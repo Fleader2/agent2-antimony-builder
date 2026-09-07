@@ -119,5 +119,14 @@ Agent 1 produces or Agent 2 receives from Agent 1.
   this one. This increment defines only the in-memory shape.
 * Any translation layer that reads a real Agent 1 export and produces an
   `Agent1CuratedKnowledgeViewContract` instance.
+* **Kinetic measurements.** Confirmed during Increment 1 (Step 21): Agent
+  1's real `Agent1CuratedKnowledgeView` carries no kinetic-measurement
+  field at all (no rate constants, Michaelis constants, or similar) --
+  this is not an oversight in this contract, it is a genuine gap in the
+  handoff today. `Agent1CuratedKnowledgeViewContract` does not invent one
+  either. Until a future Agent 1.x/handoff-contract expansion adds it,
+  every `ParameterSpecification` Agent 2 declares from this handoff has no
+  curated numeric source and must use `ParameterSource.DEFAULT`/
+  `PLACEHOLDER` -- never a fabricated `CURATED` value.
 
 None of these are required for Increment 1.

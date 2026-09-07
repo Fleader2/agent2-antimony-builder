@@ -1,5 +1,13 @@
 # Increment 1 — Agent 2 Architecture and Core Contracts
 
+**Status: implemented.** Every contract this document specifies now exists
+in `app/agent2/types.py`, tested in `tests/agent2/`, and described in full
+in `docs/04_core_domain_contracts.md` (the canonical contract reference
+going forward). This document is kept as the historical specification for
+the increment, not rewritten to read as though it always described
+finished work — see `docs/04_core_domain_contracts.md` for the current
+state.
+
 ## Goal
 
 > Establish the immutable domain contracts for full-network assembly,
@@ -8,10 +16,11 @@
 > packaging — without implementing network assembly or Antimony
 > generation yet.
 
-This document specifies the *next* implementation increment. It is not
-implemented by the repository-seeding task that created this document —
-that task deliberately stopped at lightweight contract scaffolding
-(`app/agent2/types.py`, `app/agent2/version.py`) plus this specification.
+This document specified the implementation increment that followed the
+repository-seeding task. The seeding task deliberately stopped at
+lightweight contract scaffolding (`app/agent2/types.py`,
+`app/agent2/version.py`) plus this specification; Increment 1 (this
+document) then implemented the complete contract set described below.
 
 ## Relationship to already-seeded types
 
@@ -197,9 +206,13 @@ specification authorizes implementing the algorithm behind them.
   (only the `FullAntimonyArtifact`/`ModuleAntimonyArtifact` *data*
   contracts).
 
-## Not implemented in this specification
+## Implementation status
 
-This document is a specification for the next increment. It does not
-itself implement any of the types or logic it describes beyond what the
-repository-seeding task already created (see "Relationship to
-already-seeded types" above).
+Every type this document specifies (§ "Type responsibilities" above) is
+now implemented in `app/agent2/types.py` -- see
+`docs/04_core_domain_contracts.md` for the current, authoritative contract
+reference. What remains **not** implemented, per this document's own
+"Scope exclusions" above, is every *algorithm*: whole-network assembly,
+kinetic-law assignment, parameter initialization, boundary-assessment
+heuristics, module decomposition, and Antimony generation. Those remain
+future increments.

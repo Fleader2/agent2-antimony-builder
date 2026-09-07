@@ -16,11 +16,19 @@ names actually changes.
   produced under. No boundary heuristic rules exist yet (Increment 1 is
   contracts only) -- this constant exists so the first real rule set has
   somewhere stable to record its own version from the start.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
+Increment 1: ``ModelSpecification``'s shape changed in a
+backward-incompatible way (flat id-tuple fields replaced by a real
+``FullNetwork``/``kinetic_laws``/``parameters`` with full reference-
+integrity validation). ``AGENT1_HANDOFF_VERSION``/``BOUNDARY_POLICY_VERSION``
+are unchanged -- the Agent 1 handoff shape did not change, and no boundary
+heuristic rule set exists yet to version.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.1"
+AGENT2_CONTRACT_VERSION = "0.2"
 AGENT1_HANDOFF_VERSION = "1.0"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 

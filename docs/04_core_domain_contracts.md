@@ -1,0 +1,362 @@
+# Agent 2 Core Domain Contracts
+
+## 1. Purpose
+
+This is the canonical, current-state reference for every immutable domain
+contract Agent 2 defines as of Increment 1. It documents what Agent 2
+*knows how to represent* -- not what it knows how to compute. No network
+assembly, kinetic-law assignment, boundary heuristic, module partitioning,
+or Antimony generation algorithm exists anywhere in this repository yet;
+every type below is a structural, self-validating data contract with
+reference-integrity checks only.
+
+## 2. FullNetwork
+
+`app.agent2.types.FullNetwork` -- the single authoritative graph of every
+`CompartmentSpecification`/`SpeciesSpecification`/`ReactionSpecification`
+Agent 2 will eventually assemble from an
+`Agent1CuratedKnowledgeViewContract` (a future increment). Built once,
+before kinetic-law assignment or boundary assessment (full-network-first).
+
+Fields: `network_id`, `name`, `compartments`, `species`, `reactions`,
+`organism_id`, `assumptions`, `provenance_refs`.
+
+Validated: compartment/species/reaction ids are each internally unique;
+every species' `compartment_id` names a compartment present in
+`compartments`; every reaction participant's `species_id` names a species
+present in `species`. **Never validated here**: mass balance, graph
+connectivity, unit consistency, or conservation laws -- those are Agent
+3's job.
+
+## 3. CompartmentSpecification
+
+One compartment in the full network. `source_scope`
+(`CompartmentSourceScope`: `AGENT1_CURATED`/`MODELING_CONSTRUCT`) decides
+what `source_entity_id` may hold: `AGENT1_CURATED` requires it,
+`MODELING_CONSTRUCT` forbids it and instead requires `assumptions` to
+disclose why Agent 2 needed a compartment Agent 1 never curated. No unit
+is ever invented -- `volume_unit` is `None` whenever the source data
+supplied none.
+
+Fields: `compartment_id`, `name`, `source_scope`, `source_entity_id`,
+`initial_volume` (`Decimal | None`), `volume_unit`, `constant`,
+`assumptions`, `provenance_refs`.
+
+## 4. SpeciesSpecification
+
+One chemical species. Species identity always includes compartment
+context: `compartment_id` is required. At most one of `initial_amount`/
+`initial_concentration` may be set -- no reconciliation policy exists yet.
+`constant` (value never changes) and `boundary_condition` (not consumed/
+produced by reactions, but may still be set externally) are independent
+SBML-style flags. `initialization_source` reuses `ParameterSource` rather
+than inventing a near-duplicate vocabulary for "where did this initial
+value come from."
+
+Fields: `species_id`, `name`, `compartment_id`, `source_compound_id`,
+`initial_amount`, `initial_concentration`, `initialization_source`,
+`constant`, `boundary_condition`, `assumptions`, `provenance_refs`.
+
+## 5. ReactionParticipantSpecification
+
+One reactant/product/modifier of a reaction. `role` is `ParticipantRole`
+(`REACTANT`/`PRODUCT`/`MODIFIER`, transcribed from Agent 1's own
+`ReactionParticipantRole` vocabulary -- never imported). `stoichiometry`
+is required and must be `> 0` for **every** role including `MODIFIER`,
+mirroring Agent 1's own database `CHECK` constraint. Whether a modifier's
+stoichiometry contributes to a kinetic-law expression is a modeling
+decision deferred to kinetic-law assignment -- this type only records the
+value. Multiplicity is preserved: nothing deduplicates two participants
+naming the same species and role.
+
+## 6. ReactionSpecification
+
+One reaction. `participants` are structural inputs only -- no mass-balance
+or duplicate-reaction detection. `reversible` is never inferred (`None`
+means Agent 1 did not record it). `kinetic_law_id` may be unresolved
+(`None`) at this stage. Requires at least one participant (a structural
+completeness check, not mass-balance analysis).
+
+Fields: `reaction_id`, `name`, `participants`, `source_reaction_id`,
+`reversible`, `enzyme_association_ids`, `regulatory_interaction_ids`,
+`kinetic_law_id`, `assumptions`, `provenance_refs`.
+
+## 7. KineticLawType
+
+```text
+MASS_ACTION
+MICHAELIS_MENTEN
+HILL
+REVERSIBLE_MASS_ACTION
+CUSTOM
+UNASSIGNED
+```
+
+The structural *form/category* of a rate law -- never fitted behavior.
+`UNASSIGNED` is the default starting point.
+
+## 8. KineticLawSpecification
+
+The declared structural form of one reaction's rate law. `expression` is
+a contract representation of the intended rate law (free-form text), not
+Antimony serialization -- no parsing or generation occurs, only a
+non-blank check when a law is actually assigned (`law_type is not
+UNASSIGNED`). `assignment_source` reuses `ParameterSource` (a law's *type*
+has the identical provenance-vs-status axis as a parameter's *value*).
+Reference integrity for `parameter_ids`/`species_ids` is enforced later,
+at `ModelSpecification` construction.
+
+Fields: `kinetic_law_id`, `reaction_id`, `law_type`, `assignment_source`,
+`expression`, `parameter_ids`, `species_ids`, `assumptions`,
+`provenance_refs`.
+
+## 9. ParameterSpecification
+
+The most important contract in this increment. `value` may be `None` -- a
+declared-but-uninitialized parameter is normal, not an error. `source`
+(`ParameterSource`) is the sole authority on how to interpret `value`: a
+`PLACEHOLDER` must never be presented as `CURATED`/`CALIBRATED`, and Agent
+2 must never assign `CALIBRATED` to a value it produced itself (only
+Agent 4's future feedback justifies that). `lower_bound`/`upper_bound`
+must satisfy `lower_bound <= upper_bound` when both are set. Four pure,
+deterministic properties (never a numeric confidence): `has_value`,
+`is_placeholder`, `is_calibrated`, `is_curated`.
+
+Fields: `parameter_id`, `name`, `source`, `value`, `unit`,
+`source_reference`, `reaction_id`, `module_ids`, `lower_bound`,
+`upper_bound`, `uncertainty_text`, `fixed`, `assumptions`,
+`provenance_refs`.
+
+## 10. ParameterSource
+
+```text
+CURATED
+LITERATURE_DERIVED
+DEFAULT
+PLACEHOLDER
+CALIBRATED
+```
+
+Provenance/status, never confidence. Reused by
+`SpeciesSpecification.initialization_source` and
+`KineticLawSpecification.assignment_source` rather than inventing
+near-duplicate vocabularies.
+
+## 11. BoundaryLikelihood
+
+```text
+VERY_LOW
+LOW
+MEDIUM
+HIGH
+VERY_HIGH
+```
+
+A qualitative heuristic judgment -- never a fabricated numeric
+probability. No boundary heuristic rule set exists yet to assign one.
+
+## 12. BoundaryParameterBasis
+
+```text
+NONE
+PLACEHOLDER_ONLY
+DEFAULT_ONLY
+CURATED_OR_LITERATURE
+CALIBRATED
+MIXED
+```
+
+Whether a `BoundaryAssessment` was informed by parameter data and of what
+quality -- a structural disclosure, never a numeric weight. Replaces the
+seeded free-text `parameter_basis: str | None` with this closed
+vocabulary.
+
+## 13. BoundaryAssessment
+
+One candidate module boundary's qualitative assessment. Refined in
+Increment 1 with `policy_version` (which boundary-heuristic rule set, once
+one exists, produced this), `kinetic_law_ids`/`parameter_ids` (what
+kinetic/parameter data the assessment considered), and
+`parameter_basis: BoundaryParameterBasis | None` (upgraded from a free
+string). No heuristic computation exists yet -- this is the contract a
+future rule set will populate.
+
+Fields: `boundary_id`, `upstream_element_id`, `downstream_element_id`,
+`likelihood`, `explanation`, `policy_version`, `shared_species_ids`,
+`connecting_reaction_ids`, `supporting_reason_codes`,
+`opposing_reason_codes`, `kinetic_law_ids`, `parameter_ids`,
+`parameter_basis`.
+
+## 14. ModuleBoundaryInterface
+
+One explicit interface element required for a standalone module model.
+`role` is now `ModuleInterfaceRole` (`INPUT`/`OUTPUT`/`BIDIRECTIONAL`/
+`SHARED`, upgraded from a free string); `direction` remains free text (no
+closed vocabulary was specified for it). Refined with `initial_value`
+(`Decimal | None`) and `unit`. Structural only -- no simulation semantics.
+Agent 2 never invents a boundary condition silently.
+
+## 15. ModuleSpecification
+
+One module: a named subset of the full network plus its boundary
+interfaces. Refined with `kinetic_law_ids` and `provenance_refs`. Requires
+at least one reaction (an empty module is not meaningful); every
+id-bearing tuple (`reaction_ids`/`species_ids`/`parameter_ids`/
+`kinetic_law_ids`) is internally unique. Always traceable to the full
+model via `source_boundary_ids`. One pure property:
+`has_explicit_boundary_interfaces` (`len(boundary_interfaces) > 0`) -- the
+same predicate `ModuleAntimonyArtifact` uses to decide whether a
+standalone variant may exist.
+
+## 16. ModuleDecomposition
+
+The full network's partition into modules, as of one boundary-policy
+version. Refined with `created_from_network_id` (must equal the
+`FullNetwork.network_id` it was built from, enforced at
+`ModelSpecification` construction) and `parameter_basis_summary`
+(`BoundaryParameterBasis | None`). References modules/boundaries by id --
+never duplicates them. No partitioning algorithm exists in this
+increment.
+
+## 17. ModelAssumption
+
+A structured, categorized, model-level assumption record -- distinct from
+the lightweight free-text `assumptions: tuple[str, ...]` every structural
+type already carries for local disclosures. `ModelSpecification` carries
+both: `assumptions` for quick notes, `model_assumptions` for the
+referenceable, categorized layer. Kept minimal: `assumption_id`,
+`category`, `statement`, `related_entity_ids`, `source`, `reason_code` --
+no free-form LLM rationale field.
+
+## 18. ModelSpecification
+
+The top-level, authoritative contract. Refined significantly in Increment
+1: the seeded flat id-tuple fields (`compartment_ids`/`species_ids`/
+`reaction_ids`/`kinetic_law_ids`/`parameter_ids`) are replaced by a real
+`full_network: FullNetwork` plus `kinetic_laws`/`parameters` tuples of the
+actual specification objects, enabling genuine reference-integrity
+validation (§19). Also gained `model_assumptions` and `contract_version`
+(defaults to `AGENT2_CONTRACT_VERSION`).
+
+Fields: `model_id`, `name`, `full_network`, `organism_id`, `kinetic_laws`,
+`parameters`, `boundary_assessments`, `module_decomposition`,
+`module_specifications`, `assumptions`, `model_assumptions`,
+`provenance_refs`, `contract_version`.
+
+## 19. Reference integrity
+
+`ModelSpecification.__post_init__` enforces, in one pass
+(`_validate_model_specification_references`):
+
+* every `kinetic_laws[].reaction_id` exists in `full_network.reactions`;
+* every `kinetic_laws[].parameter_ids`/`.species_ids` exist in
+  `parameters`/`full_network.species`;
+* every `parameters[].reaction_id` (when set) exists in
+  `full_network.reactions`;
+* every `full_network.reactions[].kinetic_law_id` (when set) exists in
+  `kinetic_laws`;
+* every `module_specifications[].species_ids`/`.reaction_ids`/
+  `.parameter_ids`/`.kinetic_law_ids`/`.source_boundary_ids` exist in the
+  corresponding sets;
+* every module's `boundary_interfaces[].species_id` exists in
+  `full_network.species`;
+* `module_decomposition.module_ids`/`.boundary_assessment_ids` (when set)
+  exist among `module_specifications`/`boundary_assessments`, and
+  `.created_from_network_id` equals `full_network.network_id`;
+* `kinetic_laws`/`parameters`/`module_specifications`/
+  `boundary_assessments` are each internally unique by id.
+
+**Never validated here**: mass balance, graph connectivity, unit
+consistency, or conservation-law analysis. Those are Agent 3's job.
+
+## 20. FullAntimonyArtifact
+
+The full, canonical Antimony model text -- a contract only in Increment
+1. Construction is allowed (for tests and future wiring); no generator
+function, no syntax validation, and no Antimony runtime dependency exists
+anywhere in this repository.
+
+Fields: `model_id`, `model_specification_id`, `antimony_text`,
+`generator_version`, `assumptions`, `provenance_refs`.
+
+## 21. ModuleAntimonyArtifact
+
+One module's Antimony output(s) -- a contract only in Increment 1.
+`antimony_view` may exist without `standalone_antimony`.
+`standalone_antimony` may be present only when `boundary_interfaces` is
+non-empty -- the same structural predicate as `ModuleSpecification
+.has_explicit_boundary_interfaces`. No boundary condition is ever invented
+to satisfy this rule.
+
+Fields: `module_id`, `model_specification_id`, `generator_version`,
+`antimony_view`, `standalone_antimony`, `boundary_interfaces`,
+`assumptions`.
+
+## 22. Agent2OutputPackage
+
+The complete output of one Agent 2 build. `boundary_assessments`/
+`module_decomposition` are convenience top-level copies and must be
+identical to `model_specification`'s own -- never independently
+diverging. `full_antimony.model_specification_id` must equal
+`model_specification.model_id`. Every `module_artifacts` entry must
+reference a module that exists in
+`model_specification.module_specifications` (not every module needs an
+artifact yet) and must itself carry the same `model_specification_id`.
+`module_artifacts` ids are unique.
+
+Fields: `contract_version`, `model_specification`, `full_antimony`,
+`module_artifacts`, `boundary_assessments`, `module_decomposition`,
+`assumptions`, `provenance_refs`.
+
+## 23. Versioning
+
+`AGENT2_CONTRACT_VERSION` was bumped from `"0.1"` to `"0.2"` in this
+increment (`ModelSpecification`'s shape changed in a backward-incompatible
+way). `AGENT1_HANDOFF_VERSION`/`BOUNDARY_POLICY_VERSION` are unchanged --
+the Agent 1 handoff shape did not change, and no boundary heuristic rule
+set exists yet to version. No additional version constants
+(`MODEL_SPECIFICATION_VERSION`/`ANTIMONY_ARTIFACT_VERSION`) were added --
+`AGENT2_CONTRACT_VERSION` already covers the shape of every contract in
+this file, and a fourth near-duplicate constant would be exactly the
+"complex version registry" Increment 1 instructions warn against.
+
+## 24. Scope boundaries
+
+No behavior beyond validation, identity/reference integrity, and the four
+deterministic `ParameterSpecification` properties exists anywhere in this
+file's types. Specifically absent from this repository: whole-network
+assembly, kinetic-law selection, parameter initialization policy, boundary
+heuristics, module partitioning, Antimony generation, and any Agent 3/4/5
+behavior (validation, simulation, parameter fitting, model critique).
+Verified structurally by `tests/agent2/test_contracts.py`'s AST-based
+import/definition scans, run against every file under `app/`.
+
+## 25. Increment 2 handoff
+
+Increment 2 ("Whole-Network Assembly") consumes
+`Agent1CuratedKnowledgeViewContract` and produces a `FullNetwork` --
+the first real algorithm in this repository. It must:
+
+* map each `CuratedCompartment` to a `CompartmentSpecification` with
+  `source_scope=AGENT1_CURATED`;
+* map each `CuratedCompound` referenced by a `CuratedReactionParticipant`
+  to a `SpeciesSpecification` (deciding how compartment context combines
+  with a compound to form species identity, §4);
+* map each `CuratedReaction`/`CuratedReactionParticipant` to a
+  `ReactionSpecification`/`ReactionParticipantSpecification` (deciding how
+  the free-string `CuratedReactionParticipant.role` maps onto the closed
+  `ParticipantRole` enum, and what happens if it doesn't cleanly match);
+* leave every `kinetic_law_id`/kinetic-law-assignment/parameter concern
+  entirely alone -- Increment 2's own scope ends at a valid, reference-
+  consistent `FullNetwork`.
+
+It must not implement kinetic-law assignment, parameter initialization,
+boundary assessment, module decomposition, or Antimony generation.
+
+---
+
+> Increment 1 defines what Agent 2 knows how to represent.
+>
+> It does not yet decide how to assemble a network, choose kinetics,
+> initialize missing parameters, assess boundaries, partition modules, or
+> generate Antimony.

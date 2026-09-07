@@ -1,10 +1,15 @@
-"""Architecture/scope tests for Agent 2 (Increment 1: contracts only).
+"""General/scope tests for Agent 2 (Increment 1: contracts only).
 
-These tests verify the *shape and boundaries* of the seeded contracts --
-not any generation behavior, since none exists yet. Structural checks
-(imports, definitions) use ``ast`` rather than naive substring search, so
-a module's own docstring is free to discuss Antimony/Tellurium/etc. while
-explaining what it does *not* do.
+Covers what does not belong to one specific domain file: shared enum
+vocabularies, version constants, general immutability, the Agent 1
+handoff decoupling, and scope-safety (imports/definitions). Domain-specific
+contract behavior lives in ``test_network_contracts.py``,
+``test_kinetics_contracts.py``, ``test_module_contracts.py``, and
+``test_output_contracts.py``.
+
+Structural checks (imports, definitions) use ``ast`` rather than naive
+substring search, so a module's own docstring is free to discuss
+Antimony/Tellurium/etc. while explaining what it does *not* do.
 """
 
 from __future__ import annotations
@@ -22,7 +27,6 @@ from app.agent2.types import (
     BoundaryAssessment,
     BoundaryLikelihood,
     CuratedCompartment,
-    ModelSpecification,
     ModuleBoundaryInterface,
     ModuleDecomposition,
     ModuleSpecification,
@@ -88,91 +92,11 @@ def test_version_constants_are_exported_from_package_root():
         ModuleBoundaryInterface,
         ModuleSpecification,
         ModuleDecomposition,
-        ModelSpecification,
     ],
 )
 def test_contract_types_are_frozen_dataclasses(cls):
     assert dataclasses.is_dataclass(cls)
     assert cls.__dataclass_params__.frozen is True
-
-
-def test_model_specification_instance_is_immutable():
-    spec = ModelSpecification(model_id="m1", name="test model", full_network_id="net-1")
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        spec.name = "renamed"
-
-
-# --- Cross-references between contracts ---------------------------------------------------------
-
-
-def test_model_specification_can_reference_boundary_assessments_and_module_decomposition():
-    boundary = BoundaryAssessment(
-        boundary_id="b1",
-        upstream_element_id="reaction-1",
-        downstream_element_id="reaction-2",
-        likelihood=BoundaryLikelihood.MEDIUM,
-        explanation="test-only explanation",
-    )
-    decomposition = ModuleDecomposition(
-        decomposition_id="d1",
-        name="test decomposition",
-        policy_version=BOUNDARY_POLICY_VERSION,
-        boundary_assessment_ids=("b1",),
-    )
-    module = ModuleSpecification(module_id="mod-1", name="test module", source_boundary_ids=("b1",))
-
-    spec = ModelSpecification(
-        model_id="m1",
-        name="test model",
-        full_network_id="net-1",
-        boundary_assessments=(boundary,),
-        module_decomposition=decomposition,
-        module_specifications=(module,),
-    )
-
-    assert spec.boundary_assessments[0].boundary_id == "b1"
-    assert spec.module_decomposition.decomposition_id == "d1"
-    assert spec.module_specifications[0].module_id == "mod-1"
-
-
-def test_model_specification_rejects_non_boundary_assessment_items():
-    with pytest.raises(TypeError):
-        ModelSpecification(
-            model_id="m1",
-            name="test model",
-            full_network_id="net-1",
-            boundary_assessments=("not-a-boundary-assessment",),
-        )
-
-
-def test_module_specification_can_reference_boundary_interfaces():
-    interface = ModuleBoundaryInterface(
-        species_id="species-1",
-        role="input",
-        direction="inbound",
-        assumption="constant external concentration",
-        externally_controlled=True,
-    )
-    module = ModuleSpecification(
-        module_id="mod-1", name="test module", boundary_interfaces=(interface,)
-    )
-    assert module.boundary_interfaces[0].species_id == "species-1"
-
-
-def test_module_specification_rejects_non_interface_items():
-    with pytest.raises(TypeError):
-        ModuleSpecification(module_id="mod-1", name="test module", boundary_interfaces=("bad",))
-
-
-def test_boundary_assessment_requires_a_real_likelihood_enum():
-    with pytest.raises(TypeError):
-        BoundaryAssessment(
-            boundary_id="b1",
-            upstream_element_id="e1",
-            downstream_element_id="e2",
-            likelihood="MEDIUM",  # a plain string, not a BoundaryLikelihood
-            explanation="test",
-        )
 
 
 # --- Agent 1 handoff decoupling ------------------------------------------------------------------
@@ -229,6 +153,10 @@ _FORBIDDEN_IMPORT_ROOTS = frozenset(
         "COPASI",
         "basico",
         "cobra",
+        "numpy",
+        "scipy",
+        "pandas",
+        "networkx",
     }
 )
 
@@ -244,13 +172,23 @@ _FORBIDDEN_DEFINITION_SUBSTRINGS = (
     "simulation",
     "parameterfit",
     "parameterestimation",
-    "calibrate",
+    "runcalibration",
+    "performcalibration",
+    "calibrateparameter",
     "sensitivityanalysis",
     "steadystateanalysis",
     "massbalance",
     "conservationlaw",
     "modelcritic",
     "thermodynamiccritique",
+    "assemblenetwork",
+    "networkassembler",
+    "kineticassigner",
+    "selectkineticlaw",
+    "boundaryengine",
+    "assessboundary",
+    "partitionmodules",
+    "modulepartitioner",
 )
 
 
@@ -324,6 +262,11 @@ def test_no_antimony_generation_service_module_exists_yet():
     assert not (APP_ROOT / "agent2" / "antimony.py").exists()
     assert not (APP_ROOT / "agent2" / "generator.py").exists()
     assert not (APP_ROOT / "agent2" / "service.py").exists()
+    assert not (APP_ROOT / "agent2" / "network_assembler.py").exists()
+    assert not (APP_ROOT / "agent2" / "kinetic_assigner.py").exists()
+    assert not (APP_ROOT / "agent2" / "boundary_engine.py").exists()
+    assert not (APP_ROOT / "agent2" / "module_partitioner.py").exists()
+    assert not (APP_ROOT / "agent2" / "antimony_generator.py").exists()
 
 
 def test_no_simulation_or_validation_module_exists_yet():
@@ -338,5 +281,16 @@ def test_pyproject_declares_no_modeling_or_simulation_dependency():
         data = tomllib.load(handle)
     dependencies = data.get("project", {}).get("dependencies", [])
     all_dependency_text = " ".join(dependencies).lower()
-    for forbidden in ("tellurium", "libsbml", "antimony", "copasi", "basico", "roadrunner"):
+    for forbidden in (
+        "tellurium",
+        "libsbml",
+        "antimony",
+        "copasi",
+        "basico",
+        "roadrunner",
+        "numpy",
+        "scipy",
+        "pandas",
+        "networkx",
+    ):
         assert forbidden not in all_dependency_text
