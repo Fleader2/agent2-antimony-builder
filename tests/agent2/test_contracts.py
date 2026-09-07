@@ -27,6 +27,7 @@ from app.agent2.types import (
     BoundaryAssessment,
     BoundaryLikelihood,
     CuratedCompartment,
+    CuratedKineticMeasurement,
     ModuleBoundaryInterface,
     ModuleDecomposition,
     ModuleSpecification,
@@ -88,6 +89,7 @@ def test_version_constants_are_exported_from_package_root():
     [
         Agent1CuratedKnowledgeViewContract,
         CuratedCompartment,
+        CuratedKineticMeasurement,
         BoundaryAssessment,
         ModuleBoundaryInterface,
         ModuleSpecification,
@@ -127,6 +129,61 @@ def test_types_module_never_imports_agent1_package():
     assert "app" not in imported_roots or all(
         not name.startswith("agent1") for name in imported_roots
     )
+
+
+# --- CuratedKineticMeasurement (Agent 1.x Increment A) --------------------------------------
+
+
+def test_curated_kinetic_measurement_builds_with_minimal_fields():
+    measurement = CuratedKineticMeasurement(
+        id="km-1", parameter_type="KM", value=Decimal("0.5"), unit="mM"
+    )
+    assert measurement.reaction_id is None
+    assert measurement.normalized_value is None
+    assert measurement.normalized_unit is None
+
+
+def test_curated_kinetic_measurement_value_must_be_decimal_not_float():
+    with pytest.raises(TypeError):
+        CuratedKineticMeasurement(id="km-1", parameter_type="KM", value=0.5, unit="mM")
+
+
+def test_curated_kinetic_measurement_rejects_empty_id():
+    with pytest.raises(ValueError):
+        CuratedKineticMeasurement(id="", parameter_type="KM", value=Decimal("0.5"), unit="mM")
+
+
+def test_curated_kinetic_measurement_rejects_empty_unit():
+    with pytest.raises(ValueError):
+        CuratedKineticMeasurement(id="km-1", parameter_type="KM", value=Decimal("0.5"), unit="")
+
+
+def test_curated_kinetic_measurement_normalized_value_must_be_decimal_or_none():
+    with pytest.raises(TypeError):
+        CuratedKineticMeasurement(
+            id="km-1",
+            parameter_type="KM",
+            value=Decimal("0.5"),
+            unit="mM",
+            normalized_value=0.5,
+        )
+
+
+def test_agent1_curated_knowledge_view_contract_carries_kinetic_measurements():
+    view = Agent1CuratedKnowledgeViewContract(
+        contract_version=AGENT1_HANDOFF_VERSION,
+        kinetic_measurements=(
+            CuratedKineticMeasurement(
+                id="km-1", parameter_type="KM", value=Decimal("0.5"), unit="mM"
+            ),
+        ),
+    )
+    assert view.kinetic_measurements[0].id == "km-1"
+
+
+def test_agent1_curated_knowledge_view_contract_kinetic_measurements_default_empty():
+    view = Agent1CuratedKnowledgeViewContract(contract_version=AGENT1_HANDOFF_VERSION)
+    assert view.kinetic_measurements == ()
 
 
 def test_claim_value_numeric_must_be_decimal_not_float():

@@ -320,6 +320,15 @@ set exists yet to version. No additional version constants
 this file, and a fourth near-duplicate constant would be exactly the
 "complex version registry" Increment 1 instructions warn against.
 
+**Agent 1.x Increment A** (later than the increment this file otherwise
+describes) bumped `AGENT1_HANDOFF_VERSION` "1.0" -> "1.1" and added
+`kinetic_measurements`/`CuratedKineticMeasurement` to
+`Agent1CuratedKnowledgeViewContract` (see `docs/02_agent1_handoff_contract.md`
+§4, §9) -- available input data only, not auto-converted into a
+`ParameterSpecification`. `AGENT2_CONTRACT_VERSION` did not change: none of
+this file's own output contracts (`FullNetwork`, `ModelSpecification`, ...)
+changed shape. This does not alter Increment 2's scope below (§25).
+
 ## 24. Scope boundaries
 
 No behavior beyond validation, identity/reference integrity, and the four

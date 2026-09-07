@@ -24,12 +24,22 @@ backward-incompatible way (flat id-tuple fields replaced by a real
 integrity validation). ``AGENT1_HANDOFF_VERSION``/``BOUNDARY_POLICY_VERSION``
 are unchanged -- the Agent 1 handoff shape did not change, and no boundary
 heuristic rule set exists yet to version.
+
+``AGENT1_HANDOFF_VERSION`` was bumped from ``"1.0"`` to ``"1.1"`` for
+Agent 1.x Increment A: Agent 1's own ``Agent1CuratedKnowledgeView`` gained
+a ``kinetic_measurements`` field (``AGENT1_CONTRACT_VERSION`` "1.0" ->
+"1.1" in the Agent 1 repository), so this repository's local
+``Agent1CuratedKnowledgeViewContract`` was extended to match exactly (see
+``docs/02_agent1_handoff_contract.md``). ``AGENT2_CONTRACT_VERSION`` is
+unchanged -- no field of Agent 2's own output contracts (``FullNetwork``,
+``ModelSpecification``, ...) changed shape; only the *input* handoff
+contract gained a field.
 """
 
 from __future__ import annotations
 
 AGENT2_CONTRACT_VERSION = "0.2"
-AGENT1_HANDOFF_VERSION = "1.0"
+AGENT1_HANDOFF_VERSION = "1.1"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 
 __all__ = [

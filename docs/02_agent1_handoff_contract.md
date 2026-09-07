@@ -55,6 +55,7 @@ increment.
 | `reaction_participants` | Each participant names a reaction, a compound, a role, and a stoichiometry. | That role (`REACTANT`/`PRODUCT`/`MODIFIER`) distinguishes a cofactor from a non-cofactor — Agent 1 v1 does not classify cofactors separately (§6). | Empty tuple if none. | n/a |
 | `reaction_enzyme_associations` | Each association names a reaction and (a protein or complex) that catalyzes it. | That every reaction has an associated enzyme — some may have none. | Empty tuple if none. | n/a |
 | `regulatory_interactions` | Zero or more entries, each with a regulator, a target, and an effect. | That this list is complete or even present for a well-regulated network — Agent 1 v1's regulation pipeline is schema-ready, not curated end-to-end (§6). | Empty tuple if none — never treated as "no regulation exists," only "no regulation is currently curated." | n/a |
+| `kinetic_measurements` (Agent 1.x Increment A) | Zero or more `CuratedKineticMeasurement` entries, each with a parameter type, an as-reported value/unit, and (when resolved) a reaction/protein/organism/publication reference. | That this list covers every reaction, that it is auto-converted into a `ParameterSpecification`, or that `normalized_value`/`normalized_unit` are ever populated (Agent 1 has no unit-conversion framework yet). | Empty tuple if none for this scope — never "no kinetic data exists," only "none is currently curated for this scope." | `source`/`source_id` name which connector-ingested source produced it; `confidence_score`/`confidence_class` are exposed verbatim, never recomputed by Agent 2. |
 | `claims` (accepted only) | Every claim in this list has already passed Agent 1's `HUMAN_ACCEPTED` review gate. | That an accepted claim is proven correct — it is evidence-supported and human-reviewed, not infallible. | A claim with no corresponding evidence is possible; check `evidence` before assuming support exists. | See `confidence_summaries`. |
 | `evidence` | Each evidence record references one of the `claims` above and may carry a publication reference and quoted support text. | That every claim has evidence, or that every evidence record has a publication reference. | Represented by the absence of a matching row — never fabricated. | `quoted_support`/publication reference, when present, are the provenance. |
 | `confidence_summaries` | One summary per claim, exposing Agent 1's already-computed confidence score/class and claim status verbatim. | That Agent 2 may recompute or reinterpret this value — Agent 1 is the sole authority on it. | A `None` score/class means Agent 1 recorded none — never inferred. | This *is* the provenance for "how strongly is this claim supported." |
@@ -81,10 +82,13 @@ increment.
 * That MetaCyc/BioCyc-sourced data exists — those connectors are not
   implemented in Agent 1 v1; their absence is not an error condition.
 * That every kinetic value Agent 2 will eventually need (rate constants,
-  Michaelis constants, ...) is present in the handoff — Agent 1 v1's
-  `KineticMeasurement` data may be sparse or entirely absent for a given
-  reaction. Agent 2's own parameter declaration/initialization step
-  (`docs/01_agent2_architecture.md` §9) must handle this by declaring a
+  Michaelis constants, ...) is present in the handoff — even with
+  `kinetic_measurements` now available (Agent 1.x Increment A, §4, §9),
+  Agent 1's `KineticMeasurement` data may be sparse or entirely absent for
+  a given reaction, and no field here is auto-converted into a
+  `ParameterSpecification`. Agent 2's own parameter declaration/
+  initialization step (`docs/01_agent2_architecture.md` §9) must handle
+  the sparse/absent/not-yet-mapped case by declaring a
   `PLACEHOLDER`/`DEFAULT` parameter, never by fabricating a plausible
   value.
 * That an `ExperimentRecommendation`/`ExperimentExecution`/
@@ -119,14 +123,23 @@ Agent 1 produces or Agent 2 receives from Agent 1.
   this one. This increment defines only the in-memory shape.
 * Any translation layer that reads a real Agent 1 export and produces an
   `Agent1CuratedKnowledgeViewContract` instance.
-* **Kinetic measurements.** Confirmed during Increment 1 (Step 21): Agent
-  1's real `Agent1CuratedKnowledgeView` carries no kinetic-measurement
-  field at all (no rate constants, Michaelis constants, or similar) --
-  this is not an oversight in this contract, it is a genuine gap in the
-  handoff today. `Agent1CuratedKnowledgeViewContract` does not invent one
-  either. Until a future Agent 1.x/handoff-contract expansion adds it,
-  every `ParameterSpecification` Agent 2 declares from this handoff has no
-  curated numeric source and must use `ParameterSource.DEFAULT`/
-  `PLACEHOLDER` -- never a fabricated `CURATED` value.
+* **Kinetic measurements -- closed in Agent 1.x Increment A.** Increment 1
+  (Step 21) had confirmed Agent 1's real `Agent1CuratedKnowledgeView`
+  carried no kinetic-measurement field at all. Agent 1.x Increment A
+  closed this gap: `AGENT1_HANDOFF_VERSION` was bumped "1.0" -> "1.1", and
+  `Agent1CuratedKnowledgeViewContract.kinetic_measurements` /
+  `CuratedKineticMeasurement` (`app/agent2/types.py`) now mirror Agent 1's
+  own `kinetic_measurements`/`CuratedKineticMeasurement`
+  (`app.agent1.types` in the Agent 1 repository) exactly. **This is
+  available input data only** -- nothing in this repository converts a
+  `CuratedKineticMeasurement` into a `ParameterSpecification`; that mapping
+  decision (which measurement satisfies which kinetic law's which
+  parameter, for which module) remains unimplemented Agent 2 behavior, out
+  of scope for this note and for Increment 2's own scope as originally
+  defined. Until that mapping is implemented, every
+  `ParameterSpecification` Agent 2 declares still has no curated numeric
+  source and must use `ParameterSource.DEFAULT`/`PLACEHOLDER` -- never a
+  fabricated `CURATED` value merely because a matching
+  `CuratedKineticMeasurement` exists.
 
 None of these are required for Increment 1.

@@ -300,6 +300,82 @@ class CuratedConfidenceSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class CuratedKineticMeasurement:
+    """One independently-sourced kinetic measurement, exactly as curated by Agent 1.
+
+    Added in Agent 1.x Increment A (``AGENT1_HANDOFF_VERSION`` "1.0" ->
+    "1.1"). Agent 1 curates *reported* kinetic facts -- Agent 2 decides
+    model usage, kinetic-law mapping, and parameter declaration (see
+    ``docs/02_agent1_handoff_contract.md`` §9A). **This type is never
+    auto-converted into a ``ParameterSpecification``.** Agent 2 must make
+    that mapping decision explicitly in a future increment; until it does,
+    every ``ParameterSpecification`` Agent 2 declares still uses
+    ``ParameterSource.DEFAULT``/``PLACEHOLDER`` (never fabricate a
+    ``CURATED`` value merely because a ``CuratedKineticMeasurement`` with a
+    matching reaction/parameter type exists -- that mapping decision itself
+    is Agent 2 behavior this increment does not implement).
+
+    ``value``/``unit`` are the as-reported figures; ``normalized_value``/
+    ``normalized_unit`` are ``None`` for every measurement in this handoff
+    version -- Agent 1 has no unit-conversion framework yet. No field here
+    is ever averaged, converted, or reinterpreted from what Agent 1
+    reported.
+    """
+
+    id: str
+    parameter_type: str
+    value: Decimal
+    unit: str
+    reaction_id: str | None = None
+    protein_id: str | None = None
+    complex_id: str | None = None
+    compound_id: str | None = None
+    organism_id: str | None = None
+    publication_id: str | None = None
+    reported_parameter_type: str | None = None
+    normalized_value: Decimal | None = None
+    normalized_unit: str | None = None
+    strain: str | None = None
+    temperature_c: Decimal | None = None
+    ph: Decimal | None = None
+    reported_rate_law: str | None = None
+    source: str | None = None
+    source_id: str | None = None
+    confidence_score: Decimal | None = None
+    confidence_class: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self,
+            "parameter_type",
+            _require_non_empty_str(self.parameter_type, field_name="parameter_type"),
+        )
+        if not isinstance(self.value, Decimal):
+            raise TypeError(
+                f"CuratedKineticMeasurement.value must be a Decimal, got {self.value!r}"
+            )
+        object.__setattr__(self, "unit", _require_non_empty_str(self.unit, field_name="unit"))
+        object.__setattr__(
+            self,
+            "normalized_value",
+            _require_decimal_or_none(self.normalized_value, field_name="normalized_value"),
+        )
+        object.__setattr__(
+            self,
+            "temperature_c",
+            _require_decimal_or_none(self.temperature_c, field_name="temperature_c"),
+        )
+        object.__setattr__(self, "ph", _require_decimal_or_none(self.ph, field_name="ph"))
+        object.__setattr__(
+            self,
+            "confidence_score",
+            _require_decimal_or_none(self.confidence_score, field_name="confidence_score"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Agent1CuratedKnowledgeViewContract:
     """Agent 2's local, decoupled representation of the Agent 1 handoff.
 
@@ -311,15 +387,13 @@ class Agent1CuratedKnowledgeViewContract:
     reaction-enzyme associations, regulation, accepted claims/evidence,
     confidence, limitations) -- no new field was needed for Increment 1.
 
-    **Known handoff gap** (Increment 1 instructions, Step 21): kinetic
-    measurements (rate constants, Michaelis constants, ...) are not part
-    of this handoff today -- Agent 1's real ``Agent1CuratedKnowledgeView``
-    carries no such field. This is not invented here. A future Agent 1.x/
-    handoff-contract expansion would need to add one before Agent 2 could
-    consume curated kinetic values directly; until then, every
-    ``ParameterSpecification`` Agent 2 declares from this handoff has no
-    curated numeric source and must use ``ParameterSource.DEFAULT``/
-    ``PLACEHOLDER`` (never fabricate a ``CURATED`` value).
+    **Kinetic measurements** (Agent 1.x Increment A,
+    ``AGENT1_HANDOFF_VERSION`` "1.0" -> "1.1"): ``kinetic_measurements`` is
+    now available as curated input -- see ``CuratedKineticMeasurement``.
+    This is available *input data only*; it is never auto-converted into a
+    ``ParameterSpecification`` by anything in this repository (that mapping
+    decision remains unimplemented Agent 2 behavior). This closes the
+    "known handoff gap" this docstring previously disclosed for Increment 1.
     """
 
     contract_version: str
@@ -330,6 +404,7 @@ class Agent1CuratedKnowledgeViewContract:
     reaction_participants: tuple[CuratedReactionParticipant, ...] = ()
     reaction_enzyme_associations: tuple[CuratedReactionEnzymeAssociation, ...] = ()
     regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
+    kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
     claims: tuple[CuratedClaim, ...] = ()
     evidence: tuple[CuratedEvidence, ...] = ()
     confidence_summaries: tuple[CuratedConfidenceSummary, ...] = ()
