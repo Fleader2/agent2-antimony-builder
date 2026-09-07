@@ -1,0 +1,53 @@
+---
+description: Testing conventions and required scope-safety checks for Agent 2
+globs:
+  - "tests/**/*.py"
+alwaysApply: false
+---
+
+# Agent 2 Testing Rules
+
+## Deterministic behavior
+
+Every test must be deterministic: no reliance on wall-clock time, random
+seeds, network access, or execution order. Given the same input contract,
+any Agent 2 function must produce the same output every time.
+
+## Immutable contracts where practical
+
+Every domain contract type (`app/agent2/types.py`) must be a frozen
+dataclass, and its own test file must assert that construction rejects a
+post-construction mutation attempt (`dataclasses.FrozenInstanceError`).
+
+## Versioned policies
+
+Any heuristic rule set (e.g. a future boundary-assessment policy) must be
+tested against its own declared version constant
+(`BOUNDARY_POLICY_VERSION` or a successor). A test must never assume "the
+current policy" without pinning the version it is testing against.
+
+## Tests for scope boundaries
+
+`tests/agent2/test_contracts.py` (or its successors) must keep verifying,
+structurally (via `ast`, not naive substring search over prose):
+
+- no Tellurium/COPASI/`libsbml`/`libroadrunner`/`antimony` import anywhere
+  in `app/`,
+- no Agent 1 runtime/connector import anywhere in `app/`,
+- no simulation, parameter-fitting/calibration, or model-critic function
+  or class definition anywhere in `app/`,
+- no Antimony-generation *service* module exists until an increment
+  specification explicitly authorizes one.
+
+## No hidden Agent 1/3/4/5 dependencies
+
+A test must never construct or rely on a real Agent 1 database, ORM
+object, or connector. Build test fixtures directly from
+`app.agent2.types` (e.g. `Agent1CuratedKnowledgeViewContract` and its
+nested `Curated*` records).
+
+## No runtime network calls in unit tests
+
+No test in this repository may perform a real HTTP request, database
+connection, or subprocess call. Everything Agent 2 tests today operates
+on in-memory contract objects only.

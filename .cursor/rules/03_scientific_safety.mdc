@@ -1,0 +1,52 @@
+---
+description: Scientific-safety rules protecting provenance, uncertainty, and heuristic honesty for Agent 2
+globs:
+  - "app/**/*.py"
+alwaysApply: false
+---
+
+# Agent 2 Scientific Safety Rules
+
+## Never invent missing biology
+
+If the Agent 1 handoff does not carry a piece of information (a kinetic
+value, a regulatory interaction, a cofactor classification, a MetaCyc/
+BioCyc-sourced identifier), never fabricate a plausible replacement.
+Represent it as absent (`None`, an empty tuple, or a `PLACEHOLDER`/
+`DEFAULT` `ParameterSpecification`).
+
+## Preserve provenance
+
+Every element traceable to Agent 1 (a reaction, a species, a parameter's
+curated value) must carry forward its provenance reference. Never strip a
+provenance link while reshaping data into an Agent 2 contract type.
+
+## Mark assumptions explicitly
+
+Any assumption Agent 2 makes to produce a `ModuleSpecification`,
+`ModuleBoundaryInterface`, or Antimony artifact must be recorded in that
+object's own `assumptions`/`assumption` field — never left implicit in
+code comments only.
+
+## Distinguish parameter provenance/status
+
+Always use the correct `ParameterSource` for a parameter's origin:
+`CURATED` (from Agent 1's curated data), `LITERATURE_DERIVED`, `DEFAULT`,
+`PLACEHOLDER`, or `CALIBRATED` (only for a value returned by Agent 4's
+feedback). Never present a `PLACEHOLDER`/`DEFAULT` value as though it were
+`CURATED`/`CALIBRATED`.
+
+## Never treat boundary likelihood as probability
+
+`BoundaryLikelihood` values are qualitative heuristic judgments produced
+by explicit, versioned rules. Never convert one to a number, average
+several together, or otherwise treat the vocabulary as a probability
+distribution.
+
+## Never silently invent boundary conditions
+
+A standalone module Antimony artifact requires fully explicit
+`ModuleBoundaryInterface` declarations. If they are not present, do not
+guess a boundary condition to make the module simulatable — omit the
+standalone artifact for that module instead (module views remain
+available regardless).

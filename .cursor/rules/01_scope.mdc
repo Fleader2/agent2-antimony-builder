@@ -1,0 +1,61 @@
+---
+description: Mandatory scope boundaries for Agent 2, the Antimony Builder
+alwaysApply: true
+---
+
+# Agent 2 Scope Rules
+
+This repository implements Agent 2, which builds Antimony model
+specifications from Agent 1's curated biochemical knowledge. See
+`docs/01_agent2_architecture.md` for the full architecture.
+
+## Agent 2 builds models only
+
+Agent 2's job is: assemble the full biochemical network, assign
+kinetic-law structures, declare/initialize parameters, assess module
+boundaries heuristically, decompose the network into modules, build a
+`ModelSpecification`, and generate Antimony (full and module-level).
+Nothing else belongs in this repository.
+
+## No literature curation
+
+Never implement entity normalization, evidence extraction, claim
+generation, confidence scoring, knowledge-gap detection, or experiment
+recommendation in this repository. That is Agent 1's job
+(`agent1-biochemical-curator`).
+
+## No Agent 1 behavior duplication
+
+Never import Agent 1's runtime package, ORM models, or database session
+objects. Consume only `app.agent2.types.Agent1CuratedKnowledgeViewContract`
+(`docs/02_agent1_handoff_contract.md`) — a local, decoupled representation.
+
+## No Agent 3 validation beyond syntax/internal checks
+
+Agent 2 may perform the minimal syntax/internal-contract checks needed to
+emit structurally valid Antimony (e.g. "every referenced species exists in
+this model specification"). Never implement mass-balance, conservation-law,
+disconnected-subnetwork, or full unit-consistency validation — that is
+Agent 3's job.
+
+## No Agent 4 simulation/parameter fitting
+
+Never implement Tellurium/COPASI execution, parameter scans, sensitivity
+analysis, steady-state analysis, or parameter estimation/calibration
+against experimental data. Agent 2 only declares and initializes
+parameters; it may later consume calibration *feedback* from Agent 4, but
+never performs the fitting itself.
+
+## No Agent 5 critique
+
+Never implement biological/model plausibility judgments — thermodynamic
+consistency, cofactor sufficiency, ATP participation correctness, or
+regulation plausibility. That is Agent 5's job.
+
+## Do not silently expand scope
+
+If a task or increment specification does not explicitly authorize
+implementing network-assembly, kinetic-law, boundary-heuristic, module-
+decomposition, or Antimony-generation *logic*, only extend the *contract
+types* that describe it. Stop and report if broader scope appears
+necessary rather than silently building it.

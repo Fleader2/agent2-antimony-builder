@@ -1,0 +1,58 @@
+---
+description: Canonical Agent 2 pipeline order and structural architecture rules
+globs:
+  - "app/**/*.py"
+  - "tests/**/*.py"
+alwaysApply: false
+---
+
+# Agent 2 Architecture Rules
+
+Follow the canonical workflow in `docs/01_agent2_architecture.md` §5 for
+any pipeline-shaped implementation work.
+
+## Whole network first
+
+The complete `FullNetwork` must be assembled from the Agent 1 handoff
+before any kinetic-law assignment, parameter declaration, or boundary
+assessment occurs. Never skip part of the curated network because it does
+not obviously belong to a module.
+
+## Kinetic-law assignment before boundary assessment
+
+Every reaction's kinetic-law structure must already be assigned before
+boundary assessment begins — a boundary heuristic may use kinetic-law
+structure as a signal.
+
+## Parameter declaration/initialization before boundary assessment
+
+Every kinetic law's parameters must be declared (with a `ParameterSource`
+and an initial value) before boundary assessment begins — a boundary
+heuristic may use parameter magnitudes as a signal.
+
+## Boundary likelihood is qualitative
+
+A module boundary's likelihood is always one of `VERY_LOW`/`LOW`/
+`MEDIUM`/`HIGH`/`VERY_HIGH` (`BoundaryLikelihood`). Never compute or
+display a numeric probability for it.
+
+## Module decomposition is derived from the full model
+
+A `ModuleDecomposition`/`ModuleSpecification` only ever references
+elements that already exist in the `FullNetwork`/`ModelSpecification`. It
+is never built from a separately re-derived or partial network.
+
+## The full model is authoritative
+
+The full `ModelSpecification` and full Antimony model are the canonical
+representation. Every `ModuleSpecification`/`ModuleAntimonyArtifact` must
+remain traceable back to it (via `source_boundary_ids` and the shared
+`ModelSpecification`/`FullNetwork` ids it references).
+
+## Standalone modules require explicit boundary interfaces
+
+A `ModuleAntimonyArtifact`'s standalone variant may only be produced for a
+module whose `boundary_interfaces` are fully explicit
+(`ModuleBoundaryInterface` for every externally-connected species). Never
+invent a boundary condition to make a module "simulatable" — omit the
+standalone artifact for that module instead.
