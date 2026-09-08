@@ -91,21 +91,24 @@ itself.
 ## Current Status
 
 > Increment 1 (Architecture and Core Contracts), Increment 2
-> (Whole-Network Assembly), and Increment 3 (Reaction and Enzyme-State
-> Characterization) are implemented. See `docs/04_core_domain_contracts.md`,
-> `docs/05_whole_network_assembly.md`, and
-> `docs/06_reaction_enzyme_state_characterization.md`. Next: Increment 4,
-> Kinetic-Law Assignment.
+> (Whole-Network Assembly), Increment 3 (Reaction and Enzyme-State
+> Characterization), and Increment 4 (Kinetic-Law Assignment) are
+> implemented. See `docs/04_core_domain_contracts.md`,
+> `docs/05_whole_network_assembly.md`,
+> `docs/06_reaction_enzyme_state_characterization.md`, and
+> `docs/07_kinetic_law_assignment.md`. Next: Increment 5, Parameter
+> Declaration / Initialization.
 
 ## Roadmap
 
 - **Increment 1** — Architecture and Core Contracts (implemented)
 - **Increment 2** — Whole-Network Assembly (implemented)
 - **Increment 3** — Reaction and Enzyme-State Characterization (implemented)
-- **Increment 4** — Kinetic-Law Assignment
-- **Increment 5** — Boundary Assessment and Module Decomposition
-- **Increment 6** — ModelSpecification and Antimony Generation
-- **Increment 7** — End-to-End Agent 2 Build / Syntax Contract
+- **Increment 4** — Kinetic-Law Assignment (implemented)
+- **Increment 5** — Parameter Declaration / Initialization
+- **Increment 6** — Boundary Assessment and Module Decomposition
+- **Increment 7** — ModelSpecification and Antimony Generation
+- **Increment 8** — End-to-End Agent 2 Build / Syntax Contract
 
 This roadmap describes planned scope, not a commitment to a fixed
 timeline or final design for increments beyond the next one.
@@ -120,6 +123,7 @@ timeline or final design for increments beyond the next one.
 - `docs/04_core_domain_contracts.md` — the canonical, current-state domain contract reference
 - `docs/05_whole_network_assembly.md` — Increment 2 (Whole-Network Assembly), implemented
 - `docs/06_reaction_enzyme_state_characterization.md` — Increment 3 (Reaction and Enzyme-State Characterization), implemented
+- `docs/07_kinetic_law_assignment.md` — Increment 4 (Kinetic-Law Assignment), implemented
 
 ## Repository Structure
 

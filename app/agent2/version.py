@@ -23,6 +23,12 @@ names actually changes.
   unresolved-feature emission rules). Distinct from
   ``AGENT2_CONTRACT_VERSION``: this versions a *behavioral rule set*, not
   a data shape.
+* ``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` -- the version of the
+  deterministic kinetic-law assignment rule set
+  (``app.agent2.kinetics``) a ``KineticLawAssignmentSet`` was produced
+  under (e.g. the reported-rate-law text classifier, the Michaelis-Menten
+  and mass-action-fallback heuristic eligibility rules). Also a
+  *behavioral rule set* version, not a data shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -86,6 +92,49 @@ Agent 1 was not modified in this increment (input-only).
 ``"reaction-characterization-v1"`` for the first real characterization
 rule set (catalyst/regulation/allostery/kinetic-evidence characterization,
 the conservative ``TRANSPORT`` rule).
+
+``AGENT2_CONTRACT_VERSION`` is **unchanged** at ``"0.4"`` for Increment 4
+(Kinetic-Law Assignment): no field of any type in ``app.agent2.types``
+changed shape -- the new ``KineticLawAssignment``/``KineticLawAssignmentSet``/
+``KineticLawAssignmentSource``/``KineticLawReasonCode`` types live entirely
+in the new, separate ``app.agent2.kinetics`` package and are never
+constructed from or written back onto anything in ``app.agent2.types``
+(``KineticLawSpecification``/``ModelSpecification`` are untouched; see
+``docs/07_kinetic_law_assignment.md`` §24 for why no
+``KineticLawSpecification`` is constructed in this increment). This is a
+narrower reading of this file's own bump criterion than Increment 3 used
+(that increment's justification partly cited "a new output-contract
+package was introduced" even though the package's types lived outside
+``app.agent2.types`` -- here, that broader reading is deliberately not
+repeated, since the criterion's own header line scopes
+``AGENT2_CONTRACT_VERSION`` to ``app.agent2.types`` shapes specifically).
+``AGENT1_HANDOFF_VERSION`` is unchanged at ``"1.2"`` -- Agent 1 was not
+modified in this increment (input-only).
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` is introduced at
+``"kinetic-law-v1"`` for the first real kinetic-law assignment rule set
+(curated-reported-law classification, the simple-elementary-transition
+structural rule, the Michaelis-Menten and mass-action-fallback
+heuristics).
+
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` was bumped from
+``"kinetic-law-v1"`` to ``"kinetic-law-v2"`` in the Increment 4 revision
+that formalized the tentative mass-action default policy: the narrow,
+easily-disqualified ``ENZYMATIC_MECHANISM_UNKNOWN_MASS_ACTION_FALLBACK``
+heuristic was replaced by a deliberately broader, always-explicitly-
+tentative default (``TENTATIVE_MASS_ACTION_DEFAULT``) that now also fires
+when allostery is present, when a reaction has multiple catalytic enzyme
+states, or when a reaction is explicitly reversible -- each previously a
+hard disqualifier that produced ``UNASSIGNED``. This is a real rule-set
+*behavior* change (same inputs can now produce a different assignment),
+so the policy version is bumped even though this entire increment remains
+uncommitted -- the version marker tracks behavior, not git history.
+``AGENT2_CONTRACT_VERSION`` is **not** bumped for this revision: no field
+of any type in ``app.agent2.types`` changed shape, and the new
+``KineticLawAssignment.is_tentative`` derived property and the
+``KineticLawReasonCode`` additions live entirely in
+``app.agent2.kinetics``, consistent with this file's already-established
+narrower reading (see the entry immediately above). ``AGENT1_HANDOFF_VERSION``
+is unchanged -- Agent 1 was not modified.
 """
 
 from __future__ import annotations
@@ -94,10 +143,12 @@ AGENT2_CONTRACT_VERSION = "0.4"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
+KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
 ]
