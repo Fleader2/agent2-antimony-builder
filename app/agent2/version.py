@@ -29,6 +29,12 @@ names actually changes.
   under (e.g. the reported-rate-law text classifier, the Michaelis-Menten
   and mass-action-fallback heuristic eligibility rules). Also a
   *behavioral rule set* version, not a data shape.
+* ``PARAMETER_DECLARATION_POLICY_VERSION`` -- the version of the
+  deterministic parameter declaration/initialization rule set
+  (``app.agent2.parameters``) a ``ParameterDeclarationSet`` was produced
+  under (e.g. which curated measurement types map to which kinetic-law
+  parameter slot, the multiple-measurement agreement policy). Also a
+  *behavioral rule set* version, not a data shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -135,20 +141,46 @@ of any type in ``app.agent2.types`` changed shape, and the new
 ``app.agent2.kinetics``, consistent with this file's already-established
 narrower reading (see the entry immediately above). ``AGENT1_HANDOFF_VERSION``
 is unchanged -- Agent 1 was not modified.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.4"`` to ``"0.5"`` in
+Increment 5 (Parameter Declaration / Initialization):
+``ParameterSpecification`` (``app.agent2.types``) gained one field,
+``kinetic_law_assignment_id`` -- the essential missing field found on
+inspection (Increment 5 instructions, Step 6): ``reaction_id`` alone
+cannot disambiguate a parameter declared for one catalytic context (e.g.
+one specific ``EnzymeState``) from a sibling context on the same
+reaction, and every parameter Increment 5 declares must trace back to
+exactly one ``KineticLawAssignment``. The field has a default (``None``),
+so existing keyword-based construction of ``ParameterSpecification`` is
+unaffected, but this is a real ``app.agent2.types`` shape change per this
+file's own bump criterion -- unlike Increment 4 (which added no field to
+any ``app.agent2.types`` type), this increment does. The new
+``ParameterDeclarationSet`` type itself lives in
+``app.agent2.parameters``, outside ``app.agent2.types``, and so is not
+independently a bump reason (consistent with the narrower reading
+established for ``app.agent2.kinetics``/``app.agent2.characterization``).
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+``PARAMETER_DECLARATION_POLICY_VERSION`` is introduced at
+``"parameter-declaration-v1"`` for the first real parameter declaration
+rule set (kinetic-law-type-to-parameter-slot mapping, the curated-
+measurement recognition vocabulary, the multiple-measurement agreement
+policy).
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.4"
+AGENT2_CONTRACT_VERSION = "0.5"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
+    "PARAMETER_DECLARATION_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
 ]

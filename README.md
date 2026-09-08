@@ -92,12 +92,13 @@ itself.
 
 > Increment 1 (Architecture and Core Contracts), Increment 2
 > (Whole-Network Assembly), Increment 3 (Reaction and Enzyme-State
-> Characterization), and Increment 4 (Kinetic-Law Assignment) are
-> implemented. See `docs/04_core_domain_contracts.md`,
-> `docs/05_whole_network_assembly.md`,
-> `docs/06_reaction_enzyme_state_characterization.md`, and
-> `docs/07_kinetic_law_assignment.md`. Next: Increment 5, Parameter
-> Declaration / Initialization.
+> Characterization), Increment 4 (Kinetic-Law Assignment), and Increment 5
+> (Parameter Declaration / Initialization) are implemented. See
+> `docs/04_core_domain_contracts.md`, `docs/05_whole_network_assembly.md`,
+> `docs/06_reaction_enzyme_state_characterization.md`,
+> `docs/07_kinetic_law_assignment.md`, and
+> `docs/08_parameter_declaration_initialization.md`. Next: Increment 6,
+> Heuristic Boundary Assessment.
 
 ## Roadmap
 
@@ -105,10 +106,11 @@ itself.
 - **Increment 2** — Whole-Network Assembly (implemented)
 - **Increment 3** — Reaction and Enzyme-State Characterization (implemented)
 - **Increment 4** — Kinetic-Law Assignment (implemented)
-- **Increment 5** — Parameter Declaration / Initialization
-- **Increment 6** — Boundary Assessment and Module Decomposition
-- **Increment 7** — ModelSpecification and Antimony Generation
-- **Increment 8** — End-to-End Agent 2 Build / Syntax Contract
+- **Increment 5** — Parameter Declaration / Initialization (implemented)
+- **Increment 6** — Heuristic Boundary Assessment
+- **Increment 7** — Module Decomposition
+- **Increment 8** — ModelSpecification and Antimony Generation
+- **Increment 9** — End-to-End Agent 2 Build / Syntax Contract
 
 This roadmap describes planned scope, not a commitment to a fixed
 timeline or final design for increments beyond the next one.
@@ -124,6 +126,7 @@ timeline or final design for increments beyond the next one.
 - `docs/05_whole_network_assembly.md` — Increment 2 (Whole-Network Assembly), implemented
 - `docs/06_reaction_enzyme_state_characterization.md` — Increment 3 (Reaction and Enzyme-State Characterization), implemented
 - `docs/07_kinetic_law_assignment.md` — Increment 4 (Kinetic-Law Assignment), implemented
+- `docs/08_parameter_declaration_initialization.md` — Increment 5 (Parameter Declaration / Initialization), implemented
 
 ## Repository Structure
 

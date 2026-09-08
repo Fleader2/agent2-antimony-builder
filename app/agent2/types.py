@@ -331,13 +331,17 @@ class CuratedKineticMeasurement:
     "1.1"). Agent 1 curates *reported* kinetic facts -- Agent 2 decides
     model usage, kinetic-law mapping, and parameter declaration (see
     ``docs/02_agent1_handoff_contract.md`` §9A). **This type is never
-    auto-converted into a ``ParameterSpecification``.** Agent 2 must make
-    that mapping decision explicitly in a future increment; until it does,
-    every ``ParameterSpecification`` Agent 2 declares still uses
-    ``ParameterSource.DEFAULT``/``PLACEHOLDER`` (never fabricate a
-    ``CURATED`` value merely because a ``CuratedKineticMeasurement`` with a
-    matching reaction/parameter type exists -- that mapping decision itself
-    is Agent 2 behavior this increment does not implement).
+    auto-converted into a ``ParameterSpecification`` by anything in this
+    module.** That mapping decision -- which curated measurement
+    initializes which declared parameter, for which catalytic context --
+    is implemented explicitly by ``app.agent2.parameters`` (Increment 5,
+    Parameter Declaration / Initialization; see
+    ``docs/08_parameter_declaration_initialization.md``), never implicitly
+    here: a ``ParameterSpecification`` only ever receives
+    ``ParameterSource.CURATED``/``LITERATURE_DERIVED`` through that
+    package's own explicit, deterministic mapping policy -- never merely
+    because a ``CuratedKineticMeasurement`` with a matching reaction/
+    parameter type happens to exist somewhere in the handoff.
 
     ``value``/``unit`` are the as-reported figures; ``normalized_value``/
     ``normalized_unit`` are ``None`` for every measurement in this handoff
@@ -1521,6 +1525,15 @@ class ParameterSpecification:
     (only Agent 4's feedback may justify that source, in a later
     increment). No automatic parameter estimation occurs here or anywhere
     else in this repository.
+
+    **``kinetic_law_assignment_id`` added in Increment 5** (Parameter
+    Declaration / Initialization): the essential missing field found on
+    inspection -- ``reaction_id`` alone cannot disambiguate a parameter
+    declared for one catalytic context (e.g. one specific ``EnzymeState``)
+    from a sibling context on the same reaction, and every parameter
+    Increment 5 declares must trace back to exactly one
+    ``app.agent2.kinetics.types.KineticLawAssignment``. See
+    ``docs/08_parameter_declaration_initialization.md`` §5.
     """
 
     parameter_id: str
@@ -1530,6 +1543,7 @@ class ParameterSpecification:
     unit: str | None = None
     source_reference: str | None = None
     reaction_id: str | None = None
+    kinetic_law_assignment_id: str | None = None
     module_ids: tuple[str, ...] = ()
     lower_bound: Decimal | None = None
     upper_bound: Decimal | None = None
@@ -1560,6 +1574,13 @@ class ParameterSpecification:
             self,
             "reaction_id",
             _clean_optional_str(self.reaction_id, field_name="reaction_id"),
+        )
+        object.__setattr__(
+            self,
+            "kinetic_law_assignment_id",
+            _clean_optional_str(
+                self.kinetic_law_assignment_id, field_name="kinetic_law_assignment_id"
+            ),
         )
         object.__setattr__(
             self, "module_ids", _require_str_tuple(self.module_ids, field_name="module_ids")
