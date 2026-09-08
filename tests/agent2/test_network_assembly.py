@@ -24,8 +24,12 @@ from app.agent2.network.errors import (
 )
 from app.agent2.types import (
     Agent1CuratedKnowledgeViewContract,
+    CuratedAllostericInteraction,
     CuratedCompartment,
     CuratedCompound,
+    CuratedEnzymeModification,
+    CuratedEnzymeState,
+    CuratedEnzymeStateTransition,
     CuratedKineticMeasurement,
     CuratedReaction,
     CuratedReactionEnzymeAssociation,
@@ -95,6 +99,41 @@ def _kinetic_measurement(**overrides) -> CuratedKineticMeasurement:
         "reaction_id": "r1",
     } | overrides
     return CuratedKineticMeasurement(**merged)
+
+
+def _enzyme_state(**overrides) -> CuratedEnzymeState:
+    merged = {"id": "es1", "state_type": "PHOSPHORYLATED", "protein_id": "p1"} | overrides
+    return CuratedEnzymeState(**merged)
+
+
+def _enzyme_modification(**overrides) -> CuratedEnzymeModification:
+    merged = {
+        "id": "mod1",
+        "enzyme_state_id": "es1",
+        "modification_type": "PHOSPHORYLATION",
+        "residue": "Ser129",
+    } | overrides
+    return CuratedEnzymeModification(**merged)
+
+
+def _allosteric_interaction(**overrides) -> CuratedAllostericInteraction:
+    merged = {
+        "id": "allo1",
+        "enzyme_state_id": "es1",
+        "ligand_compound_id": "glc",
+        "effect": "ACTIVATOR",
+    } | overrides
+    return CuratedAllostericInteraction(**merged)
+
+
+def _enzyme_state_transition(**overrides) -> CuratedEnzymeStateTransition:
+    merged = {
+        "id": "trans1",
+        "from_state_id": "es0",
+        "to_state_id": "es1",
+        "transition_type": "PHOSPHORYLATION",
+    } | overrides
+    return CuratedEnzymeStateTransition(**merged)
 
 
 def _simple_reaction_handoff(**reaction_overrides) -> Agent1CuratedKnowledgeViewContract:
@@ -515,6 +554,135 @@ def test_multiple_kinetic_measurements_all_preserved_never_averaged():
     network = assemble_full_network(handoff)
     values = {m.value for m in network.kinetic_measurements}
     assert values == {Decimal("0.3"), Decimal("0.7")}
+
+
+# --- Enzyme regulatory states (Increment 3) -----------------------------------------------------
+
+
+def test_enzyme_states_preserved_by_assembly():
+    handoff = dataclasses.replace(_simple_reaction_handoff(), enzyme_states=(_enzyme_state(),))
+    network = assemble_full_network(handoff)
+    assert network.enzyme_states == (_enzyme_state(),)
+
+
+def test_enzyme_modifications_preserved_by_assembly():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(),),
+        enzyme_modifications=(_enzyme_modification(),),
+    )
+    network = assemble_full_network(handoff)
+    assert network.enzyme_modifications == (_enzyme_modification(),)
+
+
+def test_allosteric_interactions_preserved_by_assembly():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(),),
+        allosteric_interactions=(_allosteric_interaction(),),
+    )
+    network = assemble_full_network(handoff)
+    assert network.allosteric_interactions == (_allosteric_interaction(),)
+
+
+def test_enzyme_state_transitions_preserved_by_assembly():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(id="es0"), _enzyme_state(id="es1")),
+        enzyme_state_transitions=(_enzyme_state_transition(),),
+    )
+    network = assemble_full_network(handoff)
+    assert network.enzyme_state_transitions == (_enzyme_state_transition(),)
+
+
+def test_state_specific_reaction_enzyme_association_preserved():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(),),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, enzyme_state_id="es1"),
+        ),
+    )
+    network = assemble_full_network(handoff)
+    assert network.enzyme_associations[0].enzyme_state_id == "es1"
+
+
+def test_state_specific_kinetic_measurement_state_reference_preserved():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(),),
+        kinetic_measurements=(_kinetic_measurement(enzyme_state_id="es1"),),
+    )
+    network = assemble_full_network(handoff)
+    assert network.kinetic_measurements[0].enzyme_state_id == "es1"
+
+
+def test_dangling_enzyme_modification_state_reference_raises():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(), enzyme_modifications=(_enzyme_modification(),)
+    )
+    with pytest.raises(DanglingReferenceError):
+        assemble_full_network(handoff)
+
+
+def test_dangling_allosteric_interaction_state_reference_raises():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(), allosteric_interactions=(_allosteric_interaction(),)
+    )
+    with pytest.raises(DanglingReferenceError):
+        assemble_full_network(handoff)
+
+
+def test_dangling_enzyme_state_transition_from_state_raises():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(id="es1"),),
+        enzyme_state_transitions=(_enzyme_state_transition(),),
+    )
+    with pytest.raises(DanglingReferenceError):
+        assemble_full_network(handoff)
+
+
+def test_dangling_state_specific_reaction_enzyme_association_raises():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, enzyme_state_id="unknown-state"),
+        ),
+    )
+    with pytest.raises(DanglingReferenceError):
+        assemble_full_network(handoff)
+
+
+def test_dangling_state_specific_kinetic_measurement_raises():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        kinetic_measurements=(_kinetic_measurement(enzyme_state_id="unknown-state"),),
+    )
+    with pytest.raises(DanglingReferenceError):
+        assemble_full_network(handoff)
+
+
+def test_duplicate_enzyme_state_ids_raise():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(), _enzyme_state()),
+    )
+    with pytest.raises(DuplicateCuratedIdentifierError):
+        assemble_full_network(handoff)
+
+
+def test_enzyme_state_family_assembly_still_deterministic():
+    handoff = dataclasses.replace(
+        _simple_reaction_handoff(),
+        enzyme_states=(_enzyme_state(id="es0"), _enzyme_state(id="es1")),
+        enzyme_modifications=(_enzyme_modification(),),
+        allosteric_interactions=(_allosteric_interaction(),),
+        enzyme_state_transitions=(_enzyme_state_transition(),),
+    )
+    first = assemble_full_network(handoff)
+    second = assemble_full_network(handoff)
+    assert first == second
 
 
 # --- Confidence and provenance preservation -----------------------------------------------------

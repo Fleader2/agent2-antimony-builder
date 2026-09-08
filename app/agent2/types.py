@@ -200,11 +200,24 @@ class CuratedReactionParticipant:
 
 @dataclass(frozen=True, slots=True)
 class CuratedReactionEnzymeAssociation:
-    """One reaction-enzyme association. Exactly one of ``protein_id``/``complex_id`` is expected."""
+    """One reaction-enzyme association. Exactly one of ``protein_id``/``complex_id``/
+    ``enzyme_state_id`` is expected.
+
+    **Discovered gap, fixed in Agent 2 Increment 3**: Agent 1's own
+    ``ReactionEnzyme`` row gained a third, optional catalytic target,
+    ``enzyme_state_id``, in Agent 1.x Increment B
+    (``AGENT1_HANDOFF_VERSION`` "1.1" -> "1.2"), but this local mirror was
+    not updated to carry it at the time -- Agent 1's real
+    ``Agent1CuratedKnowledgeView.reaction_enzyme_associations`` exposes raw
+    ``ReactionEnzyme`` rows (which already had the column), so the gap was
+    only in this repository's own decoupled representation. Fixed here by
+    addition, not redesign: existing two-target rows are unaffected.
+    """
 
     reaction_id: str
     protein_id: str | None = None
     complex_id: str | None = None
+    enzyme_state_id: str | None = None
     relationship: str | None = None
 
     def __post_init__(self) -> None:
@@ -1010,13 +1023,21 @@ class ReactionEnzymeAssociation:
     alongside the untouched original fields. No enzyme is ever chosen as
     preferred, and no complex/isozyme/catalytic-mechanism relationship is
     ever inferred here or by anything that constructs this type --
-    ``protein_id``/``complex_id``/``relationship`` are copied verbatim.
+    ``protein_id``/``complex_id``/``enzyme_state_id``/``relationship`` are
+    copied verbatim.
+
+    **``enzyme_state_id`` added in Increment 3**, alongside the identical
+    fix to ``CuratedReactionEnzymeAssociation`` (see that type's own
+    docstring) -- required so catalyst characterization can distinguish
+    state-specific catalysis from protein/complex-general catalysis
+    (``docs/06_reaction_enzyme_state_characterization.md`` §10-12).
     """
 
     association_id: str
     reaction_id: str
     protein_id: str | None = None
     complex_id: str | None = None
+    enzyme_state_id: str | None = None
     relationship: str | None = None
 
     def __post_init__(self) -> None:
@@ -1033,6 +1054,11 @@ class ReactionEnzymeAssociation:
         )
         object.__setattr__(
             self, "complex_id", _clean_optional_str(self.complex_id, field_name="complex_id")
+        )
+        object.__setattr__(
+            self,
+            "enzyme_state_id",
+            _clean_optional_str(self.enzyme_state_id, field_name="enzyme_state_id"),
         )
         object.__setattr__(
             self,
@@ -1062,6 +1088,20 @@ class FullNetwork:
     chooses a preferred enzyme, interprets regulation, or converts a
     kinetic measurement into a parameter -- see
     ``docs/05_whole_network_assembly.md``.
+
+    **Increment 3** added ``enzyme_states``/``enzyme_modifications``/
+    ``allosteric_interactions``/``enzyme_state_transitions`` -- every
+    curated enzyme regulatory state, modification, allosteric interaction,
+    and state transition, reusing Agent 1's own
+    ``CuratedEnzymeState``/``CuratedEnzymeModification``/
+    ``CuratedAllostericInteraction``/``CuratedEnzymeStateTransition`` types
+    unchanged (each already carries a real ``id``, unlike
+    ``CuratedReactionEnzymeAssociation``, so no synthesized wrapper type
+    was needed here). Attached as supporting data only -- never turned into
+    a ``SpeciesSpecification``, a model reaction, or a rate law by this
+    type or by ``app.agent2.network`` (that mapping is
+    ``app.agent2.characterization``/a future increment's job). See
+    ``docs/06_reaction_enzyme_state_characterization.md``.
     """
 
     network_id: str
@@ -1072,6 +1112,10 @@ class FullNetwork:
     enzyme_associations: tuple[ReactionEnzymeAssociation, ...] = ()
     regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
+    enzyme_states: tuple[CuratedEnzymeState, ...] = ()
+    enzyme_modifications: tuple[CuratedEnzymeModification, ...] = ()
+    allosteric_interactions: tuple[CuratedAllostericInteraction, ...] = ()
+    enzyme_state_transitions: tuple[CuratedEnzymeStateTransition, ...] = ()
     organism_id: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
@@ -1127,6 +1171,38 @@ class FullNetwork:
         )
         object.__setattr__(
             self,
+            "enzyme_states",
+            _require_tuple_of(self.enzyme_states, CuratedEnzymeState, field_name="enzyme_states"),
+        )
+        object.__setattr__(
+            self,
+            "enzyme_modifications",
+            _require_tuple_of(
+                self.enzyme_modifications,
+                CuratedEnzymeModification,
+                field_name="enzyme_modifications",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "allosteric_interactions",
+            _require_tuple_of(
+                self.allosteric_interactions,
+                CuratedAllostericInteraction,
+                field_name="allosteric_interactions",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "enzyme_state_transitions",
+            _require_tuple_of(
+                self.enzyme_state_transitions,
+                CuratedEnzymeStateTransition,
+                field_name="enzyme_state_transitions",
+            ),
+        )
+        object.__setattr__(
+            self,
             "organism_id",
             _clean_optional_str(self.organism_id, field_name="organism_id"),
         )
@@ -1163,6 +1239,22 @@ class FullNetwork:
             tuple(k.id for k in self.kinetic_measurements),
             field_name="FullNetwork.kinetic_measurements[].id",
         )
+        _require_unique(
+            tuple(s.id for s in self.enzyme_states),
+            field_name="FullNetwork.enzyme_states[].id",
+        )
+        _require_unique(
+            tuple(m.id for m in self.enzyme_modifications),
+            field_name="FullNetwork.enzyme_modifications[].id",
+        )
+        _require_unique(
+            tuple(a.id for a in self.allosteric_interactions),
+            field_name="FullNetwork.allosteric_interactions[].id",
+        )
+        _require_unique(
+            tuple(t.id for t in self.enzyme_state_transitions),
+            field_name="FullNetwork.enzyme_state_transitions[].id",
+        )
 
         _validate_full_network_references(self)
 
@@ -1187,12 +1279,29 @@ def _validate_full_network_references(network: FullNetwork) -> None:
     (``docs/05_whole_network_assembly.md``), not an oversight: inventing a
     check ``FullNetwork`` cannot actually perform would be worse than
     leaving it undone.
+
+    **Increment 3** extended this scoped validation to the enzyme-state
+    family: every ``enzyme_modifications[]``/``allosteric_interactions[]``
+    ``.enzyme_state_id``, every ``enzyme_state_transitions[]``
+    ``.from_state_id``/``.to_state_id``, every optional
+    ``enzyme_associations[].enzyme_state_id``, and every optional
+    ``kinetic_measurements[].enzyme_state_id`` must resolve against
+    ``enzyme_states`` -- a complete registry within ``FullNetwork``, unlike
+    ``compound_ids`` (§ below). ``allosteric_interactions[].ligand_compound_id``
+    is checked against ``compound_ids`` only when that registry is
+    non-empty -- ``compound_ids`` is derived solely from species that
+    happen to participate in a curated reaction, so it is never a complete
+    compound registry, and a ligand that is never itself a reaction
+    participant (a common, legitimate case) must not be rejected as
+    "dangling" merely because ``FullNetwork`` tracks no compounds at all
+    for an otherwise-empty network.
     """
     compartment_ids = {c.compartment_id for c in network.compartments}
     species_ids = {s.species_id for s in network.species}
     reaction_ids = {r.reaction_id for r in network.reactions}
     enzyme_association_ids = {e.association_id for e in network.enzyme_associations}
     regulatory_interaction_ids = {r.id for r in network.regulatory_interactions}
+    enzyme_state_ids = {s.id for s in network.enzyme_states}
     compound_ids = {
         s.source_compound_id for s in network.species if s.source_compound_id is not None
     }
@@ -1227,6 +1336,60 @@ def _validate_full_network_references(network: FullNetwork) -> None:
             raise ValueError(
                 f"FullNetwork enzyme association {association.association_id!r} references "
                 f"undefined reaction {association.reaction_id!r}"
+            )
+        if (
+            association.enzyme_state_id is not None
+            and association.enzyme_state_id not in enzyme_state_ids
+        ):
+            raise ValueError(
+                f"FullNetwork enzyme association {association.association_id!r} references "
+                f"undefined enzyme state {association.enzyme_state_id!r}"
+            )
+
+    for modification in network.enzyme_modifications:
+        if modification.enzyme_state_id not in enzyme_state_ids:
+            raise ValueError(
+                f"FullNetwork enzyme modification {modification.id!r} references undefined "
+                f"enzyme state {modification.enzyme_state_id!r}"
+            )
+
+    for interaction in network.allosteric_interactions:
+        if interaction.enzyme_state_id not in enzyme_state_ids:
+            raise ValueError(
+                f"FullNetwork allosteric interaction {interaction.id!r} references undefined "
+                f"enzyme state {interaction.enzyme_state_id!r}"
+            )
+        if compound_ids and interaction.ligand_compound_id not in compound_ids:
+            raise ValueError(
+                f"FullNetwork allosteric interaction {interaction.id!r} references undefined "
+                f"ligand compound {interaction.ligand_compound_id!r}"
+            )
+
+    for transition in network.enzyme_state_transitions:
+        if transition.from_state_id not in enzyme_state_ids:
+            raise ValueError(
+                f"FullNetwork enzyme state transition {transition.id!r} references undefined "
+                f"from_state_id {transition.from_state_id!r}"
+            )
+        if transition.to_state_id not in enzyme_state_ids:
+            raise ValueError(
+                f"FullNetwork enzyme state transition {transition.id!r} references undefined "
+                f"to_state_id {transition.to_state_id!r}"
+            )
+        if transition.reaction_id is not None and transition.reaction_id not in reaction_ids:
+            raise ValueError(
+                f"FullNetwork enzyme state transition {transition.id!r} references undefined "
+                f"reaction {transition.reaction_id!r}"
+            )
+
+    for measurement in network.kinetic_measurements:
+        if (
+            measurement.enzyme_state_id is not None
+            and measurement.enzyme_state_id not in enzyme_state_ids
+        ):
+            raise ValueError(
+                f"FullNetwork kinetic measurement {measurement.id!r} references undefined "
+                f"enzyme state {measurement.enzyme_state_id!r}"
             )
 
     for regulation in network.regulatory_interactions:

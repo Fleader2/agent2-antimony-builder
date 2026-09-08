@@ -90,19 +90,22 @@ itself.
 
 ## Current Status
 
-> Increment 1 (Architecture and Core Contracts) and Increment 2
-> (Whole-Network Assembly) are implemented. See
-> `docs/04_core_domain_contracts.md` and
-> `docs/05_whole_network_assembly.md`.
+> Increment 1 (Architecture and Core Contracts), Increment 2
+> (Whole-Network Assembly), and Increment 3 (Reaction and Enzyme-State
+> Characterization) are implemented. See `docs/04_core_domain_contracts.md`,
+> `docs/05_whole_network_assembly.md`, and
+> `docs/06_reaction_enzyme_state_characterization.md`. Next: Increment 4,
+> Kinetic-Law Assignment.
 
 ## Roadmap
 
 - **Increment 1** — Architecture and Core Contracts (implemented)
 - **Increment 2** — Whole-Network Assembly (implemented)
-- **Increment 3** — Kinetic Laws and Parameter Initialization
-- **Increment 4** — Boundary Assessment and Module Decomposition
-- **Increment 5** — ModelSpecification and Antimony Generation
-- **Increment 6** — End-to-End Agent 2 Build / Syntax Contract
+- **Increment 3** — Reaction and Enzyme-State Characterization (implemented)
+- **Increment 4** — Kinetic-Law Assignment
+- **Increment 5** — Boundary Assessment and Module Decomposition
+- **Increment 6** — ModelSpecification and Antimony Generation
+- **Increment 7** — End-to-End Agent 2 Build / Syntax Contract
 
 This roadmap describes planned scope, not a commitment to a fixed
 timeline or final design for increments beyond the next one.
@@ -116,6 +119,7 @@ timeline or final design for increments beyond the next one.
 - `docs/03_increment_1_specification.md` — Increment 1's historical specification (implemented)
 - `docs/04_core_domain_contracts.md` — the canonical, current-state domain contract reference
 - `docs/05_whole_network_assembly.md` — Increment 2 (Whole-Network Assembly), implemented
+- `docs/06_reaction_enzyme_state_characterization.md` — Increment 3 (Reaction and Enzyme-State Characterization), implemented
 
 ## Repository Structure
 

@@ -16,6 +16,13 @@ names actually changes.
   produced under. No boundary heuristic rules exist yet (Increment 1 is
   contracts only) -- this constant exists so the first real rule set has
   somewhere stable to record its own version from the start.
+* ``REACTION_CHARACTERIZATION_POLICY_VERSION`` -- the version of the
+  deterministic reaction/enzyme-state characterization rule set
+  (``app.agent2.characterization``) a ``NetworkCharacterization`` was
+  produced under (e.g. the ``TRANSPORT`` classification rule, the flag/
+  unresolved-feature emission rules). Distinct from
+  ``AGENT2_CONTRACT_VERSION``: this versions a *behavioral rule set*, not
+  a data shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -58,16 +65,39 @@ were extended to match exactly (see `docs/02_agent1_handoff_contract.md`).
 output contracts changed shape, and Whole-Network Assembly
 (``app.agent2.network``) was not modified to consume the new fields; only
 the *input* handoff contract gained fields.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.3"`` to ``"0.4"`` in
+Increment 3 (Reaction and Enzyme-State Characterization): ``FullNetwork``
+gained ``enzyme_states``/``enzyme_modifications``/``allosteric_interactions``/
+``enzyme_state_transitions`` (carried forward from the Increment B handoff
+fields, unmodified), and both ``CuratedReactionEnzymeAssociation`` and
+``ReactionEnzymeAssociation`` gained ``enzyme_state_id`` (a discovered gap
+from Agent 1.x Increment B -- see their docstrings). ``FullNetwork``'s own
+reference-integrity validation grew new checks for all of the above. A new
+output contract package, ``app.agent2.characterization``
+(``ReactionCharacterization``/``EnzymeStateCharacterization``/
+``NetworkCharacterization``), was also introduced. Every new ``FullNetwork``
+field has a default (``()``), so existing keyword-based construction is
+unaffected, but this is still an output-contract shape change per this
+file's own bump criterion. ``AGENT1_HANDOFF_VERSION`` is unchanged --
+already at ``"1.2"``, matching Agent 1's current ``AGENT1_CONTRACT_VERSION``;
+Agent 1 was not modified in this increment (input-only).
+``REACTION_CHARACTERIZATION_POLICY_VERSION`` is introduced at
+``"reaction-characterization-v1"`` for the first real characterization
+rule set (catalyst/regulation/allostery/kinetic-evidence characterization,
+the conservative ``TRANSPORT`` rule).
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.3"
+AGENT2_CONTRACT_VERSION = "0.4"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
+REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "REACTION_CHARACTERIZATION_POLICY_VERSION",
 ]

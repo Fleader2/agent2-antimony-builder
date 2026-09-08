@@ -139,10 +139,12 @@ def build_enzyme_associations(
     """One ``ReactionEnzymeAssociation`` per curated reaction-enzyme association.
 
     ``association_id`` is synthesized (the curated record has none, see
-    ``app.agent2.types.ReactionEnzymeAssociation``); every other field is
-    copied verbatim. No enzyme is chosen as preferred, no complex/isozyme
-    relationship is inferred (Increment 2 instructions, "ENZYME
-    ASSOCIATIONS").
+    ``app.agent2.types.ReactionEnzymeAssociation``); every other field
+    (including ``enzyme_state_id``, Increment 3) is copied verbatim. No
+    enzyme is chosen as preferred, no complex/isozyme relationship is
+    inferred (Increment 2 instructions, "ENZYME ASSOCIATIONS"), and no
+    state-specific catalysis is inferred for an association that did not
+    already curate one (Increment 3 instructions, Step 12).
     """
     grouped = _group_by_reaction_id(
         lambda a: a.reaction_id, handoff.reaction_enzyme_associations
@@ -156,6 +158,7 @@ def build_enzyme_associations(
                     reaction_id=curated.reaction_id,
                     protein_id=curated.protein_id,
                     complex_id=curated.complex_id,
+                    enzyme_state_id=curated.enzyme_state_id,
                     relationship=curated.relationship,
                 )
             )

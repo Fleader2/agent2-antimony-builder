@@ -58,6 +58,18 @@ def validate_handoff(handoff: Agent1CuratedKnowledgeViewContract) -> None:
     _require_unique_curated_ids(
         [k.id for k in handoff.kinetic_measurements], category="kinetic measurement"
     )
+    enzyme_state_ids = _require_unique_curated_ids(
+        [s.id for s in handoff.enzyme_states], category="enzyme state"
+    )
+    _require_unique_curated_ids(
+        [m.id for m in handoff.enzyme_modifications], category="enzyme modification"
+    )
+    _require_unique_curated_ids(
+        [a.id for a in handoff.allosteric_interactions], category="allosteric interaction"
+    )
+    _require_unique_curated_ids(
+        [t.id for t in handoff.enzyme_state_transitions], category="enzyme state transition"
+    )
 
     _validate_participants(
         handoff,
@@ -65,7 +77,12 @@ def validate_handoff(handoff: Agent1CuratedKnowledgeViewContract) -> None:
         compound_ids=compound_ids,
         compartment_ids=compartment_ids,
     )
-    _validate_enzyme_associations(handoff, reaction_ids=reaction_ids)
+    _validate_enzyme_associations(
+        handoff, reaction_ids=reaction_ids, enzyme_state_ids=enzyme_state_ids
+    )
+    _validate_enzyme_state_family(
+        handoff, reaction_ids=reaction_ids, enzyme_state_ids=enzyme_state_ids
+    )
 
 
 def _validate_participants(
@@ -107,13 +124,79 @@ def _validate_participants(
 
 
 def _validate_enzyme_associations(
-    handoff: Agent1CuratedKnowledgeViewContract, *, reaction_ids: set[str]
+    handoff: Agent1CuratedKnowledgeViewContract,
+    *,
+    reaction_ids: set[str],
+    enzyme_state_ids: set[str],
 ) -> None:
     for association in handoff.reaction_enzyme_associations:
         if association.reaction_id not in reaction_ids:
             raise DanglingReferenceError(
                 f"reaction-enzyme association references undefined reaction "
                 f"{association.reaction_id!r}"
+            )
+        if (
+            association.enzyme_state_id is not None
+            and association.enzyme_state_id not in enzyme_state_ids
+        ):
+            raise DanglingReferenceError(
+                f"reaction-enzyme association (reaction {association.reaction_id!r}) "
+                f"references undefined enzyme state {association.enzyme_state_id!r}"
+            )
+
+
+def _validate_enzyme_state_family(
+    handoff: Agent1CuratedKnowledgeViewContract,
+    *,
+    reaction_ids: set[str],
+    enzyme_state_ids: set[str],
+) -> None:
+    """Increment 3: dangling-reference checks for the enzyme-state family.
+
+    Mirrors ``app.agent2.types._validate_full_network_references``'s
+    identical checks -- run here too, against the raw handoff, so a
+    violation is reported in terms of Agent 1's own curated ids before any
+    ``app.agent2.types`` object is constructed (see module docstring).
+    """
+    for modification in handoff.enzyme_modifications:
+        if modification.enzyme_state_id not in enzyme_state_ids:
+            raise DanglingReferenceError(
+                f"enzyme modification {modification.id!r} references undefined enzyme "
+                f"state {modification.enzyme_state_id!r}"
+            )
+
+    for interaction in handoff.allosteric_interactions:
+        if interaction.enzyme_state_id not in enzyme_state_ids:
+            raise DanglingReferenceError(
+                f"allosteric interaction {interaction.id!r} references undefined enzyme "
+                f"state {interaction.enzyme_state_id!r}"
+            )
+
+    for transition in handoff.enzyme_state_transitions:
+        if transition.from_state_id not in enzyme_state_ids:
+            raise DanglingReferenceError(
+                f"enzyme state transition {transition.id!r} references undefined "
+                f"from_state_id {transition.from_state_id!r}"
+            )
+        if transition.to_state_id not in enzyme_state_ids:
+            raise DanglingReferenceError(
+                f"enzyme state transition {transition.id!r} references undefined "
+                f"to_state_id {transition.to_state_id!r}"
+            )
+        if transition.reaction_id is not None and transition.reaction_id not in reaction_ids:
+            raise DanglingReferenceError(
+                f"enzyme state transition {transition.id!r} references undefined reaction "
+                f"{transition.reaction_id!r}"
+            )
+
+    for measurement in handoff.kinetic_measurements:
+        if (
+            measurement.enzyme_state_id is not None
+            and measurement.enzyme_state_id not in enzyme_state_ids
+        ):
+            raise DanglingReferenceError(
+                f"kinetic measurement {measurement.id!r} references undefined enzyme state "
+                f"{measurement.enzyme_state_id!r}"
             )
 
 
