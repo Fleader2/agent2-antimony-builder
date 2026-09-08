@@ -16,8 +16,11 @@ import pytest
 from app.agent2.types import (
     CompartmentSourceScope,
     CompartmentSpecification,
+    CuratedKineticMeasurement,
+    CuratedRegulatoryInteraction,
     FullNetwork,
     ParticipantRole,
+    ReactionEnzymeAssociation,
     ReactionParticipantSpecification,
     ReactionSpecification,
     SpeciesSpecification,
@@ -322,3 +325,195 @@ def test_full_network_never_performs_mass_balance_or_graph_validation():
         reactions=(_reaction(),),
     )
     assert network.network_id == "n1"
+
+
+# --- ReactionEnzymeAssociation (Increment 2) --------------------------------------------------
+
+
+def _enzyme_association(**overrides) -> ReactionEnzymeAssociation:
+    merged = {
+        "association_id": "e1",
+        "reaction_id": "r1",
+        "protein_id": "p1",
+    } | overrides
+    return ReactionEnzymeAssociation(**merged)
+
+
+def test_enzyme_association_requires_non_empty_association_id():
+    with pytest.raises(ValueError):
+        _enzyme_association(association_id="")
+
+
+def test_enzyme_association_requires_non_empty_reaction_id():
+    with pytest.raises(ValueError):
+        _enzyme_association(reaction_id="")
+
+
+def test_enzyme_association_allows_protein_and_complex_both_absent():
+    """Mirrors CuratedReactionEnzymeAssociation: 'expected', never enforced."""
+    association = _enzyme_association(protein_id=None, complex_id=None)
+    assert association.protein_id is None
+    assert association.complex_id is None
+
+
+def test_enzyme_association_is_frozen_dataclass():
+    assert dataclasses.is_dataclass(ReactionEnzymeAssociation)
+    assert ReactionEnzymeAssociation.__dataclass_params__.frozen is True
+
+
+# --- FullNetwork: enzyme_associations/regulatory_interactions/kinetic_measurements ------------
+
+
+def _regulation(**overrides) -> CuratedRegulatoryInteraction:
+    merged = {
+        "id": "reg1",
+        "regulator_type": "compound",
+        "target_type": "reaction",
+        "effect": "INHIBITION",
+        "target_id": "r1",
+    } | overrides
+    return CuratedRegulatoryInteraction(**merged)
+
+
+def _kinetic_measurement(**overrides) -> CuratedKineticMeasurement:
+    merged = {
+        "id": "km1",
+        "parameter_type": "KM",
+        "value": Decimal("0.5"),
+        "unit": "mM",
+    } | overrides
+    return CuratedKineticMeasurement(**merged)
+
+
+def test_full_network_carries_enzyme_associations():
+    network = FullNetwork(
+        network_id="n1",
+        name="test network",
+        compartments=(_compartment(),),
+        species=(_species(),),
+        reactions=(_reaction(enzyme_association_ids=("e1",)),),
+        enzyme_associations=(_enzyme_association(),),
+    )
+    assert network.enzyme_associations[0].association_id == "e1"
+
+
+def test_full_network_rejects_duplicate_enzyme_association_ids():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            compartments=(_compartment(),),
+            species=(_species(),),
+            reactions=(_reaction(),),
+            enzyme_associations=(_enzyme_association(), _enzyme_association()),
+        )
+
+
+def test_full_network_rejects_enzyme_association_with_undefined_reaction():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            compartments=(_compartment(),),
+            species=(_species(),),
+            reactions=(_reaction(),),
+            enzyme_associations=(_enzyme_association(reaction_id="does-not-exist"),),
+        )
+
+
+def test_full_network_rejects_reaction_with_undefined_enzyme_association_id():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            compartments=(_compartment(),),
+            species=(_species(),),
+            reactions=(_reaction(enzyme_association_ids=("does-not-exist",)),),
+        )
+
+
+def test_full_network_carries_regulatory_interactions():
+    network = FullNetwork(
+        network_id="n1",
+        name="test network",
+        compartments=(_compartment(),),
+        species=(_species(),),
+        reactions=(_reaction(regulatory_interaction_ids=("reg1",)),),
+        regulatory_interactions=(_regulation(),),
+    )
+    assert network.regulatory_interactions[0].id == "reg1"
+
+
+def test_full_network_rejects_duplicate_regulatory_interaction_ids():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            regulatory_interactions=(_regulation(), _regulation()),
+        )
+
+
+def test_full_network_rejects_regulation_targeting_undefined_reaction():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            regulatory_interactions=(_regulation(target_id="does-not-exist"),),
+        )
+
+
+def test_full_network_rejects_reaction_with_undefined_regulatory_interaction_id():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            compartments=(_compartment(),),
+            species=(_species(),),
+            reactions=(_reaction(regulatory_interaction_ids=("does-not-exist",)),),
+        )
+
+
+def test_full_network_never_validates_regulation_of_unresolvable_entity_type():
+    """A 'protein' regulator/target has no first-class registry in FullNetwork -- never rejected."""
+    network = FullNetwork(
+        network_id="n1",
+        name="test network",
+        regulatory_interactions=(
+            _regulation(
+                regulator_type="protein",
+                regulator_id="does-not-exist-anywhere",
+                target_type="protein",
+                target_id="also-does-not-exist",
+            ),
+        ),
+    )
+    assert network.regulatory_interactions[0].regulator_id == "does-not-exist-anywhere"
+
+
+def test_full_network_carries_kinetic_measurements():
+    network = FullNetwork(
+        network_id="n1",
+        name="test network",
+        kinetic_measurements=(_kinetic_measurement(),),
+    )
+    assert network.kinetic_measurements[0].id == "km1"
+
+
+def test_full_network_rejects_duplicate_kinetic_measurement_ids():
+    with pytest.raises(ValueError):
+        FullNetwork(
+            network_id="n1",
+            name="test network",
+            kinetic_measurements=(_kinetic_measurement(), _kinetic_measurement()),
+        )
+
+
+def test_full_network_never_converts_kinetic_measurement_to_parameter():
+    """Structural guard: FullNetwork carries CuratedKineticMeasurement verbatim, never a
+    ParameterSpecification-shaped object."""
+    network = FullNetwork(
+        network_id="n1",
+        name="test network",
+        kinetic_measurements=(_kinetic_measurement(),),
+    )
+    assert isinstance(network.kinetic_measurements[0], CuratedKineticMeasurement)

@@ -90,12 +90,15 @@ itself.
 
 ## Current Status
 
-> Repository initialized; implementation begins with Increment 1.
+> Increment 1 (Architecture and Core Contracts) and Increment 2
+> (Whole-Network Assembly) are implemented. See
+> `docs/04_core_domain_contracts.md` and
+> `docs/05_whole_network_assembly.md`.
 
 ## Roadmap
 
-- **Increment 1** — Architecture and Core Contracts
-- **Increment 2** — Whole-Network Assembly
+- **Increment 1** — Architecture and Core Contracts (implemented)
+- **Increment 2** — Whole-Network Assembly (implemented)
 - **Increment 3** — Kinetic Laws and Parameter Initialization
 - **Increment 4** — Boundary Assessment and Module Decomposition
 - **Increment 5** — ModelSpecification and Antimony Generation
@@ -110,7 +113,9 @@ timeline or final design for increments beyond the next one.
 
 - `docs/01_agent2_architecture.md` — full Agent 2 architecture
 - `docs/02_agent1_handoff_contract.md` — the Agent 1 → Agent 2 data contract
-- `docs/03_increment_1_specification.md` — the next implementation increment
+- `docs/03_increment_1_specification.md` — Increment 1's historical specification (implemented)
+- `docs/04_core_domain_contracts.md` — the canonical, current-state domain contract reference
+- `docs/05_whole_network_assembly.md` — Increment 2 (Whole-Network Assembly), implemented
 
 ## Repository Structure
 

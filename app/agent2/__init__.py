@@ -7,11 +7,13 @@ the full architecture, ``docs/02_agent1_handoff_contract.md`` for the
 Agent 1 handoff contract, and ``docs/04_core_domain_contracts.md`` for the
 full domain-contract reference this Increment 1 establishes.
 
-Increment 1 defines only the immutable domain contracts
-(``app.agent2.types``) and version markers (``app.agent2.version``). No
-network assembly, kinetic-law assignment, boundary heuristic, module
-partitioning, or Antimony generation is implemented yet -- there is no
-service module to import.
+Increment 1 defined the immutable domain contracts (``app.agent2.types``)
+and version markers (``app.agent2.version``). Increment 2 added the first
+real algorithm, whole-network assembly (``app.agent2.network`` --
+``from app.agent2.network import assemble_full_network``), kept as its own
+subpackage rather than re-exported here to keep this package's own surface
+limited to domain contracts. Kinetic-law assignment, boundary heuristics,
+module partitioning, and Antimony generation are still not implemented.
 """
 
 from app.agent2.types import (
@@ -46,6 +48,7 @@ from app.agent2.types import (
     ParameterSource,
     ParameterSpecification,
     ParticipantRole,
+    ReactionEnzymeAssociation,
     ReactionParticipantSpecification,
     ReactionSpecification,
     SpeciesSpecification,
@@ -91,6 +94,7 @@ __all__ = [
     "ParameterSource",
     "ParameterSpecification",
     "ParticipantRole",
+    "ReactionEnzymeAssociation",
     "ReactionParticipantSpecification",
     "ReactionSpecification",
     "SpeciesSpecification",

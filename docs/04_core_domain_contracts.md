@@ -14,19 +14,44 @@ reference-integrity checks only.
 
 `app.agent2.types.FullNetwork` -- the single authoritative graph of every
 `CompartmentSpecification`/`SpeciesSpecification`/`ReactionSpecification`
-Agent 2 will eventually assemble from an
-`Agent1CuratedKnowledgeViewContract` (a future increment). Built once,
-before kinetic-law assignment or boundary assessment (full-network-first).
+Agent 2 assembles from an `Agent1CuratedKnowledgeViewContract`
+(`app.agent2.network.assemble_full_network`, Increment 2 -- see
+`docs/05_whole_network_assembly.md`). Built once, before kinetic-law
+assignment or boundary assessment (full-network-first).
 
 Fields: `network_id`, `name`, `compartments`, `species`, `reactions`,
-`organism_id`, `assumptions`, `provenance_refs`.
+`enzyme_associations`, `regulatory_interactions`, `kinetic_measurements`
+(the latter three added in Increment 2), `organism_id`, `assumptions`,
+`provenance_refs`.
 
-Validated: compartment/species/reaction ids are each internally unique;
-every species' `compartment_id` names a compartment present in
-`compartments`; every reaction participant's `species_id` names a species
-present in `species`. **Never validated here**: mass balance, graph
+Validated: compartment/species/reaction/enzyme-association/regulatory-
+interaction/kinetic-measurement ids are each internally unique; every
+species' `compartment_id` names a compartment present in `compartments`;
+every reaction participant's `species_id` names a species present in
+`species`; every reaction's `enzyme_association_ids`/
+`regulatory_interaction_ids` exist among `enzyme_associations`/
+`regulatory_interactions`; every enzyme association's `reaction_id` exists
+among `reactions`; every regulatory interaction's `regulator_id`/
+`target_id` is checked only when its type is `"reaction"`/`"compound"`
+(see `docs/05_whole_network_assembly.md` §14 for why every other entity
+type is left unchecked). **Never validated here**: mass balance, graph
 connectivity, unit consistency, or conservation laws -- those are Agent
 3's job.
+
+`enzyme_associations`/`regulatory_interactions`/`kinetic_measurements` are
+supporting data attached to the network, never structural graph elements
+in their own right -- see §2A/§10 below and
+`docs/05_whole_network_assembly.md` §§9-11.
+
+## 2A. ReactionEnzymeAssociation
+
+`app.agent2.types.ReactionEnzymeAssociation` -- one reaction-enzyme
+association carried into `FullNetwork.enzyme_associations` (Increment 2).
+Mirrors `CuratedReactionEnzymeAssociation` field-for-field, adding only
+`association_id`: a stable id synthesized at assembly time, since the
+curated handoff record itself carries none (a discovered gap -- see
+`docs/05_whole_network_assembly.md` §14). Fields: `association_id`,
+`reaction_id`, `protein_id`, `complex_id`, `relationship`.
 
 ## 3. CompartmentSpecification
 
@@ -329,37 +354,58 @@ describes) bumped `AGENT1_HANDOFF_VERSION` "1.0" -> "1.1" and added
 this file's own output contracts (`FullNetwork`, `ModelSpecification`, ...)
 changed shape. This does not alter Increment 2's scope below (§25).
 
+**Increment 2** bumped `AGENT2_CONTRACT_VERSION` from `"0.2"` to `"0.3"`:
+`FullNetwork` gained `enzyme_associations`/`regulatory_interactions`/
+`kinetic_measurements` (each defaulting to `()`, so existing keyword-based
+construction is unaffected) plus three new reference-integrity checks, and
+a new domain type, `ReactionEnzymeAssociation`, was introduced (§2A).
+`AGENT1_HANDOFF_VERSION`/`BOUNDARY_POLICY_VERSION` are unchanged.
+
 ## 24. Scope boundaries
 
-No behavior beyond validation, identity/reference integrity, and the four
-deterministic `ParameterSpecification` properties exists anywhere in this
-file's types. Specifically absent from this repository: whole-network
-assembly, kinetic-law selection, parameter initialization policy, boundary
-heuristics, module partitioning, Antimony generation, and any Agent 3/4/5
-behavior (validation, simulation, parameter fitting, model critique).
-Verified structurally by `tests/agent2/test_contracts.py`'s AST-based
-import/definition scans, run against every file under `app/`.
+As of Increment 1, no behavior beyond validation, identity/reference
+integrity, and the four deterministic `ParameterSpecification` properties
+existed anywhere in this file's types. **Increment 2** (§25) added the
+first real algorithm, whole-network assembly
+(`app.agent2.network.assemble_full_network`) -- still specifically absent
+from this repository: kinetic-law selection, parameter initialization
+policy, boundary heuristics, module partitioning, Antimony generation, and
+any Agent 3/4/5 behavior (validation, simulation, parameter fitting, model
+critique). Verified structurally by `tests/agent2/test_contracts.py`'s and
+`tests/agent2/test_network_assembly.py`'s AST-based import/definition
+scans.
 
 ## 25. Increment 2 handoff
 
-Increment 2 ("Whole-Network Assembly") consumes
-`Agent1CuratedKnowledgeViewContract` and produces a `FullNetwork` --
-the first real algorithm in this repository. It must:
+**Status: implemented** (`app.agent2.network`, see
+`docs/05_whole_network_assembly.md` for the full contract). Increment 2
+("Whole-Network Assembly") consumes `Agent1CuratedKnowledgeViewContract`
+and produces a `FullNetwork` -- the first real algorithm in this
+repository. It:
 
-* map each `CuratedCompartment` to a `CompartmentSpecification` with
+* maps each `CuratedCompartment` to a `CompartmentSpecification` with
   `source_scope=AGENT1_CURATED`;
-* map each `CuratedCompound` referenced by a `CuratedReactionParticipant`
-  to a `SpeciesSpecification` (deciding how compartment context combines
-  with a compound to form species identity, §4);
-* map each `CuratedReaction`/`CuratedReactionParticipant` to a
-  `ReactionSpecification`/`ReactionParticipantSpecification` (deciding how
-  the free-string `CuratedReactionParticipant.role` maps onto the closed
-  `ParticipantRole` enum, and what happens if it doesn't cleanly match);
-* leave every `kinetic_law_id`/kinetic-law-assignment/parameter concern
+* maps each `CuratedCompound` referenced by a `CuratedReactionParticipant`
+  to a `SpeciesSpecification`, keyed by compound+compartment (§4) --
+  deciding that a participant with no compartment reference cannot be
+  assembled and must raise (`MissingCompartmentReferenceError`), since
+  Agent 1 v1 permits a nullable compartment reference but
+  `SpeciesSpecification.compartment_id` is required;
+* maps each `CuratedReaction`/`CuratedReactionParticipant` to a
+  `ReactionSpecification`/`ReactionParticipantSpecification`, mapping the
+  free-string `CuratedReactionParticipant.role` onto the closed
+  `ParticipantRole` enum and raising `UnknownParticipantRoleError` when it
+  does not cleanly match;
+* additionally attaches curated enzyme associations, regulatory
+  interactions, and kinetic measurements to `FullNetwork` (§2, §2A, and
+  `docs/05_whole_network_assembly.md` §§9-11) -- not originally itemized
+  in this section's first draft, but required by Increment 2's own
+  governing instructions and implemented alongside the mappings above;
+* leaves every `kinetic_law_id`/kinetic-law-assignment/parameter concern
   entirely alone -- Increment 2's own scope ends at a valid, reference-
   consistent `FullNetwork`.
 
-It must not implement kinetic-law assignment, parameter initialization,
+It does not implement kinetic-law assignment, parameter initialization,
 boundary assessment, module decomposition, or Antimony generation.
 
 ---

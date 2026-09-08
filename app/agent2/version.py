@@ -34,11 +34,22 @@ a ``kinetic_measurements`` field (``AGENT1_CONTRACT_VERSION`` "1.0" ->
 unchanged -- no field of Agent 2's own output contracts (``FullNetwork``,
 ``ModelSpecification``, ...) changed shape; only the *input* handoff
 contract gained a field.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.2"`` to ``"0.3"`` in
+Increment 2 (Whole-Network Assembly): ``FullNetwork`` gained
+``enzyme_associations``/``regulatory_interactions``/``kinetic_measurements``,
+and a new domain type, ``ReactionEnzymeAssociation``, was introduced.
+Every new field has a default (`()`), so existing keyword-based
+construction of ``FullNetwork`` is unaffected, but ``FullNetwork``'s own
+reference-integrity validation grew three new checks -- an output-contract
+shape change per this file's own bump criterion. ``AGENT1_HANDOFF_VERSION``/
+``BOUNDARY_POLICY_VERSION`` are unchanged -- the Agent 1 handoff shape did
+not change, and no boundary heuristic rule set exists yet.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.2"
+AGENT2_CONTRACT_VERSION = "0.3"
 AGENT1_HANDOFF_VERSION = "1.1"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 

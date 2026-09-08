@@ -23,10 +23,21 @@ Sections, in the order data flows through the (future) pipeline:
    because later structural types reference them.
 3. **Full-network structural domain** -- ``CompartmentSpecification``,
    ``SpeciesSpecification``, ``ReactionParticipantSpecification``,
-   ``ReactionSpecification``, ``FullNetwork``. The complete, authoritative
-   network Agent 2 will eventually assemble from an
-   ``Agent1CuratedKnowledgeViewContract`` (Increment 2) -- this increment
-   only defines the shape and its internal reference-integrity rules.
+   ``ReactionSpecification``, ``ReactionEnzymeAssociation``,
+   ``FullNetwork``. The complete, authoritative network Agent 2 assembles
+   from an ``Agent1CuratedKnowledgeViewContract``
+   (``app.agent2.network.assemble_full_network``, Increment 2) -- this
+   module still only defines the shape and its internal reference-
+   integrity rules, never the assembly algorithm itself. **Increment 2**
+   additionally attached curated regulation
+   (``FullNetwork.regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...]``)
+   and curated kinetic measurements
+   (``FullNetwork.kinetic_measurements: tuple[CuratedKineticMeasurement, ...]``)
+   directly, reusing the Agent 1 handoff's own record types unchanged
+   (§1) rather than inventing near-duplicate network-level mirrors --
+   both are supporting evidence attached to the network, never
+   reinterpreted, classified, or converted into a structural element or a
+   ``ParameterSpecification``.
 4. **Kinetics and parameters** -- ``KineticLawSpecification``,
    ``ParameterSpecification``. Structural declarations only: no fitting,
    no estimation, no expression evaluation.
@@ -814,6 +825,54 @@ class ReactionSpecification:
 
 
 @dataclass(frozen=True, slots=True)
+class ReactionEnzymeAssociation:
+    """One reaction<->enzyme association carried into the full network, exactly as curated.
+
+    Mirrors ``CuratedReactionEnzymeAssociation`` field-for-field, adding
+    only ``association_id``. **Discovered gap** (Increment 2): Agent 1's
+    handoff contract for this record carries no id of its own -- unlike
+    ``CuratedRegulatoryInteraction``/``CuratedKineticMeasurement``, which
+    do, and which ``FullNetwork`` therefore attaches unchanged (§ module
+    docstring). Rather than changing the already-approved, cross-repository
+    ``CuratedReactionEnzymeAssociation`` shape to add one,
+    ``app.agent2.network`` synthesizes a stable, deterministic
+    ``association_id`` at assembly time (scoped to one reaction, never
+    derived from content that could collide) and this type carries it
+    alongside the untouched original fields. No enzyme is ever chosen as
+    preferred, and no complex/isozyme/catalytic-mechanism relationship is
+    ever inferred here or by anything that constructs this type --
+    ``protein_id``/``complex_id``/``relationship`` are copied verbatim.
+    """
+
+    association_id: str
+    reaction_id: str
+    protein_id: str | None = None
+    complex_id: str | None = None
+    relationship: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "association_id",
+            _require_non_empty_str(self.association_id, field_name="association_id"),
+        )
+        object.__setattr__(
+            self, "reaction_id", _require_non_empty_str(self.reaction_id, field_name="reaction_id")
+        )
+        object.__setattr__(
+            self, "protein_id", _clean_optional_str(self.protein_id, field_name="protein_id")
+        )
+        object.__setattr__(
+            self, "complex_id", _clean_optional_str(self.complex_id, field_name="complex_id")
+        )
+        object.__setattr__(
+            self,
+            "relationship",
+            _clean_optional_str(self.relationship, field_name="relationship"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class FullNetwork:
     """The single authoritative graph of every compartment, species, and reaction.
 
@@ -823,6 +882,17 @@ class FullNetwork:
     every reaction participant's species exists) but never performs
     Agent-3-level mass-balance, connectivity, or unit-consistency
     analysis.
+
+    **Increment 2** added ``enzyme_associations``/``regulatory_interactions``/
+    ``kinetic_measurements`` -- every curated enzyme association, curated
+    regulatory interaction, and curated kinetic measurement in the source
+    handoff, attached here as supporting data the structural graph carries
+    forward. None of the three is a structural graph element in its own
+    right (unlike compartments/species/reactions): they are never used to
+    infer a species, a reaction, or a compartment, and nothing here
+    chooses a preferred enzyme, interprets regulation, or converts a
+    kinetic measurement into a parameter -- see
+    ``docs/05_whole_network_assembly.md``.
     """
 
     network_id: str
@@ -830,6 +900,9 @@ class FullNetwork:
     compartments: tuple[CompartmentSpecification, ...] = ()
     species: tuple[SpeciesSpecification, ...] = ()
     reactions: tuple[ReactionSpecification, ...] = ()
+    enzyme_associations: tuple[ReactionEnzymeAssociation, ...] = ()
+    regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
+    kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
     organism_id: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
@@ -858,6 +931,33 @@ class FullNetwork:
         )
         object.__setattr__(
             self,
+            "enzyme_associations",
+            _require_tuple_of(
+                self.enzyme_associations,
+                ReactionEnzymeAssociation,
+                field_name="enzyme_associations",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "regulatory_interactions",
+            _require_tuple_of(
+                self.regulatory_interactions,
+                CuratedRegulatoryInteraction,
+                field_name="regulatory_interactions",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "kinetic_measurements",
+            _require_tuple_of(
+                self.kinetic_measurements,
+                CuratedKineticMeasurement,
+                field_name="kinetic_measurements",
+            ),
+        )
+        object.__setattr__(
+            self,
             "organism_id",
             _clean_optional_str(self.organism_id, field_name="organism_id"),
         )
@@ -870,29 +970,138 @@ class FullNetwork:
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
 
-        compartment_ids = tuple(c.compartment_id for c in self.compartments)
-        species_ids = tuple(s.species_id for s in self.species)
-        reaction_ids = tuple(r.reaction_id for r in self.reactions)
-        _require_unique(compartment_ids, field_name="FullNetwork.compartments[].compartment_id")
-        _require_unique(species_ids, field_name="FullNetwork.species[].species_id")
-        _require_unique(reaction_ids, field_name="FullNetwork.reactions[].reaction_id")
+        _require_unique(
+            tuple(c.compartment_id for c in self.compartments),
+            field_name="FullNetwork.compartments[].compartment_id",
+        )
+        _require_unique(
+            tuple(s.species_id for s in self.species),
+            field_name="FullNetwork.species[].species_id",
+        )
+        _require_unique(
+            tuple(r.reaction_id for r in self.reactions),
+            field_name="FullNetwork.reactions[].reaction_id",
+        )
+        _require_unique(
+            tuple(e.association_id for e in self.enzyme_associations),
+            field_name="FullNetwork.enzyme_associations[].association_id",
+        )
+        _require_unique(
+            tuple(r.id for r in self.regulatory_interactions),
+            field_name="FullNetwork.regulatory_interactions[].id",
+        )
+        _require_unique(
+            tuple(k.id for k in self.kinetic_measurements),
+            field_name="FullNetwork.kinetic_measurements[].id",
+        )
 
-        compartment_id_set = set(compartment_ids)
-        for species in self.species:
-            if species.compartment_id not in compartment_id_set:
+        _validate_full_network_references(self)
+
+
+def _validate_full_network_references(network: FullNetwork) -> None:
+    """Every internal cross-reference in ``network`` must resolve. See ``FullNetwork``.
+
+    A module-level function, mirroring
+    ``_validate_model_specification_references`` -- kept out of
+    ``__post_init__`` purely for readability, never called elsewhere.
+
+    **Scoped, not exhaustive** (Increment 2): ``FullNetwork`` models
+    compartments/species/reactions as first-class entities, but not
+    proteins, enzyme complexes, genes, organisms, or publications --
+    ``enzyme_associations[].protein_id``/``.complex_id``,
+    ``kinetic_measurements[].protein_id``/``.complex_id``/
+    ``.organism_id``/``.publication_id``, and any
+    ``regulatory_interactions[]`` entity of a type other than
+    ``"reaction"``/``"compound"`` are therefore never referentially
+    validated here -- there is nothing in ``FullNetwork`` to validate them
+    against. This is a disclosed limitation
+    (``docs/05_whole_network_assembly.md``), not an oversight: inventing a
+    check ``FullNetwork`` cannot actually perform would be worse than
+    leaving it undone.
+    """
+    compartment_ids = {c.compartment_id for c in network.compartments}
+    species_ids = {s.species_id for s in network.species}
+    reaction_ids = {r.reaction_id for r in network.reactions}
+    enzyme_association_ids = {e.association_id for e in network.enzyme_associations}
+    regulatory_interaction_ids = {r.id for r in network.regulatory_interactions}
+    compound_ids = {
+        s.source_compound_id for s in network.species if s.source_compound_id is not None
+    }
+
+    for species in network.species:
+        if species.compartment_id not in compartment_ids:
+            raise ValueError(
+                f"FullNetwork species {species.species_id!r} references undefined "
+                f"compartment {species.compartment_id!r}"
+            )
+
+    for reaction in network.reactions:
+        for participant in reaction.participants:
+            if participant.species_id not in species_ids:
                 raise ValueError(
-                    f"FullNetwork species {species.species_id!r} references undefined "
-                    f"compartment {species.compartment_id!r}"
+                    f"FullNetwork reaction {reaction.reaction_id!r} references undefined "
+                    f"species {participant.species_id!r}"
                 )
+        _require_known(
+            reaction.enzyme_association_ids,
+            enzyme_association_ids,
+            field_name=f"reaction {reaction.reaction_id}.enzyme_association_ids",
+        )
+        _require_known(
+            reaction.regulatory_interaction_ids,
+            regulatory_interaction_ids,
+            field_name=f"reaction {reaction.reaction_id}.regulatory_interaction_ids",
+        )
 
-        species_id_set = set(species_ids)
-        for reaction in self.reactions:
-            for participant in reaction.participants:
-                if participant.species_id not in species_id_set:
-                    raise ValueError(
-                        f"FullNetwork reaction {reaction.reaction_id!r} references undefined "
-                        f"species {participant.species_id!r}"
-                    )
+    for association in network.enzyme_associations:
+        if association.reaction_id not in reaction_ids:
+            raise ValueError(
+                f"FullNetwork enzyme association {association.association_id!r} references "
+                f"undefined reaction {association.reaction_id!r}"
+            )
+
+    for regulation in network.regulatory_interactions:
+        _require_regulation_endpoint_known(
+            regulation.target_type, regulation.target_id, reaction_ids, compound_ids, regulation.id
+        )
+        _require_regulation_endpoint_known(
+            regulation.regulator_type,
+            regulation.regulator_id,
+            reaction_ids,
+            compound_ids,
+            regulation.id,
+        )
+
+
+def _require_regulation_endpoint_known(
+    entity_type: str,
+    entity_id: str | None,
+    reaction_ids: set[str],
+    compound_ids: set[str],
+    regulation_id: str,
+) -> None:
+    """Validate one regulation endpoint (regulator or target) only when its type is resolvable.
+
+    Only ``"reaction"`` (against ``FullNetwork.reactions``) and
+    ``"compound"`` (against the compound ids ``FullNetwork.species`` was
+    derived from) are checked -- see
+    ``_validate_full_network_references``'s own docstring for why every
+    other entity type (``"protein"``, ``"gene"``, ...) is left unchecked
+    rather than rejected or guessed at.
+    """
+    if entity_id is None:
+        return
+    normalized_type = entity_type.strip().lower() if entity_type else ""
+    if normalized_type == "reaction" and entity_id not in reaction_ids:
+        raise ValueError(
+            f"FullNetwork regulatory interaction {regulation_id!r} references undefined "
+            f"reaction {entity_id!r}"
+        )
+    if normalized_type == "compound" and entity_id not in compound_ids:
+        raise ValueError(
+            f"FullNetwork regulatory interaction {regulation_id!r} references undefined "
+            f"compound {entity_id!r}"
+        )
 
 
 # =================================================================================================
@@ -1810,6 +2019,7 @@ __all__ = [
     "CuratedCompound",
     "CuratedConfidenceSummary",
     "CuratedEvidence",
+    "CuratedKineticMeasurement",
     "CuratedReaction",
     "CuratedReactionEnzymeAssociation",
     "CuratedReactionParticipant",
@@ -1828,6 +2038,7 @@ __all__ = [
     "ParameterSource",
     "ParameterSpecification",
     "ParticipantRole",
+    "ReactionEnzymeAssociation",
     "ReactionParticipantSpecification",
     "ReactionSpecification",
     "SpeciesSpecification",
