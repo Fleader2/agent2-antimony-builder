@@ -326,6 +326,22 @@ This increment does not begin Increment 3. No `KineticLawSpecification`,
 `ParameterSpecification`, `BoundaryAssessment`, `ModuleSpecification`, or
 Antimony artifact is ever constructed by anything in `app.agent2.network`.
 
+## 17. Richer handoff acknowledged, not consumed (Agent 1.x Increment B)
+
+Agent 1's handoff gained `enzyme_states`/`enzyme_modifications`/
+`allosteric_interactions`/`enzyme_state_transitions`, plus
+`CuratedKineticMeasurement.enzyme_state_id`
+(`docs/02_agent1_handoff_contract.md` §4B). `assemble_full_network` was
+**not** modified to read or attach any of them -- `FullNetwork` already
+preserves `CuratedKineticMeasurement` unchanged (§11), so
+`enzyme_state_id` passes through automatically wherever a kinetic
+measurement already did, but no new field was added to `FullNetwork` for
+the four new curated types, since nothing in this package's own behavior
+needed to change to remain correct. Agent 2's future Reaction
+Characterization stage will be the one to map a `CuratedEnzymeState` onto
+a distinct model species -- not implemented here, and not begun by this
+note.
+
 ---
 
 > Increment 2 assembles the complete structural network. It does not

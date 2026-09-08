@@ -62,6 +62,16 @@ increment.
 | `provenance` | Represented via `evidence`'s own publication/quoted-support fields plus `confidence_summaries` (there is no separate top-level "provenance" field in Agent 1's actual `Agent1CuratedKnowledgeView`). | That every reaction/compound is directly evidence-linked — only claims carry evidence in Agent 1 v1. | Absence of evidence for a given claim is possible and must be preserved, not backfilled. | See `evidence`/`confidence_summaries`. |
 | `limitations` | A non-empty tuple of plain-text, human-readable disclosures (e.g. regulation incompleteness, cofactor non-classification). | That this list is exhaustive of every limitation that could ever matter to Agent 2 — read it, but do not treat its absence of an item as a guarantee of completeness. | Always present, per Agent 1's own contract; represented as an empty tuple only if Agent 1 ever ships with none. | n/a |
 
+## 4B. Enzyme regulatory states (Agent 1.x Increment B)
+
+| Field | Agent 2 may assume | Agent 2 must not assume | Missing information | Confidence/provenance |
+|---|---|---|---|---|
+| `enzyme_states` | Zero or more `CuratedEnzymeState` entries, each naming exactly one of `protein_id`/`complex_id` and a `state_type` (`BASE`/`MODIFIED`/`ALLOSTERICALLY_BOUND`/`OTHER`). | That a state's `id` bears any relationship to the protein/complex it names, or that this list is exhaustive of every biologically real state — only curated ones appear. | Empty tuple if none for this scope. | `source`/`source_id`, when present, name the connector-ingested source. |
+| `enzyme_modifications` | Each entry names an `enzyme_state_id` and a `modification_type` (`PHOSPHORYLATION`/`ACETYLATION`/`CYSTEINYLATION`/`UBIQUITINATION`/`METHYLATION`/`OTHER`); `residue`/`residue_position`/`stoichiometry` are present only when the source reported them. | That every state has a modification, or that residue/position is ever inferred when absent. | Empty tuple if none. | n/a |
+| `allosteric_interactions` | Each entry names an `enzyme_state_id`, a resolved `ligand_compound_id`, and a qualitative `effect` (`ACTIVATOR`/`INHIBITOR`/`MODULATOR`/`UNKNOWN`). | That `effect` implies a specific numeric kinetic consequence — the quantitative effect, if curated, is a separate, state-specific `CuratedKineticMeasurement` sharing the same `enzyme_state_id`, never this record itself. | Empty tuple if none. | n/a |
+| `enzyme_state_transitions` | Each entry names a `from_state_id`, `to_state_id`, and `transition_type` (`MODIFICATION`/`DEMODIFICATION`/`LIGAND_BINDING`/`LIGAND_RELEASE`/`OTHER`); `reaction_id` is present only when Agent 1's own reaction-curation pipeline already resolves it. | That every transition names a reaction, or that Agent 1 ever invents one. | Empty tuple if none. | n/a |
+| `CuratedKineticMeasurement.enzyme_state_id` | `None` unless the measurement was specifically reported for one defined state. | That a state-specific measurement applies to the parent protein/complex generally, or to any other state of it. | `None` means not state-specific, or not yet resolved to one. | Same as `kinetic_measurements` above. |
+
 ## 5. General assumptions Agent 2 may make
 
 * Every id is a stable, opaque identifier (a UUID or string) — Agent 2
@@ -141,5 +151,16 @@ Agent 1 produces or Agent 2 receives from Agent 1.
   source and must use `ParameterSource.DEFAULT`/`PLACEHOLDER` -- never a
   fabricated `CURATED` value merely because a matching
   `CuratedKineticMeasurement` exists.
+* **Enzyme regulatory states (Agent 1.x Increment B).**
+  `AGENT1_HANDOFF_VERSION` was bumped "1.1" -> "1.2".
+  `enzyme_states`/`enzyme_modifications`/`allosteric_interactions`/
+  `enzyme_state_transitions` (§4B) and `CuratedKineticMeasurement.enzyme_state_id`
+  now mirror Agent 1's identically-named fields exactly. Available as
+  input data only -- nothing in this repository maps a `CuratedEnzymeState`
+  onto a model species, and Whole-Network Assembly (Increment 2) was not
+  modified to consume these fields. Agent 2's future Reaction
+  Characterization stage will consume these state distinctions (a state
+  may become a distinct model species with its own kinetic-law
+  applicability and parameters) -- not implemented here.
 
 None of these are required for Increment 1.

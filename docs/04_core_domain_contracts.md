@@ -361,6 +361,16 @@ construction is unaffected) plus three new reference-integrity checks, and
 a new domain type, `ReactionEnzymeAssociation`, was introduced (§2A).
 `AGENT1_HANDOFF_VERSION`/`BOUNDARY_POLICY_VERSION` are unchanged.
 
+**Agent 1.x Increment B** (later than the increment this file otherwise
+describes) bumped `AGENT1_HANDOFF_VERSION` "1.1" -> "1.2" and added
+`enzyme_states`/`enzyme_modifications`/`allosteric_interactions`/
+`enzyme_state_transitions` to `Agent1CuratedKnowledgeViewContract`, plus
+`enzyme_state_id` to `CuratedKineticMeasurement` (see
+`docs/02_agent1_handoff_contract.md` §4B, §9) -- available input data
+only. `AGENT2_CONTRACT_VERSION` did not change: none of this file's own
+output contracts changed shape, and Whole-Network Assembly was not
+modified to consume the new fields (`docs/05_whole_network_assembly.md`).
+
 ## 24. Scope boundaries
 
 As of Increment 1, no behavior beyond validation, identity/reference

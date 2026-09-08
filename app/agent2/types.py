@@ -355,6 +355,11 @@ class CuratedKineticMeasurement:
     confidence_score: Decimal | None = None
     confidence_class: str | None = None
     notes: str | None = None
+    #: Agent 1.x Increment B (``AGENT1_HANDOFF_VERSION`` "1.1" -> "1.2").
+    #: ``None`` unless this measurement was specifically reported for one
+    #: defined ``CuratedEnzymeState`` -- never applicable to the parent
+    #: protein/complex generally, or to any other state, when set.
+    enzyme_state_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
@@ -387,6 +392,155 @@ class CuratedKineticMeasurement:
 
 
 @dataclass(frozen=True, slots=True)
+class CuratedEnzymeState:
+    """One curated enzyme regulatory state, exactly as curated by Agent 1.
+
+    Added in Agent 1.x Increment B (``AGENT1_HANDOFF_VERSION`` "1.1" ->
+    "1.2"). Exactly one of ``protein_id``/``complex_id`` is expected
+    (mirrors ``CuratedReactionEnzymeAssociation``'s own "expected, never
+    enforced" stance -- Agent 1's own row carries a real database
+    ``CHECK``, so a violation here would mean the handoff itself is
+    malformed, not something this decoupled mirror re-validates). Never
+    conflates the underlying protein/complex identity with the state's own
+    identity -- see ``docs/02_agent1_handoff_contract.md`` §4B.
+    """
+
+    id: str
+    state_type: str
+    protein_id: str | None = None
+    complex_id: str | None = None
+    state_label: str | None = None
+    compartment_id: str | None = None
+    active_state: bool | None = None
+    source: str | None = None
+    source_id: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self, "state_type", _require_non_empty_str(self.state_type, field_name="state_type")
+        )
+        object.__setattr__(
+            self,
+            "active_state",
+            _require_bool_or_none(self.active_state, field_name="active_state"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedEnzymeModification:
+    """One curated covalent/post-translational modification, exactly as curated by Agent 1.
+
+    Added in Agent 1.x Increment B. Always attached to one
+    ``CuratedEnzymeState`` via ``enzyme_state_id``.
+    """
+
+    id: str
+    enzyme_state_id: str
+    modification_type: str
+    residue: str | None = None
+    residue_position: int | None = None
+    site_label: str | None = None
+    modifying_compound_id: str | None = None
+    stoichiometry: Decimal | None = None
+    source: str | None = None
+    source_id: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self,
+            "enzyme_state_id",
+            _require_non_empty_str(self.enzyme_state_id, field_name="enzyme_state_id"),
+        )
+        object.__setattr__(
+            self,
+            "modification_type",
+            _require_non_empty_str(self.modification_type, field_name="modification_type"),
+        )
+        if self.stoichiometry is not None and not isinstance(self.stoichiometry, Decimal):
+            raise TypeError(
+                f"CuratedEnzymeModification.stoichiometry must be a Decimal or None, "
+                f"got {self.stoichiometry!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedAllostericInteraction:
+    """One curated allosteric interaction, exactly as curated by Agent 1.
+
+    Added in Agent 1.x Increment B. ``effect`` is the curated *qualitative*
+    regulatory relationship only -- the quantitative kinetic consequence,
+    if any, is a separate, state-specific ``CuratedKineticMeasurement``
+    sharing the same ``enzyme_state_id`` (see that type's own docstring;
+    the two are never conflated). ``ligand_compound_id`` is required --
+    Agent 1 never hands off an allosteric interaction with an unresolved
+    ligand.
+    """
+
+    id: str
+    enzyme_state_id: str
+    ligand_compound_id: str
+    effect: str
+    site_label: str | None = None
+    mechanism: str | None = None
+    source: str | None = None
+    source_id: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self,
+            "enzyme_state_id",
+            _require_non_empty_str(self.enzyme_state_id, field_name="enzyme_state_id"),
+        )
+        object.__setattr__(
+            self,
+            "ligand_compound_id",
+            _require_non_empty_str(self.ligand_compound_id, field_name="ligand_compound_id"),
+        )
+        object.__setattr__(self, "effect", _require_non_empty_str(self.effect, field_name="effect"))
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedEnzymeStateTransition:
+    """One curated transition between two enzyme regulatory states, exactly as curated by Agent 1.
+
+    Added in Agent 1.x Increment B. ``reaction_id`` is ``None`` unless
+    Agent 1's own reaction-curation pipeline already resolves the
+    transition -- never fabricated.
+    """
+
+    id: str
+    from_state_id: str
+    to_state_id: str
+    transition_type: str
+    reaction_id: str | None = None
+    source: str | None = None
+    source_id: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self,
+            "from_state_id",
+            _require_non_empty_str(self.from_state_id, field_name="from_state_id"),
+        )
+        object.__setattr__(
+            self, "to_state_id", _require_non_empty_str(self.to_state_id, field_name="to_state_id")
+        )
+        object.__setattr__(
+            self,
+            "transition_type",
+            _require_non_empty_str(self.transition_type, field_name="transition_type"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Agent1CuratedKnowledgeViewContract:
     """Agent 2's local, decoupled representation of the Agent 1 handoff.
 
@@ -405,6 +559,17 @@ class Agent1CuratedKnowledgeViewContract:
     ``ParameterSpecification`` by anything in this repository (that mapping
     decision remains unimplemented Agent 2 behavior). This closes the
     "known handoff gap" this docstring previously disclosed for Increment 1.
+
+    **Enzyme regulatory states** (Agent 1.x Increment B,
+    ``AGENT1_HANDOFF_VERSION`` "1.1" -> "1.2"): ``enzyme_states``/
+    ``enzyme_modifications``/``allosteric_interactions``/
+    ``enzyme_state_transitions`` are now available as curated input, plus
+    ``CuratedKineticMeasurement.enzyme_state_id`` for state-specific
+    measurements -- see §4B of ``docs/02_agent1_handoff_contract.md``.
+    Input data only, same as kinetic measurements: nothing in this
+    repository maps a ``CuratedEnzymeState`` onto a model species, and
+    Whole-Network Assembly (Increment 2) was not modified to consume these
+    fields (see ``docs/05_whole_network_assembly.md``).
     """
 
     contract_version: str
@@ -416,6 +581,10 @@ class Agent1CuratedKnowledgeViewContract:
     reaction_enzyme_associations: tuple[CuratedReactionEnzymeAssociation, ...] = ()
     regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
+    enzyme_states: tuple[CuratedEnzymeState, ...] = ()
+    enzyme_modifications: tuple[CuratedEnzymeModification, ...] = ()
+    allosteric_interactions: tuple[CuratedAllostericInteraction, ...] = ()
+    enzyme_state_transitions: tuple[CuratedEnzymeStateTransition, ...] = ()
     claims: tuple[CuratedClaim, ...] = ()
     evidence: tuple[CuratedEvidence, ...] = ()
     confidence_summaries: tuple[CuratedConfidenceSummary, ...] = ()
@@ -2014,10 +2183,14 @@ __all__ = [
     "BoundaryParameterBasis",
     "CompartmentSourceScope",
     "CompartmentSpecification",
+    "CuratedAllostericInteraction",
     "CuratedClaim",
     "CuratedCompartment",
     "CuratedCompound",
     "CuratedConfidenceSummary",
+    "CuratedEnzymeModification",
+    "CuratedEnzymeState",
+    "CuratedEnzymeStateTransition",
     "CuratedEvidence",
     "CuratedKineticMeasurement",
     "CuratedReaction",

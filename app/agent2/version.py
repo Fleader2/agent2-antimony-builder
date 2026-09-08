@@ -45,12 +45,25 @@ reference-integrity validation grew three new checks -- an output-contract
 shape change per this file's own bump criterion. ``AGENT1_HANDOFF_VERSION``/
 ``BOUNDARY_POLICY_VERSION`` are unchanged -- the Agent 1 handoff shape did
 not change, and no boundary heuristic rule set exists yet.
+
+``AGENT1_HANDOFF_VERSION`` was bumped from ``"1.1"`` to ``"1.2"`` for
+Agent 1.x Increment B: Agent 1's own ``Agent1CuratedKnowledgeView`` gained
+``enzyme_states``/``enzyme_modifications``/``allosteric_interactions``/
+``enzyme_state_transitions`` and ``enzyme_state_id`` on
+``CuratedKineticMeasurement`` (``AGENT1_CONTRACT_VERSION`` "1.1" -> "1.2"
+in the Agent 1 repository), so this repository's local
+``Agent1CuratedKnowledgeViewContract`` and ``CuratedKineticMeasurement``
+were extended to match exactly (see `docs/02_agent1_handoff_contract.md`).
+``AGENT2_CONTRACT_VERSION`` is unchanged -- no field of Agent 2's own
+output contracts changed shape, and Whole-Network Assembly
+(``app.agent2.network``) was not modified to consume the new fields; only
+the *input* handoff contract gained fields.
 """
 
 from __future__ import annotations
 
 AGENT2_CONTRACT_VERSION = "0.3"
-AGENT1_HANDOFF_VERSION = "1.1"
+AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v1"
 
 __all__ = [
