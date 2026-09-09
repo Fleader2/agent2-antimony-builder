@@ -165,13 +165,110 @@ established for ``app.agent2.kinetics``/``app.agent2.characterization``).
 rule set (kinetic-law-type-to-parameter-slot mapping, the curated-
 measurement recognition vocabulary, the multiple-measurement agreement
 policy).
+
+``BOUNDARY_POLICY_VERSION`` is **retained** at ``"boundary-v1"`` for
+Increment 6 (Heuristic Boundary Assessment) -- not bumped. It was seeded
+at that value back in Increment 1, before any boundary-heuristic rule set
+existed, specifically so the first real rule set would have somewhere
+stable to record its own version from the start (see this file's own
+bullet list above). Increment 6 is that first real rule set, so
+``"boundary-v1"`` is simply now actually produced by
+``app.agent2.boundaries``, exactly as originally anticipated -- not a new
+version superseding an old one. ``AGENT2_CONTRACT_VERSION`` is
+**unchanged** at ``"0.5"``: inspection found `BoundaryAssessment`/
+``BoundaryLikelihood``/``BoundaryParameterBasis`` (``app.agent2.types``)
+already complete for this increment's needs (Increment 6 instructions,
+Step 34 -- "reuse... do not redesign unless a genuine contradiction
+exists"), so no field of any ``app.agent2.types`` type changed shape. The
+new ``BoundaryAssessmentSet``/``RuleOutcome``/``RuleDirection``/
+``RuleStrength``/``BoundaryReasonCode`` types live entirely in
+``app.agent2.boundaries``, outside ``app.agent2.types``, consistent with
+the same narrower reading already established for
+``app.agent2.kinetics``/``app.agent2.characterization``.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+
+``BOUNDARY_POLICY_VERSION`` was bumped from ``"boundary-v1"`` to
+``"boundary-v2"`` in the Increment 6 pre-commit scientific revision that
+separated biological modularity from parameterization convenience (see
+``docs/09_heuristic_boundary_assessment.md`` §10-11 for the full
+rationale). This is a substantial rule-set *behavior* change: three
+reason codes (``PARAMETER_SOURCE_DISCONTINUITY``,
+``PLACEHOLDER_PARAMETER_REGION``, ``PARAMETERIZATION_CONTINUITY``) were
+retired to permanent ``NEUTRAL``; three structural-proxy rules
+(``TRANSPORT_INTERFACE``, ``BRANCH_POINT``, ``CONVERGENCE_POINT``) had
+their strength ceilings lowered; ``KINETIC_LAW_DISCONTINUITY``'s ceiling
+was lowered from ``STRONG`` to ``MODERATE``; ``STRONG_LOCAL_CONTINUITY``
+was corrected to no longer treat mutual ``UNASSIGNED`` kinetic-law types
+as a shared law; four new functional-modularity rules were added
+(``SHARED_RESOURCE_COUPLING``, ``NEGATIVE_FEEDBACK_ISOLATION``,
+``FEEDBACK_CROSSING_BOUNDARY``, ``IRREVERSIBLE_OUTPUT_ISOLATION``); three
+deferred-principle placeholder rules were added (always ``NEUTRAL``); and
+``policy.combine_outcomes``'s ``VERY_HIGH`` condition was redefined to
+require at least one ``STRONG`` supporting signal (previously two)
+together with no ``MODERATE``-or-stronger opposition. Same inputs can now
+produce a different assessment, so the policy version is bumped even
+though this entire increment remains uncommitted -- consistent with this
+file's own established precedent (the
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` ``v1``->``v2`` bump above): the
+version marker tracks behavior, not git history.
+``AGENT2_CONTRACT_VERSION`` is **not** bumped for this revision: no field
+of any ``app.agent2.types`` type changed shape --
+``BoundaryAssessment``/``BoundaryLikelihood``/``BoundaryParameterBasis``
+remain exactly as Increment 6 originally left them; only the rule catalog
+in ``app.agent2.boundaries`` changed. ``AGENT1_HANDOFF_VERSION`` is
+unchanged -- Agent 1 was not modified.
+
+``BOUNDARY_POLICY_VERSION`` was bumped from ``"boundary-v2"`` to
+``"boundary-v3"`` in the Increment 6 feedback-heuristic revision:
+nested feedback loops are ordinary biology, and an intrinsic loop
+confined to one side of a candidate interface (what makes that side a
+module) is a fundamentally different kind of evidence than an extrinsic
+loop crossing the interface (typically module-regulating communication
+between two already-independent modules). ``NEGATIVE_FEEDBACK_ISOLATION``
+was renamed ``INTRINSIC_FEEDBACK_CONFINEMENT`` and its direction flipped
+from support to **oppose** (confined feedback argues for preserving that
+side intact, not for cutting at its edge). ``FEEDBACK_CROSSING_BOUNDARY``
+was renamed ``EXTRINSIC_FEEDBACK_CROSSING_DEFERRED`` and now always
+evaluates ``NEUTRAL`` -- Agent 2 has no dynamic-simulation capability
+(loop gain, response time, relaxation time, retroactivity, buffering
+strength, condition-dependence) with which to confirm a boundary-crossing
+loop is direct, strong, constitutive, local, and minimally regulated, so
+it must not infer that judgment. Same inputs can now produce a different
+assessment for any candidate touching a curated regulatory interaction,
+so the policy version is bumped again even though this entire increment
+remains uncommitted -- the version marker tracks behavior, not git
+history. ``policy.combine_outcomes`` itself (the categorical decision
+table) is **unchanged** by this revision -- only which rules feed it
+changed. ``AGENT2_CONTRACT_VERSION`` is **not** bumped: no field of any
+``app.agent2.types`` type changed shape; the renamed/redirected rules
+live entirely in ``app.agent2.boundaries``. ``AGENT1_HANDOFF_VERSION`` is
+unchanged -- Agent 1 was not modified.
+
+``BOUNDARY_POLICY_VERSION`` is **retained at ``"boundary-v3"``** (not
+bumped) for the subsequent terminology-only revision that renamed
+``INTRINSIC_FEEDBACK_CONFINEMENT``/``intrinsic_feedback_confinement`` to
+``INTRINSIC_FEEDBACK_ISOLATION``/``intrinsic_feedback_isolation``
+(see ``docs/09_heuristic_boundary_assessment.md`` §24) and added a
+heuristic-class taxonomy to that document (§11a). Unlike every prior
+``BOUNDARY_POLICY_VERSION`` bump above, there is no behavior to track
+here: the deterministic trigger condition, direction (``OPPOSE``), and
+strength (``STRONG``) of the renamed rule are byte-identical, and
+``policy.combine_outcomes`` was not touched. The only externally-visible
+change is that the string ``"INTRINSIC_FEEDBACK_CONFINEMENT"`` no longer
+appears in any ``BoundaryAssessment.opposing_reason_codes`` tuple and
+``"INTRINSIC_FEEDBACK_ISOLATION"`` appears in its place under the
+identical firing condition -- a vocabulary rename, not a policy change.
+Per this file's own bump criterion ("bump a constant only when the shape
+or policy it names actually changes"), no bump is warranted.
+``AGENT2_CONTRACT_VERSION``/``AGENT1_HANDOFF_VERSION`` are unchanged for
+the same reasons as the entry above.
 """
 
 from __future__ import annotations
 
 AGENT2_CONTRACT_VERSION = "0.5"
 AGENT1_HANDOFF_VERSION = "1.2"
-BOUNDARY_POLICY_VERSION = "boundary-v1"
+BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
