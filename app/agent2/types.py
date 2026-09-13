@@ -1766,6 +1766,25 @@ class ModuleSpecification:
     module is never defined independently of the ``BoundaryAssessment``\\ s
     that justified it. Requires at least one reaction (an empty module is
     not meaningful). Every id-bearing tuple is internally unique.
+
+    **Increment 7 (Module Decomposition)** added
+    ``kinetic_law_assignment_ids``, ``compartment_ids``,
+    ``enzyme_state_ids``, ``interface_species_ids``, and
+    ``boundary_interface_ids`` -- all references only, never duplicated
+    data (``docs/10_module_decomposition.md`` §6). ``kinetic_law_ids``
+    (Increment 1, referencing the not-yet-produced
+    ``KineticLawSpecification.kinetic_law_id`` namespace) is deliberately
+    left untouched and unpopulated by Increment 7: the kinetic-law
+    decisions Increment 7 actually consumes are
+    ``app.agent2.kinetics.types.KineticLawAssignment.assignment_id``
+    values, a distinct id namespace, hence the separate
+    ``kinetic_law_assignment_ids`` field rather than conflating the two
+    (``docs/10_module_decomposition.md`` §5). ``boundary_interface_ids``
+    references ``InterModuleBoundaryInterface.interface_id`` values on the
+    owning ``ModuleDecomposition.interfaces`` -- a different concept from
+    the pre-existing, per-species ``boundary_interfaces``
+    (``ModuleBoundaryInterface``), which remains reserved for a future
+    increment's standalone-Antimony boundary-condition declarations.
     """
 
     module_id: str
@@ -1774,7 +1793,12 @@ class ModuleSpecification:
     species_ids: tuple[str, ...] = ()
     parameter_ids: tuple[str, ...] = ()
     kinetic_law_ids: tuple[str, ...] = ()
+    kinetic_law_assignment_ids: tuple[str, ...] = ()
+    compartment_ids: tuple[str, ...] = ()
+    enzyme_state_ids: tuple[str, ...] = ()
+    interface_species_ids: tuple[str, ...] = ()
     boundary_interfaces: tuple[ModuleBoundaryInterface, ...] = ()
+    boundary_interface_ids: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
     source_boundary_ids: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
@@ -1789,12 +1813,27 @@ class ModuleSpecification:
             "species_ids",
             "parameter_ids",
             "kinetic_law_ids",
+            "kinetic_law_assignment_ids",
+            "compartment_ids",
+            "enzyme_state_ids",
+            "interface_species_ids",
+            "boundary_interface_ids",
             "assumptions",
             "source_boundary_ids",
             "provenance_refs",
         ):
             object.__setattr__(self, name, _require_str_tuple(getattr(self, name), field_name=name))
-        for name in ("reaction_ids", "species_ids", "parameter_ids", "kinetic_law_ids"):
+        for name in (
+            "reaction_ids",
+            "species_ids",
+            "parameter_ids",
+            "kinetic_law_ids",
+            "kinetic_law_assignment_ids",
+            "compartment_ids",
+            "enzyme_state_ids",
+            "interface_species_ids",
+            "boundary_interface_ids",
+        ):
             _require_unique(getattr(self, name), field_name=f"ModuleSpecification.{name}")
         if not self.reaction_ids:
             raise ValueError(
@@ -1821,13 +1860,92 @@ class ModuleSpecification:
 
 
 @dataclass(frozen=True, slots=True)
+class InterModuleBoundaryInterface:
+    """One explicit interface where two modules of one ``ModuleDecomposition`` meet.
+
+    **Introduced in Increment 7 (Module Decomposition).** Distinct from
+    ``ModuleBoundaryInterface`` (Increment 1), which records one
+    per-species boundary-condition declaration *within* a single module
+    for a future standalone-Antimony variant -- this type instead records
+    the *pairwise* relationship between two modules at one boundary
+    interface (Increment 7 instructions, Step 11: "upstream module,
+    downstream module, shared species, boundary id, boundary likelihood,
+    assumptions"). Never invents a boundary condition: ``assumptions`` may
+    disclose why the interface exists, never a fabricated flux or
+    concentration. ``shared_species_ids`` are references to
+    ``FullNetwork.species`` only -- never duplicated or ghost species
+    (``docs/10_module_decomposition.md`` §11-12).
+    """
+
+    interface_id: str
+    upstream_module_id: str
+    downstream_module_id: str
+    boundary_id: str
+    boundary_likelihood: BoundaryLikelihood
+    shared_species_ids: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "interface_id",
+            _require_non_empty_str(self.interface_id, field_name="interface_id"),
+        )
+        object.__setattr__(
+            self,
+            "upstream_module_id",
+            _require_non_empty_str(self.upstream_module_id, field_name="upstream_module_id"),
+        )
+        object.__setattr__(
+            self,
+            "downstream_module_id",
+            _require_non_empty_str(self.downstream_module_id, field_name="downstream_module_id"),
+        )
+        if self.upstream_module_id == self.downstream_module_id:
+            raise ValueError(
+                "InterModuleBoundaryInterface.upstream_module_id and .downstream_module_id must "
+                f"differ -- an interface only exists between two different modules, got "
+                f"{self.upstream_module_id!r} for both"
+            )
+        object.__setattr__(
+            self, "boundary_id", _require_non_empty_str(self.boundary_id, field_name="boundary_id")
+        )
+        if not isinstance(self.boundary_likelihood, BoundaryLikelihood):
+            raise TypeError(
+                "InterModuleBoundaryInterface.boundary_likelihood must be a BoundaryLikelihood, "
+                f"got {self.boundary_likelihood!r}"
+            )
+        object.__setattr__(
+            self,
+            "shared_species_ids",
+            _require_str_tuple(self.shared_species_ids, field_name="shared_species_ids"),
+        )
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ModuleDecomposition:
     """The full network's partition into modules, as of one boundary-policy version.
 
     References modules/boundaries by id -- never duplicates them.
     ``policy_version`` prevents a decomposition produced under one
     heuristic rule set from being silently reinterpreted under a later,
-    different one. No partitioning algorithm exists in this increment.
+    different one.
+
+    **Increment 7 (Module Decomposition)** introduced the first real
+    partitioning algorithm and added three fields: ``interfaces`` (every
+    ``InterModuleBoundaryInterface`` where two of this decomposition's
+    modules meet), ``candidate_boundary_ids`` (every boundary this policy
+    deliberately did *not* cut but also did not discard -- `MEDIUM`
+    evidence preserved for a future decomposition, never silently
+    dropped, ``docs/10_module_decomposition.md`` §9), and ``explanation``
+    (a deterministic, template-based summary of how this decomposition
+    was produced, mirroring ``BoundaryAssessment.explanation``).
+    ``boundary_assessment_ids`` records every boundary this policy
+    actually *selected* as a cut (`HIGH`/`VERY_HIGH`) -- distinct from
+    ``candidate_boundary_ids``, which are explicitly not cuts.
     """
 
     decomposition_id: str
@@ -1836,8 +1954,11 @@ class ModuleDecomposition:
     created_from_network_id: str
     module_ids: tuple[str, ...] = ()
     boundary_assessment_ids: tuple[str, ...] = ()
+    candidate_boundary_ids: tuple[str, ...] = ()
+    interfaces: tuple[InterModuleBoundaryInterface, ...] = ()
     assumptions: tuple[str, ...] = ()
     parameter_basis_summary: BoundaryParameterBasis | None = None
+    explanation: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -1858,11 +1979,37 @@ class ModuleDecomposition:
                 self.created_from_network_id, field_name="created_from_network_id"
             ),
         )
-        for name in ("module_ids", "boundary_assessment_ids", "assumptions"):
+        for name in (
+            "module_ids",
+            "boundary_assessment_ids",
+            "candidate_boundary_ids",
+            "assumptions",
+        ):
             object.__setattr__(self, name, _require_str_tuple(getattr(self, name), field_name=name))
         _require_unique(self.module_ids, field_name="ModuleDecomposition.module_ids")
         _require_unique(
             self.boundary_assessment_ids, field_name="ModuleDecomposition.boundary_assessment_ids"
+        )
+        _require_unique(
+            self.candidate_boundary_ids, field_name="ModuleDecomposition.candidate_boundary_ids"
+        )
+        overlap = set(self.boundary_assessment_ids) & set(self.candidate_boundary_ids)
+        if overlap:
+            raise ValueError(
+                "ModuleDecomposition.boundary_assessment_ids (selected cuts) and "
+                f".candidate_boundary_ids (preserved, not cut) must be disjoint, overlap: "
+                f"{sorted(overlap)}"
+            )
+        object.__setattr__(
+            self,
+            "interfaces",
+            _require_tuple_of(
+                self.interfaces, InterModuleBoundaryInterface, field_name="interfaces"
+            ),
+        )
+        _require_unique(
+            tuple(interface.interface_id for interface in self.interfaces),
+            field_name="ModuleDecomposition.interfaces[].interface_id",
         )
         if self.parameter_basis_summary is not None and not isinstance(
             self.parameter_basis_summary, BoundaryParameterBasis
@@ -1871,6 +2018,9 @@ class ModuleDecomposition:
                 "ModuleDecomposition.parameter_basis_summary must be a BoundaryParameterBasis or "
                 f"None, got {self.parameter_basis_summary!r}"
             )
+        object.__setattr__(
+            self, "explanation", _clean_optional_str(self.explanation, field_name="explanation")
+        )
 
 
 # =================================================================================================
@@ -2045,9 +2195,22 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
     ``ModelSpecification.__post_init__`` readable -- it performs no
     computation ``__post_init__`` could not, and is never called from
     anywhere else.
+
+    **Increment 7 (Module Decomposition) scope note**: ``module
+    .kinetic_law_assignment_ids`` is never validated here -- unlike
+    ``module.kinetic_law_ids`` (checked against ``spec.kinetic_laws``,
+    the ``KineticLawSpecification`` namespace), ``ModelSpecification``
+    carries no ``KineticLawAssignment`` registry to validate the
+    ``KineticLawAssignment.assignment_id`` namespace against. This is a
+    disclosed limitation, not an oversight -- mirroring
+    ``_validate_full_network_references``'s own identical "nothing to
+    validate against" precedent for fields naming an entity type
+    ``FullNetwork`` does not track.
     """
     reaction_ids = {reaction.reaction_id for reaction in spec.full_network.reactions}
     species_ids = {species.species_id for species in spec.full_network.species}
+    compartment_ids = {c.compartment_id for c in spec.full_network.compartments}
+    enzyme_state_ids = {s.id for s in spec.full_network.enzyme_states}
     kinetic_law_ids = {law.kinetic_law_id for law in spec.kinetic_laws}
     parameter_ids = {param.parameter_id for param in spec.parameters}
     module_ids = {module.module_id for module in spec.module_specifications}
@@ -2106,6 +2269,21 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
             boundary_ids,
             field_name=f"module {module.module_id}.source_boundary_ids",
         )
+        _require_known(
+            module.compartment_ids,
+            compartment_ids,
+            field_name=f"module {module.module_id}.compartment_ids",
+        )
+        _require_known(
+            module.enzyme_state_ids,
+            enzyme_state_ids,
+            field_name=f"module {module.module_id}.enzyme_state_ids",
+        )
+        _require_known(
+            module.interface_species_ids,
+            species_ids,
+            field_name=f"module {module.module_id}.interface_species_ids",
+        )
         for interface in module.boundary_interfaces:
             _require_known(
                 (interface.species_id,),
@@ -2125,11 +2303,42 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
             boundary_ids,
             field_name="module_decomposition.boundary_assessment_ids",
         )
+        _require_known(
+            decomposition.candidate_boundary_ids,
+            boundary_ids,
+            field_name="module_decomposition.candidate_boundary_ids",
+        )
         if decomposition.created_from_network_id != spec.full_network.network_id:
             raise ValueError(
                 "module_decomposition.created_from_network_id "
                 f"({decomposition.created_from_network_id!r}) must equal "
                 f"full_network.network_id ({spec.full_network.network_id!r})"
+            )
+        interface_ids = {interface.interface_id for interface in decomposition.interfaces}
+        for interface in decomposition.interfaces:
+            _require_known(
+                (interface.upstream_module_id, interface.downstream_module_id),
+                module_ids,
+                field_name=f"module_decomposition interface {interface.interface_id} module ids",
+            )
+            _require_known(
+                (interface.boundary_id,),
+                boundary_ids,
+                field_name=f"module_decomposition interface {interface.interface_id}.boundary_id",
+            )
+            _require_known(
+                interface.shared_species_ids,
+                species_ids,
+                field_name=(
+                    f"module_decomposition interface {interface.interface_id}"
+                    ".shared_species_ids"
+                ),
+            )
+        for module in spec.module_specifications:
+            _require_known(
+                module.boundary_interface_ids,
+                interface_ids,
+                field_name=f"module {module.module_id}.boundary_interface_ids",
             )
 
 

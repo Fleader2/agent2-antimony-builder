@@ -219,15 +219,33 @@ One explicit interface element required for a standalone module model.
 `SHARED`, upgraded from a free string); `direction` remains free text (no
 closed vocabulary was specified for it). Refined with `initial_value`
 (`Decimal | None`) and `unit`. Structural only -- no simulation semantics.
-Agent 2 never invents a boundary condition silently.
+Agent 2 never invents a boundary condition silently. Distinct from
+`InterModuleBoundaryInterface` (§14a, Increment 7): this type is a
+*per-species* record within one module (for a future standalone-Antimony
+variant), never a pairwise module-to-module relationship.
+
+## 14a. InterModuleBoundaryInterface
+
+**Introduced in Increment 7 (Module Decomposition).** One explicit
+interface where two modules of one `ModuleDecomposition` meet:
+`interface_id`, `upstream_module_id`, `downstream_module_id`,
+`boundary_id`, `boundary_likelihood` (`BoundaryLikelihood`, required --
+copied verbatim from the source `BoundaryAssessment`, never invented),
+`shared_species_ids`, `assumptions`. `upstream_module_id`/
+`downstream_module_id` must differ (an interface exists only between two
+different modules). See `docs/10_module_decomposition.md` §11-12.
 
 ## 15. ModuleSpecification
 
 One module: a named subset of the full network plus its boundary
-interfaces. Refined with `kinetic_law_ids` and `provenance_refs`. Requires
-at least one reaction (an empty module is not meaningful); every
-id-bearing tuple (`reaction_ids`/`species_ids`/`parameter_ids`/
-`kinetic_law_ids`) is internally unique. Always traceable to the full
+interfaces. Refined with `kinetic_law_ids` and `provenance_refs`
+(Increment 1), then with five more fields in Increment 7:
+`kinetic_law_assignment_ids`, `compartment_ids`, `enzyme_state_ids`,
+`interface_species_ids`, `boundary_interface_ids` -- see
+`docs/10_module_decomposition.md` §5 for why each is a distinct id
+namespace from its similarly-named Increment-1 sibling. Requires at
+least one reaction (an empty module is not meaningful); every id-bearing
+tuple, old and new, is internally unique. Always traceable to the full
 model via `source_boundary_ids`. One pure property:
 `has_explicit_boundary_interfaces` (`len(boundary_interfaces) > 0`) -- the
 same predicate `ModuleAntimonyArtifact` uses to decide whether a
@@ -239,9 +257,17 @@ The full network's partition into modules, as of one boundary-policy
 version. Refined with `created_from_network_id` (must equal the
 `FullNetwork.network_id` it was built from, enforced at
 `ModelSpecification` construction) and `parameter_basis_summary`
-(`BoundaryParameterBasis | None`). References modules/boundaries by id --
-never duplicates them. No partitioning algorithm exists in this
-increment.
+(`BoundaryParameterBasis | None`), then with three more fields in
+Increment 7: `candidate_boundary_ids` (`MEDIUM` boundaries preserved,
+never cut -- validated disjoint from `boundary_assessment_ids`),
+`interfaces` (every `InterModuleBoundaryInterface` where two of this
+decomposition's modules meet), and `explanation` (a deterministic
+summary string, mirroring `BoundaryAssessment.explanation`). References
+modules/boundaries by id -- never duplicates them. Increment 7
+introduced the first real partitioning algorithm: connected components
+of the reaction graph after removing every `HIGH`/`VERY_HIGH` boundary
+(`app.agent2.modules.decompose_network` -- see
+`docs/10_module_decomposition.md`).
 
 ## 17. ModelAssumption
 
@@ -285,14 +311,30 @@ Fields: `model_id`, `name`, `full_network`, `organism_id`, `kinetic_laws`,
   corresponding sets;
 * every module's `boundary_interfaces[].species_id` exists in
   `full_network.species`;
+* **(Increment 7)** every `module_specifications[].compartment_ids`/
+  `.enzyme_state_ids`/`.interface_species_ids` exist in
+  `full_network.compartments`/`.enzyme_states`/`.species`;
 * `module_decomposition.module_ids`/`.boundary_assessment_ids` (when set)
   exist among `module_specifications`/`boundary_assessments`, and
   `.created_from_network_id` equals `full_network.network_id`;
+* **(Increment 7)** `module_decomposition.candidate_boundary_ids` exists
+  among `boundary_assessments`; every
+  `module_decomposition.interfaces[].upstream_module_id`/
+  `.downstream_module_id` exists among `module_specifications`, every
+  `.boundary_id` exists among `boundary_assessments`, and every
+  `.shared_species_ids` exists among `full_network.species`; every
+  `module_specifications[].boundary_interface_ids` exists among
+  `module_decomposition.interfaces` (checked only when a decomposition
+  is present -- otherwise there is no registry to validate against, the
+  same disclosed-limitation pattern used throughout this file);
 * `kinetic_laws`/`parameters`/`module_specifications`/
   `boundary_assessments` are each internally unique by id.
 
 **Never validated here**: mass balance, graph connectivity, unit
-consistency, or conservation-law analysis. Those are Agent 3's job.
+consistency, or conservation-law analysis (Agent 3's job), and
+`module_specifications[].kinetic_law_assignment_ids` (Increment 7) --
+`ModelSpecification` carries no `KineticLawAssignment` registry to check
+that namespace against; see `docs/10_module_decomposition.md` §20/§24.
 
 ## 20. FullAntimonyArtifact
 

@@ -93,14 +93,16 @@ itself.
 > Increment 1 (Architecture and Core Contracts), Increment 2
 > (Whole-Network Assembly), Increment 3 (Reaction and Enzyme-State
 > Characterization), Increment 4 (Kinetic-Law Assignment), Increment 5
-> (Parameter Declaration / Initialization), and Increment 6 (Heuristic
-> Boundary Assessment) are implemented. See
+> (Parameter Declaration / Initialization), Increment 6 (Heuristic
+> Boundary Assessment), and Increment 7 (Module Decomposition) are
+> implemented. See
 > `docs/04_core_domain_contracts.md`, `docs/05_whole_network_assembly.md`,
 > `docs/06_reaction_enzyme_state_characterization.md`,
 > `docs/07_kinetic_law_assignment.md`,
-> `docs/08_parameter_declaration_initialization.md`, and
-> `docs/09_heuristic_boundary_assessment.md`. Next: Increment 7, Module
-> Decomposition.
+> `docs/08_parameter_declaration_initialization.md`,
+> `docs/09_heuristic_boundary_assessment.md`, and
+> `docs/10_module_decomposition.md`. Next: Increment 8, ModelSpecification
+> and Antimony Generation.
 
 ## Roadmap
 
@@ -110,7 +112,7 @@ itself.
 - **Increment 4** — Kinetic-Law Assignment (implemented)
 - **Increment 5** — Parameter Declaration / Initialization (implemented)
 - **Increment 6** — Heuristic Boundary Assessment (implemented)
-- **Increment 7** — Module Decomposition
+- **Increment 7** — Module Decomposition (implemented)
 - **Increment 8** — ModelSpecification and Antimony Generation
 - **Increment 9** — End-to-End Agent 2 Build / Syntax Contract
 
@@ -130,6 +132,7 @@ timeline or final design for increments beyond the next one.
 - `docs/07_kinetic_law_assignment.md` — Increment 4 (Kinetic-Law Assignment), implemented
 - `docs/08_parameter_declaration_initialization.md` — Increment 5 (Parameter Declaration / Initialization), implemented
 - `docs/09_heuristic_boundary_assessment.md` — Increment 6 (Heuristic Boundary Assessment), implemented
+- `docs/10_module_decomposition.md` — Increment 7 (Module Decomposition), implemented
 
 ## Repository Structure
 

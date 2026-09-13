@@ -35,6 +35,12 @@ names actually changes.
   under (e.g. which curated measurement types map to which kinetic-law
   parameter slot, the multiple-measurement agreement policy). Also a
   *behavioral rule set* version, not a data shape.
+* ``MODULE_DECOMPOSITION_POLICY_VERSION`` -- the version of the
+  deterministic module-decomposition rule set (``app.agent2.modules``) a
+  ``ModuleDecompositionSet`` was produced under (e.g. which
+  ``BoundaryLikelihood`` values cut vs. become candidates, the
+  connected-component partitioning rule). Also a *behavioral rule set*
+  version, not a data shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -262,22 +268,73 @@ Per this file's own bump criterion ("bump a constant only when the shape
 or policy it names actually changes"), no bump is warranted.
 ``AGENT2_CONTRACT_VERSION``/``AGENT1_HANDOFF_VERSION`` are unchanged for
 the same reasons as the entry above.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.5"`` to ``"0.6"`` in
+Increment 7 (Module Decomposition): ``ModuleSpecification`` gained five
+fields (``kinetic_law_assignment_ids``, ``compartment_ids``,
+``enzyme_state_ids``, ``interface_species_ids``,
+``boundary_interface_ids``), ``ModuleDecomposition`` gained three
+(``candidate_boundary_ids``, ``interfaces``, ``explanation``), and a new
+type, ``InterModuleBoundaryInterface`` (the pairwise module-to-module
+interface record -- deliberately distinct from the pre-existing,
+per-species ``ModuleBoundaryInterface``, which remains reserved for a
+future standalone-Antimony boundary-condition declaration; see
+``docs/10_module_decomposition.md`` §11), was introduced. Every new field
+has a default (``()``/``None``), so existing keyword-based construction
+of ``ModuleSpecification``/``ModuleDecomposition`` is unaffected, but
+``_validate_model_specification_references`` grew new checks for all of
+the above -- an output-contract shape change per this file's own bump
+criterion. ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not
+modified (input-only).
+``MODULE_DECOMPOSITION_POLICY_VERSION`` is introduced at
+``"module-decomposition-v1"`` for the first real module-decomposition
+rule set (`HIGH`/`VERY_HIGH` boundaries cut, `MEDIUM` preserved as
+candidates, `LOW`/`VERY_LOW` never cut, connected-component
+partitioning on the remaining graph).
+
+``MODULE_DECOMPOSITION_POLICY_VERSION`` is **retained at
+``"module-decomposition-v1"``** (not bumped) for the subsequent
+consistency revision that corrected ``InterModuleBoundaryInterface``
+creation to only ever consider selected (`HIGH`/`VERY_HIGH`)
+``BoundaryAssessment``\\ s -- a retained (`LOW`/`MEDIUM`/`VERY_LOW`)
+boundary's own two reactions are unconditionally unioned, so they can
+never end up in different final modules, making the prior code's
+broader iteration dead/impossible for anything but selected boundaries
+(see ``docs/10_module_decomposition.md`` §11/§11a). This produces
+byte-identical output to the prior code for every input -- the removed
+code path never executed for any real decomposition -- so there is no
+behavior to track: same inputs produce the same ``ModuleDecompositionSet``
+before and after. Two additional, structurally redundant defensive
+validation checks were also added to ``_validate_references`` (an
+interface's boundary must have been selected; an interface's endpoints
+must actually contain the underlying reactions), which likewise never
+reject a previously-accepted decomposition. Per this file's own bump
+criterion ("bump a constant only when the shape or policy it names
+actually changes"), no bump is warranted; per this revision's own
+explicit instruction, the first, still-uncommitted implementation is
+simply corrected before release rather than versioned as a behavior
+change. ``AGENT2_CONTRACT_VERSION`` is unchanged: no ``app.agent2.types``
+shape changed (``InterModuleBoundaryInterface``/``ModuleDecomposition``/
+``ModuleSpecification`` retain the exact fields introduced above).
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.5"
+AGENT2_CONTRACT_VERSION = "0.6"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
+MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
+    "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
 ]
