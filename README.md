@@ -94,15 +94,16 @@ itself.
 > (Whole-Network Assembly), Increment 3 (Reaction and Enzyme-State
 > Characterization), Increment 4 (Kinetic-Law Assignment), Increment 5
 > (Parameter Declaration / Initialization), Increment 6 (Heuristic
-> Boundary Assessment), and Increment 7 (Module Decomposition) are
-> implemented. See
+> Boundary Assessment), Increment 7 (Module Decomposition), and
+> Increment 8 (ModelSpecification Assembly) are implemented. See
 > `docs/04_core_domain_contracts.md`, `docs/05_whole_network_assembly.md`,
 > `docs/06_reaction_enzyme_state_characterization.md`,
 > `docs/07_kinetic_law_assignment.md`,
 > `docs/08_parameter_declaration_initialization.md`,
-> `docs/09_heuristic_boundary_assessment.md`, and
-> `docs/10_module_decomposition.md`. Next: Increment 8, ModelSpecification
-> and Antimony Generation.
+> `docs/09_heuristic_boundary_assessment.md`,
+> `docs/10_module_decomposition.md`, and
+> `docs/11_model_specification_assembly.md`. Next: Increment 9, Antimony
+> Generation.
 
 ## Roadmap
 
@@ -113,8 +114,9 @@ itself.
 - **Increment 5** — Parameter Declaration / Initialization (implemented)
 - **Increment 6** — Heuristic Boundary Assessment (implemented)
 - **Increment 7** — Module Decomposition (implemented)
-- **Increment 8** — ModelSpecification and Antimony Generation
-- **Increment 9** — End-to-End Agent 2 Build / Syntax Contract
+- **Increment 8** — ModelSpecification Assembly (implemented)
+- **Increment 9** — Antimony Generation
+- **Increment 10** — End-to-End Agent 2 Build / Syntax Contract
 
 This roadmap describes planned scope, not a commitment to a fixed
 timeline or final design for increments beyond the next one.
@@ -133,6 +135,7 @@ timeline or final design for increments beyond the next one.
 - `docs/08_parameter_declaration_initialization.md` — Increment 5 (Parameter Declaration / Initialization), implemented
 - `docs/09_heuristic_boundary_assessment.md` — Increment 6 (Heuristic Boundary Assessment), implemented
 - `docs/10_module_decomposition.md` — Increment 7 (Module Decomposition), implemented
+- `docs/11_model_specification_assembly.md` — Increment 8 (ModelSpecification Assembly), implemented
 
 ## Repository Structure
 

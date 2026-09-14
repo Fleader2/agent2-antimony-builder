@@ -41,6 +41,16 @@ names actually changes.
   ``BoundaryLikelihood`` values cut vs. become candidates, the
   connected-component partitioning rule). Also a *behavioral rule set*
   version, not a data shape.
+* ``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` -- the version of the
+  deterministic cross-artifact assembly policy
+  (``app.agent2.model_specification``) a ``ModelSpecification`` was
+  produced under (e.g. the ``KineticLawAssignment`` ->
+  ``KineticLawSpecification`` materialization rule, the
+  ``KineticLawAssignmentSource`` -> ``ParameterSource`` bridge, the
+  expression-template policy, which categories of incompleteness become
+  ``ModelAssumption`` records). Also a *behavioral rule set* version, not
+  a data shape -- distinct from ``AGENT2_CONTRACT_VERSION``, which
+  versions ``ModelSpecification``'s own shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -317,23 +327,164 @@ change. ``AGENT2_CONTRACT_VERSION`` is unchanged: no ``app.agent2.types``
 shape changed (``InterModuleBoundaryInterface``/``ModuleDecomposition``/
 ``ModuleSpecification`` retain the exact fields introduced above).
 ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+
+``AGENT2_CONTRACT_VERSION`` is **unchanged** at ``"0.6"`` for Increment 8
+(ModelSpecification Assembly): inspection found ``ModelSpecification``/
+``KineticLawSpecification``/``ParameterSpecification``/
+``ModuleSpecification``/``ModuleDecomposition`` already complete for this
+increment's needs (Increment 8 instructions' own "do not redesign
+existing contracts unless a genuine contradiction exists"). Two
+candidate extensions were considered and deliberately not made: (1)
+``KineticLawSpecification`` gained no new field for a materialized law's
+catalytic context (``enzyme_state_id``/``protein_id``/``complex_id``) --
+each catalytic context already gets its own separate
+``KineticLawSpecification`` row (never collapsed), and the context label
+itself is fully preserved as provenance text
+(``docs/11_model_specification_assembly.md`` §11-12), so a new field was
+judged not genuinely required; (2) ``ReactionSpecification`` gained no
+``kinetic_law_ids`` field for the one-reaction-to-many-laws case --
+``ModelSpecification.kinetic_laws`` is already an unrestricted flat list
+keyed by each law's own ``reaction_id``, so nothing prevents more than
+one law per reaction today, and ``FullNetwork`` (this increment's
+structural authority, never reconstructed) was left completely untouched
+(§13-14 of the same document). ``AGENT1_HANDOFF_VERSION`` is unchanged --
+Agent 1 was not modified.
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` is introduced at
+``"model-specification-v1"`` for the first real cross-artifact assembly
+policy (the ``KineticLawAssignment`` -> ``KineticLawSpecification``
+materialization rule and its ``assignment_source`` bridge, the
+expression-template policy for built-in law types, and the four
+``ModelAssumption`` categories generated deterministically from already-
+disclosed incompleteness).
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.6"`` to ``"0.7"`` in an
+Increment 8 pre-commit revision that reverses two of the "not genuinely
+required" judgment calls in the entry immediately above, once review
+found them to be genuine ambiguities a *canonical* contract must not
+carry:
+
+1. ``KineticLawSpecification.assignment_source`` changed type from
+   ``ParameterSource`` to ``KineticLawAssignmentSource`` (relocated to
+   ``app.agent2.types`` from ``app.agent2.kinetics.types`` in the same
+   revision, still re-exported there unchanged for every existing
+   import). A law's *type* provenance ("why was this rate-law form
+   chosen") and a parameter's *value* provenance ("where did this number
+   come from") are different questions; the field originally answered
+   the wrong one, forcing ``CURATED``/``DEFAULT``/``PLACEHOLDER`` to mean
+   two different things depending on context. See
+   ``docs/11_model_specification_assembly.md`` §10.
+2. ``KineticLawSpecification`` gained three new optional fields,
+   ``enzyme_state_id``/``protein_id``/``complex_id`` (identical mutual-
+   exclusivity rule to ``KineticLawAssignment``'s own target fields),
+   copied verbatim from the source assignment. A materialized law's
+   catalytic context was previously disclosed only as ``provenance_refs``
+   text -- adequate for a human audit trail, not for a downstream
+   consumer (Increment 9) that needs to *resolve* the context
+   programmatically without parsing a string. See
+   ``docs/11_model_specification_assembly.md`` §11.
+
+Both are genuine public core-contract shape changes (a field's type
+changed; three fields were added) per this file's own bump criterion --
+unlike the Increment 7 module-decomposition consistency revision, this
+one is **not** behavior-preserving: `assemble_model_specification`'s
+actual output differs for the same inputs (`assignment_source` values
+differ in type entirely; three new fields are now populated). Existing
+keyword-based construction of ``KineticLawSpecification`` for the
+*unaffected* fields is unaffected, but every existing
+``assignment_source=ParameterSource...`` construction site needed
+updating (none shipped -- this repository has never committed a
+``KineticLawSpecification`` construction). ``AGENT1_HANDOFF_VERSION`` is
+unchanged -- Agent 1 was not modified.
+
+A third issue from the same review -- a genuinely multi-substrate
+``MICHAELIS_MENTEN`` law receiving a simplified, scientifically-
+unjustified combining expression -- was also corrected, but requires no
+``app.agent2.types`` shape change (only the *value* the existing
+``expression``/``assumptions`` fields carry): see
+``docs/11_model_specification_assembly.md`` §8/§16.
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v1"`` to ``"model-specification-v2"`` for the
+combined behavior change across all three corrections (the
+``assignment_source``/catalytic-context fields now populated
+differently, and the multi-substrate Michaelis-Menten expression policy
+itself changed) -- the version marker tracks behavior, not git history,
+consistent with every prior pre-commit revision in this file.
+
+``AGENT2_CONTRACT_VERSION`` is **retained at ``"0.7"``** (not bumped
+again) for a second, final Increment 8 pre-commit revision that corrects
+*how* the multi-substrate ``MICHAELIS_MENTEN`` case above is represented.
+The entry immediately above already disclosed that case honestly instead
+of asserting an unjustified equation, but did so by placing a string
+status marker, ``"UNRESOLVED_MULTI_SUBSTRATE_MECHANISM"``, directly in
+``KineticLawSpecification.expression`` -- itself a defect, since a field
+whose entire meaning is "the concrete algebraic representation" must
+never carry a non-expression value, however clearly named. This revision
+removes that constant entirely and instead allows ``expression=None`` for
+*any* ``law_type``, not only ``UNASSIGNED``: ``kinetic_law_type``
+describes the selected law family; ``expression`` is the concrete
+algebraic form when known, and is simply absent when the family is known
+but the exact algebra is not (see ``docs/04_core_domain_contracts.md`` §8
+and ``docs/11_model_specification_assembly.md`` §8a for the full
+family-vs-algebra distinction, and §8 for why ``None`` is the correct
+representation for this specific case). The unresolved state remains
+disclosed exclusively through a dedicated ``ModelAssumption`` (reason
+code ``MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED``), never through
+``expression`` itself.
+
+Inspection (this revision's own Step 1) found no ``app.agent2.types``
+shape change is required: ``KineticLawSpecification.expression`` was
+already a plain ``str | None`` field; only its own ``__post_init__``
+runtime check (previously: raise if non-``UNASSIGNED`` and blank) was
+relaxed, and a new pure derived property, ``has_expression`` (mirroring
+``ParameterSpecification.has_value``), was added -- a property is not a
+constructor field and does not change how any existing caller constructs
+``KineticLawSpecification``. Nothing was added, removed, or retyped, so
+per this file's own bump criterion ``AGENT2_CONTRACT_VERSION`` is not
+bumped.
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` is likewise **retained
+at ``"model-specification-v2"``** (not bumped to ``"v3"``) for this
+revision, by explicit instruction, even though this is a genuine
+narrow exception to this file's own general "track behavior, not git
+history" convention used for every ``*_POLICY_VERSION`` bump above
+(including this same constant's own ``v1``->``v2`` bump two entries
+above): ``assemble_model_specification``'s real output for the same
+multi-substrate-``MICHAELIS_MENTEN`` inputs does differ before and after
+(``expression`` changes from the sentinel string to ``None``; the
+generated ``ModelAssumption.reason_code`` is renamed from
+``"UNRESOLVED_MULTI_SUBSTRATE_MECHANISM"`` to
+``"MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"``), which would ordinarily
+justify a bump under this file's own convention. This revision's own
+instructions explicitly called for retaining the version instead,
+reasoning that the entire Increment 8 policy has never been committed or
+released under either ``"model-specification-v1"`` or
+``"model-specification-v2"`` -- no consumer has ever observed the
+sentinel-bearing behavior as a released policy version to distinguish
+from its replacement, so incorporating the correction cleanly before
+release avoids churn that would carry no real information. This is
+recorded transparently here specifically because it deviates from
+convention: a *future* correction to already-released behavior should
+still bump, not treat this entry as license to skip bumps generally.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.6"
+AGENT2_CONTRACT_VERSION = "0.7"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v2"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
+    "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",

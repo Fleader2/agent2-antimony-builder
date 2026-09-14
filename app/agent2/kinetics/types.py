@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.agent2.types import KineticLawType
+from app.agent2.types import KineticLawAssignmentSource, KineticLawType
 
 # --- Local validation helpers (mirrors app.agent2.types/app.agent2.characterization.types) -----
 
@@ -53,26 +53,12 @@ def _require_enum_tuple(value: object, enum_cls: type, *, field_name: str) -> tu
 
 
 # --- KineticLawAssignmentSource ------------------------------------------------------------------
-
-
-class KineticLawAssignmentSource(StrEnum):
-    """Provenance of *the modeling decision itself* -- never a confidence score.
-
-    Distinct from ``app.agent2.types.ParameterSource`` on purpose:
-    ``ParameterSource`` answers "where did this numeric parameter value
-    come from," which conflates a very different axis (curated value vs.
-    default vs. calibrated-by-Agent-4) with what this enum answers instead
-    -- "why does this reaction have *this kind* of rate-law structure."
-    Reusing ``ParameterSource`` would have forced ``CURATED`` to mean both
-    "Agent 1 reported this exact rate law" and "Agent 1 reported this
-    exact Km value" -- two different claims this package must keep
-    separate. See ``docs/07_kinetic_law_assignment.md`` §5.
-    """
-
-    CURATED_REPORTED = "CURATED_REPORTED"
-    DETERMINISTIC_STRUCTURAL = "DETERMINISTIC_STRUCTURAL"
-    HEURISTIC = "HEURISTIC"
-    UNASSIGNED = "UNASSIGNED"
+#
+# Relocated to ``app.agent2.types`` in an Increment 8 pre-commit revision (see that enum's own
+# docstring for the full rationale) so ``KineticLawSpecification.assignment_source`` could use
+# it directly without a reverse-layering import. Imported above and re-exported here unchanged
+# -- every existing ``from app.agent2.kinetics.types import KineticLawAssignmentSource`` import
+# continues to work exactly as before.
 
 
 class KineticLawReasonCode(StrEnum):

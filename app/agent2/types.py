@@ -18,7 +18,10 @@ Sections, in the order data flows through the (future) pipeline:
    (``docs/02_agent1_handoff_contract.md``). This module never imports
    Agent 1's runtime package.
 2. **Shared enums** -- ``ParameterSource``, ``BoundaryLikelihood``,
-   ``BoundaryParameterBasis``, ``KineticLawType``, ``ParticipantRole``,
+   ``BoundaryParameterBasis``, ``KineticLawType``,
+   ``KineticLawAssignmentSource`` (relocated here from
+   ``app.agent2.kinetics.types`` in an Increment 8 pre-commit revision,
+   still re-exported there unchanged), ``ParticipantRole``,
    ``ModuleInterfaceRole``, ``CompartmentSourceScope``. Defined early
    because later structural types reference them.
 3. **Full-network structural domain** -- ``CompartmentSpecification``,
@@ -629,11 +632,19 @@ class ParameterSource(StrEnum):
 
     ``CALIBRATED`` is reserved for a value returned by Agent 4's feedback
     (``docs/01_agent2_architecture.md`` §21); Agent 2 never assigns it to a
-    value it produced itself. Also reused by ``KineticLawSpecification
-    .assignment_source`` (a kinetic law's *type* has the identical
-    provenance-vs-status axis as a parameter's *value*) and by
+    value it produced itself. Also reused by
     ``SpeciesSpecification.initialization_source``, rather than inventing
-    a near-duplicate vocabulary for either.
+    a near-duplicate vocabulary.
+
+    **No longer reused by `KineticLawSpecification.assignment_source`**
+    (Increment 8 pre-commit revision): a kinetic law's *type* provenance
+    ("why was this rate-law form chosen") and a parameter's *value*
+    provenance ("where did this number come from") are different axes
+    that happen to share a provenance-vs-status shape but not the same
+    vocabulary of answers -- see `KineticLawAssignmentSource` below for
+    the dedicated enum this field now uses instead, and
+    ``docs/11_model_specification_assembly.md`` §10 for the full
+    rationale.
     """
 
     CURATED = "CURATED"
@@ -687,6 +698,41 @@ class KineticLawType(StrEnum):
     HILL = "HILL"
     REVERSIBLE_MASS_ACTION = "REVERSIBLE_MASS_ACTION"
     CUSTOM = "CUSTOM"
+    UNASSIGNED = "UNASSIGNED"
+
+
+class KineticLawAssignmentSource(StrEnum):
+    """Provenance of *the modeling decision itself* -- never a confidence score, and never a
+    claim about a parameter's own numeric value.
+
+    **Relocated here from `app.agent2.kinetics.types` in an Increment 8
+    pre-commit revision** so `KineticLawSpecification.assignment_source`
+    (`app.agent2.types`, the canonical, cross-cutting layer) could use it
+    directly without `app.agent2.types` importing from a narrower,
+    per-increment package -- the reverse of this repository's established
+    dependency direction (`app.agent2.kinetics.types` already imports
+    `KineticLawType` from here). `app.agent2.kinetics.types` still
+    exposes the identical symbol via a re-export
+    (`from app.agent2.types import KineticLawAssignmentSource`), so every
+    existing `from app.agent2.kinetics.types import
+    KineticLawAssignmentSource` import continues to work unchanged.
+
+    Distinct from `ParameterSource` on purpose: `ParameterSource` answers
+    "where did this numeric parameter value come from" (curated value vs.
+    default vs. calibrated-by-Agent-4) -- a different axis from what this
+    enum answers, "why does this reaction have *this kind* of rate-law
+    structure." Reusing `ParameterSource` for both (as
+    `KineticLawSpecification.assignment_source` originally did, before
+    this revision) would have forced `CURATED`/`DEFAULT`/`PLACEHOLDER` to
+    mean two different things depending on context -- exactly the
+    ambiguity this dedicated enum exists to eliminate. See
+    ``docs/07_kinetic_law_assignment.md`` §5 and
+    ``docs/11_model_specification_assembly.md`` §10.
+    """
+
+    CURATED_REPORTED = "CURATED_REPORTED"
+    DETERMINISTIC_STRUCTURAL = "DETERMINISTIC_STRUCTURAL"
+    HEURISTIC = "HEURISTIC"
     UNASSIGNED = "UNASSIGNED"
 
 
@@ -1451,21 +1497,81 @@ class KineticLawSpecification:
 
     ``expression`` is a contract representation of the intended rate law
     (e.g. free-form text such as ``"k1 * A * B"``), not an Antimony
-    serialization -- no expression parsing or generation occurs here
-    beyond a non-blank check when a law is actually assigned. ``UNASSIGNED``
-    may omit ``expression`` entirely. Reference integrity for
-    ``parameter_ids``/``species_ids`` against a real parameter/species set
-    is enforced later, at ``ModelSpecification`` construction -- this type
-    alone has no such set to check against.
+    serialization -- no expression parsing or generation occurs here at
+    all. Reference integrity for ``parameter_ids``/``species_ids``
+    against a real parameter/species set is enforced later, at
+    ``ModelSpecification`` construction -- this type alone has no such
+    set to check against.
+
+    **``kinetic_law_type`` vs. ``expression`` -- two distinct facts, not
+    one (Increment 8 pre-commit revision).** ``kinetic_law_type`` names
+    the *selected law family* (e.g. Michaelis-Menten); ``expression`` is
+    the *concrete algebraic representation* of that family, when one is
+    actually known. **``expression`` is optional for every
+    ``kinetic_law_type``, not only ``UNASSIGNED``**: a reaction can have
+    a confidently-identified law family with no safely-reconstructable
+    algebra yet (e.g. curated evidence identifies a multi-substrate
+    Michaelis-Menten mechanism, but no single combining expression is
+    justified from independently-declared parameters alone -- see
+    ``docs/11_model_specification_assembly.md`` §8). That is a
+    fundamentally different, stronger claim than ``UNASSIGNED``
+    (``docs/04_core_domain_contracts.md`` §7: "the default starting
+    point" -- no law-selection decision was made at all). Reading
+    ``expression is None`` alone can therefore mean either "no law was
+    ever assigned" (`law_type is UNASSIGNED`) or "a law family was
+    assigned but its exact algebra remains unresolved" (`law_type` is
+    anything else) -- never conflate the two; check `law_type` first. The
+    pure, derived ``has_expression`` property answers "does this law
+    currently carry a usable expression," independent of which case
+    applies. An earlier draft of this revision stored the unresolved-
+    algebra case as a string sentinel
+    (``"UNRESOLVED_MULTI_SUBSTRATE_MECHANISM"``) placed directly in
+    ``expression`` -- **removed**: a non-expression status marker must
+    never occupy a field whose entire meaning is "the concrete algebraic
+    representation." The unresolved state is disclosed instead through
+    ``assumptions`` and a dedicated ``ModelAssumption`` (§16 of the same
+    document), never through ``expression`` itself.
+
+    **Increment 8 pre-commit revision** also made two earlier
+    corrections, both driven by ``ModelSpecification``'s own purpose as
+    the *authoritative* handoff to Antimony generation -- neither should
+    require Increment 9 to parse text or rediscover a fact this type
+    could simply state directly:
+
+    * ``assignment_source`` is now ``KineticLawAssignmentSource``
+      (previously ``ParameterSource``, reused by mistake -- see that
+      enum's own docstring and ``docs/11_model_specification_assembly.md``
+      §10). A kinetic law's *type* provenance ("why was this rate-law
+      form chosen") is a different fact from a parameter's *value*
+      provenance ("where did this number come from"); collapsing them
+      into one vocabulary was exactly the kind of ambiguity a canonical
+      contract must not carry.
+    * ``enzyme_state_id``/``protein_id``/``complex_id`` are new,
+      optional, mutually-exclusive fields (identical exclusivity
+      semantics to ``KineticLawAssignment``'s own three-field target,
+      and to ``CuratedReactionEnzymeAssociation``/
+      ``ReactionEnzymeAssociation`` upstream of it) naming this law's own
+      catalytic context directly. Previously this fact lived only in
+      ``provenance_refs`` text (e.g. ``"catalytic-context::enzyme_state
+      ::E_P"``) -- adequate for a human audit trail, but not for a
+      downstream consumer that needs to *resolve* which catalytic
+      context a law belongs to without parsing a string. All three
+      ``None`` means the same thing it already means on
+      ``KineticLawAssignment``: the reaction as a whole, no distinguishing
+      catalytic identity (no catalyst known, or several catalysts
+      collapsed because their evidence was identical).
     """
 
     kinetic_law_id: str
     reaction_id: str
     law_type: KineticLawType
-    assignment_source: ParameterSource
+    assignment_source: KineticLawAssignmentSource
     expression: str | None = None
     parameter_ids: tuple[str, ...] = ()
     species_ids: tuple[str, ...] = ()
+    enzyme_state_id: str | None = None
+    protein_id: str | None = None
+    complex_id: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -1482,19 +1588,14 @@ class KineticLawSpecification:
             raise TypeError(
                 f"KineticLawSpecification.law_type must be a KineticLawType, got {self.law_type!r}"
             )
-        if not isinstance(self.assignment_source, ParameterSource):
+        if not isinstance(self.assignment_source, KineticLawAssignmentSource):
             raise TypeError(
-                "KineticLawSpecification.assignment_source must be a ParameterSource, "
-                f"got {self.assignment_source!r}"
+                "KineticLawSpecification.assignment_source must be a "
+                f"KineticLawAssignmentSource, got {self.assignment_source!r}"
             )
         object.__setattr__(
             self, "expression", _clean_optional_str(self.expression, field_name="expression")
         )
-        if self.law_type is not KineticLawType.UNASSIGNED and self.expression is None:
-            raise ValueError(
-                f"KineticLawSpecification with law_type={self.law_type.value} requires a "
-                "non-blank expression"
-            )
         object.__setattr__(
             self,
             "parameter_ids",
@@ -1504,6 +1605,24 @@ class KineticLawSpecification:
             self, "species_ids", _require_str_tuple(self.species_ids, field_name="species_ids")
         )
         object.__setattr__(
+            self,
+            "enzyme_state_id",
+            _clean_optional_str(self.enzyme_state_id, field_name="enzyme_state_id"),
+        )
+        object.__setattr__(
+            self, "protein_id", _clean_optional_str(self.protein_id, field_name="protein_id")
+        )
+        object.__setattr__(
+            self, "complex_id", _clean_optional_str(self.complex_id, field_name="complex_id")
+        )
+        target_fields = (self.enzyme_state_id, self.protein_id, self.complex_id)
+        if sum(field is not None for field in target_fields) > 1:
+            raise ValueError(
+                "KineticLawSpecification allows at most one of enzyme_state_id/protein_id/"
+                f"complex_id to be set, got enzyme_state_id={self.enzyme_state_id!r}, "
+                f"protein_id={self.protein_id!r}, complex_id={self.complex_id!r}"
+            )
+        object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )
         object.__setattr__(
@@ -1511,6 +1630,19 @@ class KineticLawSpecification:
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
+
+    @property
+    def has_expression(self) -> bool:
+        """Pure, derived: does this law currently carry a usable algebraic expression?
+
+        Independent of ``law_type`` -- ``False`` for ``UNASSIGNED`` (no
+        law was ever selected) and equally ``False`` for a law whose
+        family is known but whose exact algebra remains unresolved (e.g.
+        a multi-substrate Michaelis-Menten assignment). Check
+        ``law_type`` separately to distinguish those two cases; this
+        property answers only "is `expression` currently populated."
+        """
+        return self.expression is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2230,6 +2362,17 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
         _require_known(
             law.species_ids, species_ids, field_name=f"kinetic law {law.kinetic_law_id}.species_ids"
         )
+        # Increment 8 pre-commit revision: enzyme_state_id is a first-class catalytic-context
+        # field (previously provenance text only) and FullNetwork.enzyme_states is a real,
+        # complete registry to check it against -- unlike protein_id/complex_id, which name an
+        # entity type FullNetwork does not track at all (the same disclosed, deliberate
+        # limitation _validate_full_network_references already documents).
+        if law.enzyme_state_id is not None:
+            _require_known(
+                (law.enzyme_state_id,),
+                enzyme_state_ids,
+                field_name=f"kinetic law {law.kinetic_law_id}.enzyme_state_id",
+            )
 
     for param in spec.parameters:
         if param.reaction_id is not None:

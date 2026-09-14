@@ -120,20 +120,57 @@ UNASSIGNED
 The structural *form/category* of a rate law -- never fitted behavior.
 `UNASSIGNED` is the default starting point.
 
+## 7a. KineticLawAssignmentSource
+
+```text
+CURATED_REPORTED
+DETERMINISTIC_STRUCTURAL
+HEURISTIC
+UNASSIGNED
+```
+
+Provenance of *the kinetic-law-type decision itself* -- "why does this
+reaction have this kind of rate-law structure" -- never a claim about
+any parameter's own numeric value. **Relocated to `app.agent2.types`
+from `app.agent2.kinetics.types` in an Increment 8 pre-commit revision**
+so `KineticLawSpecification.assignment_source` (§8) could use it
+directly; still re-exported, unchanged, from
+`app.agent2.kinetics.types` for every existing import site. See
+`docs/11_model_specification_assembly.md` §10.
+
 ## 8. KineticLawSpecification
 
-The declared structural form of one reaction's rate law. `expression` is
-a contract representation of the intended rate law (free-form text), not
-Antimony serialization -- no parsing or generation occurs, only a
-non-blank check when a law is actually assigned (`law_type is not
-UNASSIGNED`). `assignment_source` reuses `ParameterSource` (a law's *type*
-has the identical provenance-vs-status axis as a parameter's *value*).
-Reference integrity for `parameter_ids`/`species_ids` is enforced later,
-at `ModelSpecification` construction.
+The declared structural form of one reaction's rate law. `kinetic_law_type`
+and `expression` answer two different questions: `kinetic_law_type` is
+the *selected law family* (e.g. Michaelis-Menten); `expression` is the
+*concrete algebraic representation* of that family, free-form text, not
+Antimony serialization -- no parsing or generation occurs at all.
+**`expression` is optional for every `law_type`, not only `UNASSIGNED`**
+(corrected in an Increment 8 pre-commit revision: the prior rule
+requiring a non-blank expression for any non-`UNASSIGNED` law_type has
+been removed). A reaction can have a confidently-identified law family
+with no safely-reconstructable algebra yet (e.g. a curated multi-
+substrate Michaelis-Menten mechanism) -- `expression=None` in that case
+is a fundamentally different, *stronger* claim than
+`law_type=UNASSIGNED` (no law-selection decision made at all); check
+`law_type` to distinguish them, never infer one from the other. The
+pure derived property `has_expression` answers only "is `expression`
+currently populated," independent of which case applies. `assignment_source`
+is `KineticLawAssignmentSource` (§7a) -- **not** `ParameterSource` (a
+pre-Increment-8 reuse, corrected in the same revision once inspection
+found the two answer genuinely different questions: a law's *type*
+provenance vs. a parameter's *value* provenance). `enzyme_state_id`/
+`protein_id`/`complex_id` (added in the same revision) name this law's
+own catalytic context directly, with the identical mutual-exclusivity
+rule already established on `KineticLawAssignment`/
+`CuratedReactionEnzymeAssociation`. Reference integrity for
+`parameter_ids`/`species_ids` is enforced later, at `ModelSpecification`
+construction.
 
 Fields: `kinetic_law_id`, `reaction_id`, `law_type`, `assignment_source`,
-`expression`, `parameter_ids`, `species_ids`, `assumptions`,
-`provenance_refs`.
+`expression`, `parameter_ids`, `species_ids`, `enzyme_state_id`,
+`protein_id`, `complex_id`, `assumptions`, `provenance_refs`. One pure
+property: `has_expression` (`expression is not None`).
 
 ## 9. ParameterSpecification
 
@@ -163,9 +200,10 @@ CALIBRATED
 ```
 
 Provenance/status, never confidence. Reused by
-`SpeciesSpecification.initialization_source` and
-`KineticLawSpecification.assignment_source` rather than inventing
-near-duplicate vocabularies.
+`SpeciesSpecification.initialization_source` rather than inventing a
+near-duplicate vocabulary. **No longer reused by
+`KineticLawSpecification.assignment_source`** (Increment 8 pre-commit
+revision) -- see `KineticLawAssignmentSource` (§7a).
 
 ## 11. BoundaryLikelihood
 
@@ -327,14 +365,21 @@ Fields: `model_id`, `name`, `full_network`, `organism_id`, `kinetic_laws`,
   `module_decomposition.interfaces` (checked only when a decomposition
   is present -- otherwise there is no registry to validate against, the
   same disclosed-limitation pattern used throughout this file);
+* **(Increment 8)** every `kinetic_laws[].enzyme_state_id` (when set)
+  exists in `full_network.enzyme_states` -- a real, complete registry to
+  check it against, unlike `.protein_id`/`.complex_id` (see below);
 * `kinetic_laws`/`parameters`/`module_specifications`/
   `boundary_assessments` are each internally unique by id.
 
 **Never validated here**: mass balance, graph connectivity, unit
-consistency, or conservation-law analysis (Agent 3's job), and
+consistency, or conservation-law analysis (Agent 3's job);
 `module_specifications[].kinetic_law_assignment_ids` (Increment 7) --
 `ModelSpecification` carries no `KineticLawAssignment` registry to check
-that namespace against; see `docs/10_module_decomposition.md` §20/§24.
+that namespace against, see `docs/10_module_decomposition.md` §20/§24;
+and `kinetic_laws[].protein_id`/`.complex_id` (Increment 8) -- `FullNetwork`
+tracks no protein/complex registry at all, the same disclosed limitation
+`_validate_full_network_references` already documents for those entity
+types elsewhere.
 
 ## 20. FullAntimonyArtifact
 
