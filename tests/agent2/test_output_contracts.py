@@ -16,6 +16,7 @@ import pytest
 
 from app.agent2.types import (
     Agent2OutputPackage,
+    AntimonyArtifactReadiness,
     BoundaryAssessment,
     BoundaryLikelihood,
     CompartmentSourceScope,
@@ -376,8 +377,106 @@ def test_module_antimony_artifact_standalone_allowed_with_explicit_interfaces():
         generator_version="0.0",
         standalone_antimony="// standalone",
         boundary_interfaces=(interface,),
+        readiness=AntimonyArtifactReadiness.EXECUTABLE,
     )
     assert artifact.standalone_antimony == "// standalone"
+
+
+def test_full_antimony_artifact_defaults_to_executable_readiness():
+    artifact = _full_antimony()
+    assert artifact.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert artifact.unresolved_kinetic_law_ids == ()
+    assert artifact.unresolved_reaction_ids == ()
+
+
+def test_full_antimony_artifact_rejects_view_only_readiness():
+    with pytest.raises(ValueError):
+        FullAntimonyArtifact(
+            model_id="m1",
+            model_specification_id="m1",
+            antimony_text="// placeholder",
+            generator_version="0.0",
+            readiness=AntimonyArtifactReadiness.VIEW_ONLY,
+        )
+
+
+def test_full_antimony_artifact_non_executable_requires_unresolved_ids():
+    with pytest.raises(ValueError):
+        FullAntimonyArtifact(
+            model_id="m1",
+            model_specification_id="m1",
+            antimony_text="// placeholder",
+            generator_version="0.0",
+            readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
+        )
+
+
+def test_full_antimony_artifact_non_executable_requires_unresolved_reaction_ids_too():
+    """``unresolved_kinetic_law_ids`` alone is not sufficient -- Increment 9's pre-commit
+    revision requires ``unresolved_reaction_ids`` populated in lockstep, since a biochemical
+    reaction is not the same thing as a kinetic-law contribution."""
+    with pytest.raises(ValueError):
+        FullAntimonyArtifact(
+            model_id="m1",
+            model_specification_id="m1",
+            antimony_text="// placeholder",
+            generator_version="0.0",
+            readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
+            unresolved_kinetic_law_ids=("k1",),
+        )
+    artifact = FullAntimonyArtifact(
+        model_id="m1",
+        model_specification_id="m1",
+        antimony_text="// placeholder",
+        generator_version="0.0",
+        readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
+        unresolved_kinetic_law_ids=("k1",),
+        unresolved_reaction_ids=("r1",),
+    )
+    assert artifact.unresolved_reaction_ids == ("r1",)
+
+
+def test_module_antimony_artifact_defaults_to_view_only_readiness():
+    artifact = ModuleAntimonyArtifact(
+        module_id="mod-1",
+        model_specification_id="m1",
+        generator_version="0.0",
+        antimony_view="// view",
+    )
+    assert artifact.readiness is AntimonyArtifactReadiness.VIEW_ONLY
+
+
+def test_module_antimony_artifact_executable_requires_standalone_text():
+    with pytest.raises(ValueError):
+        ModuleAntimonyArtifact(
+            module_id="mod-1",
+            model_specification_id="m1",
+            generator_version="0.0",
+            antimony_view="// view",
+            readiness=AntimonyArtifactReadiness.EXECUTABLE,
+        )
+
+
+def test_module_antimony_artifact_non_executable_requires_both_unresolved_id_fields():
+    with pytest.raises(ValueError):
+        ModuleAntimonyArtifact(
+            module_id="mod-1",
+            model_specification_id="m1",
+            generator_version="0.0",
+            antimony_view="// view",
+            readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
+            unresolved_kinetic_law_ids=("k1",),
+        )
+    artifact = ModuleAntimonyArtifact(
+        module_id="mod-1",
+        model_specification_id="m1",
+        generator_version="0.0",
+        antimony_view="// view",
+        readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
+        unresolved_kinetic_law_ids=("k1",),
+        unresolved_reaction_ids=("r1",),
+    )
+    assert artifact.unresolved_reaction_ids == ("r1",)
 
 
 def test_no_antimony_generator_function_exists_on_artifact_types():

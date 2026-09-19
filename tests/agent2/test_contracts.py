@@ -219,8 +219,15 @@ _FORBIDDEN_IMPORT_ROOTS = frozenset(
 
 # Checked against actual `def`/`class` names only, case-insensitive, with
 # underscores stripped -- never against prose.
+#
+# "generateantimony" was removed from this list in Increment 9 (Antimony
+# Generation): that increment's own specification explicitly authorizes
+# exactly one public function of this name
+# (``app.agent2.antimony.generate_antimony``, a deterministic text
+# serializer -- never simulation, fitting, or a modeling-decision engine).
+# Every other substring below remains forbidden -- Increment 9 did not
+# authorize simulation, fitting, calibration, or model critique.
 _FORBIDDEN_DEFINITION_SUBSTRINGS = (
-    "generateantimony",
     "buildantimony",
     "antimonygenerator",
     "sbmlgenerator",

@@ -57,8 +57,9 @@ Sections, in the order data flows through the (future) pipeline:
    integrity. Never performs Agent 3-level mass-balance, connectivity,
    unit-consistency, or conservation-law analysis.
 8. **Antimony artifact contracts** -- ``FullAntimonyArtifact``,
-   ``ModuleAntimonyArtifact``. Contracts only: no generator function, no
-   syntax validation, no Antimony dependency exists in this increment.
+   ``ModuleAntimonyArtifact``, ``AntimonyArtifactReadiness``. The
+   generator itself (``app.agent2.antimony``, Increment 9) lives outside
+   this module; these remain data contracts only.
 9. **Agent2OutputPackage** -- the final output envelope, with its own
    cross-artifact reference-integrity rules.
 """
@@ -2486,17 +2487,60 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
 
 
 # =================================================================================================
-# 8. Antimony artifact contracts (contracts only -- no generation logic)
+# 8. Antimony artifact contracts
 # =================================================================================================
+
+
+class AntimonyArtifactReadiness(StrEnum):
+    """Whether one generated Antimony artifact is actually simulatable, or only descriptive.
+
+    Introduced in Increment 9 (Antimony Generation) -- deliberately three
+    values, not a lifecycle system. ``EXECUTABLE`` means every reaction's
+    kinetic law has a resolved expression with every referenced parameter
+    numerically initialized, and (for a module) that
+    ``standalone_antimony`` is populated. ``NON_EXECUTABLE_UNRESOLVED_KINETICS``
+    means generation produced text but withheld executable status because
+    at least one referenced ``KineticLawSpecification`` has no resolved
+    expression, an unresolved reversibility, or a parameter with no
+    numeric value -- never because Agent 9 fabricated a missing fact.
+    ``VIEW_ONLY`` is reserved for a module's subset view, which is never
+    claimed to be independently simulatable regardless of its own
+    kinetics. Never computed by inference across artifacts -- the
+    generator sets it directly from what it actually produced. See
+    ``docs/12_antimony_generation.md`` §21-22.
+    """
+
+    EXECUTABLE = "EXECUTABLE"
+    NON_EXECUTABLE_UNRESOLVED_KINETICS = "NON_EXECUTABLE_UNRESOLVED_KINETICS"
+    VIEW_ONLY = "VIEW_ONLY"
 
 
 @dataclass(frozen=True, slots=True)
 class FullAntimonyArtifact:
-    """The full, canonical Antimony model text -- a contract only in Increment 1.
+    """The full, canonical Antimony model text.
 
-    Construction is allowed (for tests and future contract wiring); no
-    generator function, no syntax validation, and no Antimony runtime
-    dependency exists anywhere in this repository.
+    **Increment 9 (Antimony Generation)** added ``readiness``/
+    ``unresolved_kinetic_law_ids``: the full model is always exactly one
+    of ``EXECUTABLE`` (``unresolved_kinetic_law_ids`` empty) or
+    ``NON_EXECUTABLE_UNRESOLVED_KINETICS`` (``unresolved_kinetic_law_ids``
+    non-empty, naming exactly which ``KineticLawSpecification`` rows
+    blocked full executability) -- ``VIEW_ONLY`` is not a legal value here,
+    since the full model is never merely a subset view. See
+    ``docs/12_antimony_generation.md`` §21.
+
+    **Increment 9 pre-commit revision** added ``unresolved_reaction_ids``:
+    a biochemical ``ReactionSpecification`` and a catalytic
+    ``KineticLawSpecification`` contribution are not the same thing -- one
+    reaction can carry more than one kinetic-law context (e.g. one per
+    enzyme state), and Antimony generation now always emits exactly one
+    Antimony reaction per ``ReactionSpecification`` (never one per
+    kinetic law). ``unresolved_kinetic_law_ids`` alone cannot tell a
+    downstream consumer *which reactions* are blocked without re-deriving
+    the law-to-reaction mapping itself; ``unresolved_reaction_ids`` names
+    those reactions directly. Populated in lockstep with
+    ``unresolved_kinetic_law_ids`` under the same ``readiness`` rules --
+    empty iff ``readiness is EXECUTABLE``. See
+    ``docs/12_antimony_generation.md`` §7/§11a.
     """
 
     model_id: str
@@ -2505,6 +2549,9 @@ class FullAntimonyArtifact:
     generator_version: str
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
+    readiness: AntimonyArtifactReadiness = AntimonyArtifactReadiness.EXECUTABLE
+    unresolved_kinetic_law_ids: tuple[str, ...] = ()
+    unresolved_reaction_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -2535,11 +2582,57 @@ class FullAntimonyArtifact:
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
+        if not isinstance(self.readiness, AntimonyArtifactReadiness):
+            raise TypeError(
+                "FullAntimonyArtifact.readiness must be an AntimonyArtifactReadiness, "
+                f"got {self.readiness!r}"
+            )
+        if self.readiness is AntimonyArtifactReadiness.VIEW_ONLY:
+            raise ValueError(
+                "FullAntimonyArtifact.readiness must not be VIEW_ONLY -- the full model is "
+                "never merely a subset view"
+            )
+        object.__setattr__(
+            self,
+            "unresolved_kinetic_law_ids",
+            _require_str_tuple(
+                self.unresolved_kinetic_law_ids, field_name="unresolved_kinetic_law_ids"
+            ),
+        )
+        _require_unique(
+            self.unresolved_kinetic_law_ids,
+            field_name="FullAntimonyArtifact.unresolved_kinetic_law_ids",
+        )
+        object.__setattr__(
+            self,
+            "unresolved_reaction_ids",
+            _require_str_tuple(
+                self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"
+            ),
+        )
+        _require_unique(
+            self.unresolved_reaction_ids,
+            field_name="FullAntimonyArtifact.unresolved_reaction_ids",
+        )
+        if self.readiness is AntimonyArtifactReadiness.EXECUTABLE and (
+            self.unresolved_kinetic_law_ids or self.unresolved_reaction_ids
+        ):
+            raise ValueError(
+                "FullAntimonyArtifact.readiness=EXECUTABLE requires an empty "
+                "unresolved_kinetic_law_ids and an empty unresolved_reaction_ids"
+            )
+        if self.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS and (
+            not self.unresolved_kinetic_law_ids or not self.unresolved_reaction_ids
+        ):
+            raise ValueError(
+                "FullAntimonyArtifact.readiness=NON_EXECUTABLE_UNRESOLVED_KINETICS requires a "
+                "non-empty unresolved_kinetic_law_ids and a non-empty unresolved_reaction_ids"
+            )
 
 
 @dataclass(frozen=True, slots=True)
 class ModuleAntimonyArtifact:
-    """One module's Antimony output(s) -- a contract only in Increment 1.
+    """One module's Antimony output(s).
 
     ``antimony_view`` (a subset view, not necessarily simulatable) may
     exist without ``standalone_antimony``. ``standalone_antimony`` may be
@@ -2548,6 +2641,27 @@ class ModuleAntimonyArtifact:
     .has_explicit_boundary_interfaces``. No boundary condition is ever
     invented to satisfy this rule; a module lacking explicit interfaces
     simply has no standalone artifact.
+
+    **Increment 9 (Antimony Generation)** added ``readiness``/
+    ``unresolved_kinetic_law_ids``: ``VIEW_ONLY`` (the default) requires
+    ``standalone_antimony`` to be ``None``; ``EXECUTABLE`` requires
+    ``standalone_antimony`` to be populated and
+    ``unresolved_kinetic_law_ids`` empty;
+    ``NON_EXECUTABLE_UNRESOLVED_KINETICS`` means the module's boundary
+    interfaces were explicit enough to be eligible for a standalone model,
+    but at least one of its kinetic laws blocked executability -- the
+    standalone text is withheld (``standalone_antimony`` stays ``None``)
+    rather than emitted as though it were runnable. See
+    ``docs/12_antimony_generation.md`` §22-23.
+
+    **Increment 9 pre-commit revision** added ``unresolved_reaction_ids``
+    for the same reason as ``FullAntimonyArtifact``'s own identical
+    addition -- a module may include a reaction whose multiple catalytic
+    contexts leave its composed rate unresolved; this names the reaction
+    directly rather than requiring a consumer to re-derive it from
+    ``unresolved_kinetic_law_ids``. Empty whenever ``readiness`` is
+    ``VIEW_ONLY``/``EXECUTABLE``; non-empty iff
+    ``NON_EXECUTABLE_UNRESOLVED_KINETICS``.
     """
 
     module_id: str
@@ -2557,6 +2671,9 @@ class ModuleAntimonyArtifact:
     standalone_antimony: str | None = None
     boundary_interfaces: tuple[ModuleBoundaryInterface, ...] = ()
     assumptions: tuple[str, ...] = ()
+    readiness: AntimonyArtifactReadiness = AntimonyArtifactReadiness.VIEW_ONLY
+    unresolved_kinetic_law_ids: tuple[str, ...] = ()
+    unresolved_reaction_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -2599,6 +2716,61 @@ class ModuleAntimonyArtifact:
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )
+        if not isinstance(self.readiness, AntimonyArtifactReadiness):
+            raise TypeError(
+                "ModuleAntimonyArtifact.readiness must be an AntimonyArtifactReadiness, "
+                f"got {self.readiness!r}"
+            )
+        object.__setattr__(
+            self,
+            "unresolved_kinetic_law_ids",
+            _require_str_tuple(
+                self.unresolved_kinetic_law_ids, field_name="unresolved_kinetic_law_ids"
+            ),
+        )
+        _require_unique(
+            self.unresolved_kinetic_law_ids,
+            field_name="ModuleAntimonyArtifact.unresolved_kinetic_law_ids",
+        )
+        object.__setattr__(
+            self,
+            "unresolved_reaction_ids",
+            _require_str_tuple(
+                self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"
+            ),
+        )
+        _require_unique(
+            self.unresolved_reaction_ids,
+            field_name="ModuleAntimonyArtifact.unresolved_reaction_ids",
+        )
+        if self.readiness is AntimonyArtifactReadiness.VIEW_ONLY and (
+            self.standalone_antimony is not None
+            or self.unresolved_kinetic_law_ids
+            or self.unresolved_reaction_ids
+        ):
+            raise ValueError(
+                "ModuleAntimonyArtifact.readiness=VIEW_ONLY requires standalone_antimony=None "
+                "and empty unresolved_kinetic_law_ids/unresolved_reaction_ids"
+            )
+        if self.readiness is AntimonyArtifactReadiness.EXECUTABLE and (
+            self.standalone_antimony is None
+            or self.unresolved_kinetic_law_ids
+            or self.unresolved_reaction_ids
+        ):
+            raise ValueError(
+                "ModuleAntimonyArtifact.readiness=EXECUTABLE requires a populated "
+                "standalone_antimony and empty unresolved_kinetic_law_ids/unresolved_reaction_ids"
+            )
+        if self.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS and (
+            self.standalone_antimony is not None
+            or not self.unresolved_kinetic_law_ids
+            or not self.unresolved_reaction_ids
+        ):
+            raise ValueError(
+                "ModuleAntimonyArtifact.readiness=NON_EXECUTABLE_UNRESOLVED_KINETICS requires "
+                "standalone_antimony=None and non-empty "
+                "unresolved_kinetic_law_ids/unresolved_reaction_ids"
+            )
 
 
 # =================================================================================================
@@ -2714,6 +2886,7 @@ class Agent2OutputPackage:
 __all__ = [
     "Agent1CuratedKnowledgeViewContract",
     "Agent2OutputPackage",
+    "AntimonyArtifactReadiness",
     "BoundaryAssessment",
     "BoundaryLikelihood",
     "BoundaryParameterBasis",

@@ -32,7 +32,7 @@ Agent1CuratedKnowledgeView
     -> ModuleDecompositionSet
     -> ModelSpecification Assembly (this increment)
     -> ModelSpecification
-    -> Antimony Generation (future Increment 9)
+    -> Antimony Generation (Increment 9, see docs/12_antimony_generation.md)
 ```
 
 Agent 1 is untouched by this increment; nothing in

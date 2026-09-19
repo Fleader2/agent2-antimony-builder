@@ -51,6 +51,14 @@ names actually changes.
   ``ModelAssumption`` records). Also a *behavioral rule set* version, not
   a data shape -- distinct from ``AGENT2_CONTRACT_VERSION``, which
   versions ``ModelSpecification``'s own shape.
+* ``ANTIMONY_GENERATION_POLICY_VERSION`` -- the version of the
+  deterministic Antimony-serialization policy (``app.agent2.antimony``) a
+  ``FullAntimonyArtifact``/``ModuleAntimonyArtifact`` was produced under
+  (e.g. the identifier-sanitization/collision policy, the built-in
+  expression-template token-substitution rule, the unresolved-kinetics/
+  readiness policy, the reversibility and amount-vs-concentration
+  serialization conventions). Also a *behavioral rule set* version, not a
+  data shape.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -466,11 +474,84 @@ recorded transparently here specifically because it deviates from
 convention: a *future* correction to already-released behavior should
 still bump, not treat this entry as license to skip bumps generally.
 ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.7"`` to ``"0.8"`` in
+Increment 9 (Antimony Generation): ``FullAntimonyArtifact`` and
+``ModuleAntimonyArtifact`` each gained two fields, ``readiness`` (a new
+enum, ``AntimonyArtifactReadiness``) and ``unresolved_kinetic_law_ids``,
+plus new ``__post_init__`` cross-field validation tying the two together
+and (for ``FullAntimonyArtifact``) forbidding
+``AntimonyArtifactReadiness.VIEW_ONLY``. Both new fields have defaults
+(``AntimonyArtifactReadiness.EXECUTABLE``/``.VIEW_ONLY`` and ``()``
+respectively), so every existing keyword-based construction in
+``tests/agent2/test_output_contracts.py`` continues to construct
+unchanged -- but this is still an output-contract shape change (new
+fields, new validation) per this file's own bump criterion, exactly like
+Increment 7's identical situation (new fields, all defaulted, still
+counted as a bump). ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1
+was not modified.
+``ANTIMONY_GENERATION_POLICY_VERSION`` is introduced at
+``"antimony-generation-v1"`` for the first real Antimony-generation
+policy (deterministic identifier sanitization/collision resolution
+scoped per entity category; closed-vocabulary token substitution for
+built-in expression templates, never free-text ``.replace()``; CUSTOM
+laws always withheld from executable status, since no structured symbol
+mapping exists for opaque curated text; a kinetic law is executable only
+when its expression is resolved, every referenced parameter has a
+numeric value, and the owning reaction's ``reversible`` flag is not
+``None``; no serialization-only placeholder numeric value is ever
+invented for a valueless parameter; a module's ``standalone_antimony`` is
+generated only when its ``boundary_interfaces`` are explicit, mirroring
+the pre-existing ``ModuleAntimonyArtifact`` invariant).
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.8"`` to ``"0.9"`` in an
+Increment 9 pre-commit revision that corrects a modeling-semantic defect
+found before this increment's first commit: a biochemical
+``ReactionSpecification`` and a catalytic ``KineticLawSpecification``
+contribution are not the same thing, but the first Antimony Generation
+draft keyed its shared reaction-identifier map by ``kinetic_law_id``,
+so a reaction with more than one catalytic-context kinetic law (e.g. one
+per enzyme state, never collapsed by Increment 4) was serialized as
+*multiple, stoichiometrically identical* Antimony reactions -- silently
+asserting simultaneous parallel flux through the same stoichiometry,
+which no upstream contract or evidence actually establishes. Corrected
+to: one ``ReactionSpecification`` always serializes to exactly one
+Antimony reaction; when more than one kinetic law shares a
+``reaction_id``, the reaction's rate is marked unresolved
+(``MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED``) rather than
+duplicated, summed, or arbitrarily chosen from among them (see
+``docs/12_antimony_generation.md`` §11a for the full rationale).
+``FullAntimonyArtifact``/``ModuleAntimonyArtifact`` each gained one more
+field, ``unresolved_reaction_ids`` (defaulted to ``()``, so every
+existing keyword-based construction continues to construct unchanged),
+with ``__post_init__`` validation extending the existing
+``readiness``/``unresolved_kinetic_law_ids`` cross-checks to also cover
+it -- a genuine output-contract shape change per this file's own bump
+criterion, independent of the behavior correction itself.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+
+``ANTIMONY_GENERATION_POLICY_VERSION`` is **retained at
+``"antimony-generation-v1"``** (not bumped to ``"v2"``) for this same
+revision, even though real generated output differs materially for any
+``ModelSpecification`` with a multi-context reaction (previously N
+stoichiometric reactions with N rates; now one reaction, rate withheld)
+-- which would ordinarily justify a bump under this file's own "track
+behavior, not git history" convention (the same convention that, for
+example, justified ``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION``'s own
+``v1``->``v2`` bump). Retained instead because Increment 9 has never been
+committed or released under ``"antimony-generation-v1"`` -- no consumer
+has ever observed the duplicate-reaction behavior as a released policy
+version to distinguish from its correction, so incorporating the fix
+cleanly before release avoids version churn that would carry no real
+information, consistent with the identical precedent already recorded
+above for ``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION``. A *future*
+correction to already-released Antimony-generation behavior should still
+bump this constant -- this entry is not license to skip bumps generally.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.7"
+AGENT2_CONTRACT_VERSION = "0.9"
 AGENT1_HANDOFF_VERSION = "1.2"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
@@ -478,10 +559,12 @@ KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v2"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT2_CONTRACT_VERSION",
+    "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
