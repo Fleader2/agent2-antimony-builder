@@ -625,7 +625,47 @@ changes *which* reactions reach that already-correct machinery.
 block naming the anchored substrate and source measurement, layered
 alongside (never replacing) that existing generic disclosure.
 
-## 33. Final architectural rule
+## 33. Plural Protein Context Matching for Kinetic Evidence
+
+Motivated by Real Integration Pilot 2 Run 4: the real, uniquely
+reaction-attributed malonyl-CoA `Km` (§32) was confirmed structurally
+eligible for the substrate-anchored Michaelis-Menten approximation, but
+was still silently excluded from its own reaction's evidence entirely.
+`_matches_context`/`_is_untagged` (Increment 4 code) matched a
+measurement's catalyst identity by equality against
+`CuratedKineticMeasurement.protein_id` -- the legacy, non-authoritative
+field (see that field's own docstring: "a legacy convenience field, not
+authoritative for protein applicability -- use `protein_ids` instead").
+The real reaction's own two curated catalysts did not include the
+measurement's legacy `protein_id` (which happened to name a different
+real protein than either catalyst), even though the measurement's
+authoritative `protein_ids` already, correctly, named one of them.
+
+**Fix**: `_matches_context` now checks `context.protein_id in
+measurement.protein_ids` (membership, never equality against the legacy
+field); `_is_untagged` now checks that `protein_ids` is empty (never that
+the legacy field is `None`). `CuratedKineticMeasurement.__post_init__`
+already guarantees `protein_ids` is a non-empty superset of `protein_id`
+whenever the latter is set, so this is a pure narrowing-removal, not a
+new fallback: a legacy single-protein measurement (`protein_id=P1`,
+`protein_ids=(P1,)`) matches exactly as before; a plural measurement now
+also matches through any of its other, equally-applicable entries.
+Complex/enzyme-state matching is unchanged (Agent 1 has no plural
+equivalent for either).
+
+**No evidence broadening beyond intersection.** This still requires a
+non-empty intersection between the measurement's `protein_ids` and the
+specific catalyst a context is for -- it never treats plural protein
+context as reaction-level evidence, never infers `reaction_id` from
+`protein_ids`, and never spreads one measurement across every reaction a
+listed protein catalyzes (§7 of the corresponding increment's own
+instructions). When a single measurement's `protein_ids` now matches
+*more than one* of a reaction's own catalysts, and those catalysts'
+evidence collapses into one shared context (§12's own pre-existing
+collapse rule, unchanged), the measurement is deduplicated into exactly
+one evidence record for that shared context -- never counted twice.
+
+## 34. Final architectural rule
 
 Curated rate laws are preserved as evidence-backed modeling inputs.
 Deterministic and heuristic kinetic-law choices are modeling decisions

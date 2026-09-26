@@ -1111,3 +1111,286 @@ def test_substrate_anchored_decision_is_deterministic_regardless_of_evidence_ord
     a2 = _only(_assign(reversed_order))
     assert a1.kinetic_law_type == a2.kinetic_law_type == KineticLawType.MICHAELIS_MENTEN
     assert a1.source_measurement_ids == a2.source_measurement_ids == ("km-malonyl",)
+
+
+# --- Plural Protein Context Matching for Kinetic Evidence (Real Integration Pilot 2 Run 4
+# regression) -------------------------------------------------------------------------------
+
+
+from app.agent2.kinetics.selector import (  # noqa: E402
+    _build_contexts_with_evidence,
+    _CatalyticContext,
+    _is_untagged,
+    _matches_context,
+)
+
+
+def _plural_measurement(**overrides) -> CuratedKineticMeasurement:
+    merged = {
+        "id": "km-plural",
+        "parameter_type": "KM",
+        "value": Decimal("1"),
+        "unit": "mM",
+    } | overrides
+    return CuratedKineticMeasurement(**merged)
+
+
+# --- A. Legacy single-protein compatibility ---------------------------------------------------
+
+
+def test_a_legacy_single_protein_still_matches():
+    measurement = _plural_measurement(protein_id="p1")
+    assert measurement.protein_ids == ("p1",)
+    context = _CatalyticContext(protein_id="p1")
+    assert _matches_context(measurement, context)
+
+
+# --- B. Plural context match -------------------------------------------------------------------
+
+
+def test_b_plural_context_matches_via_first_member():
+    measurement = _plural_measurement(protein_ids=("p1", "p2"))
+    context = _CatalyticContext(protein_id="p1")
+    assert _matches_context(measurement, context)
+
+
+# --- C. Match through non-legacy member (the key Run 4 regression) -----------------------------
+
+
+def test_c_matches_through_non_legacy_plural_member():
+    """The exact real Run 4 shape: legacy protein_id names a DIFFERENT protein than the one
+    the reaction context is actually for, but that context's protein is still present in the
+    same measurement's own authoritative protein_ids."""
+    measurement = _plural_measurement(protein_id="p2", protein_ids=("p1", "p2"))
+    context = _CatalyticContext(protein_id="p1")
+    assert _matches_context(measurement, context)
+
+
+# --- D. No intersection ------------------------------------------------------------------------
+
+
+def test_d_no_intersection_does_not_match():
+    measurement = _plural_measurement(protein_ids=("p1", "p2"))
+    context = _CatalyticContext(protein_id="p3")
+    assert not _matches_context(measurement, context)
+
+
+# --- E. Empty authoritative context: existing untagged behavior --------------------------------
+
+
+def test_e_empty_authoritative_context_is_untagged():
+    measurement = _plural_measurement(protein_id=None, protein_ids=())
+    assert _is_untagged(measurement)
+    assert _matches_context(measurement, _CatalyticContext())
+
+
+# --- F. Singular None but plural populated: not untagged ---------------------------------------
+
+
+def test_f_singular_none_plural_populated_is_not_untagged():
+    measurement = _plural_measurement(protein_id=None, protein_ids=("p1", "p2"))
+    assert not _is_untagged(measurement)
+
+
+# --- G. Multiple intersections: one evidence record, no duplication ----------------------------
+
+
+def test_g_multiple_intersections_collapse_without_duplication():
+    from app.agent2.characterization.types import ReactionCharacterization, ReactionClass
+
+    measurement = _plural_measurement(id="km-shared", protein_ids=("p1", "p2"))
+    rc = ReactionCharacterization(
+        reaction_id="r1",
+        reaction_name="r1",
+        participant_species_ids=(),
+        reactant_species_ids=(),
+        product_species_ids=(),
+        modifier_species_ids=(),
+        reversible=None,
+        reaction_classes=(ReactionClass.ENZYMATIC,),
+        catalyst_association_ids=("e0", "e1"),
+        catalytic_protein_ids=("p1", "p2"),
+        catalytic_complex_ids=(),
+        catalytic_enzyme_state_ids=(),
+        regulation_ids=(),
+        allosteric_interaction_ids=(),
+        enzyme_state_ids=(),
+        enzyme_state_transition_ids=(),
+        kinetic_measurement_ids=("km-shared",),
+        state_specific_kinetic_measurement_ids=(),
+        reported_rate_law_measurement_ids=(),
+        characterization_flags=(),
+        unresolved_features=(),
+    )
+    contexts = _build_contexts_with_evidence(rc, (measurement,))
+    assert len(contexts) == 1
+    _context, evidence = contexts[0]
+    assert evidence == (measurement,)
+
+
+# --- H. Complex/enzyme-state behavior unchanged -------------------------------------------------
+
+
+def test_h_complex_matching_still_uses_singular_field_only():
+    measurement = _plural_measurement(complex_id="c1")
+    assert _matches_context(measurement, _CatalyticContext(complex_id="c1"))
+    assert not _matches_context(measurement, _CatalyticContext(complex_id="c2"))
+
+
+def test_h_enzyme_state_matching_unaffected_by_plural_protein_context():
+    measurement = _plural_measurement(enzyme_state_id="es1", protein_ids=("p1", "p2"))
+    assert _matches_context(measurement, _CatalyticContext(enzyme_state_id="es1"))
+    assert not _matches_context(measurement, _CatalyticContext(enzyme_state_id="es2"))
+    # A state-tagged measurement never also matches a plain protein-general context, even
+    # when its protein_ids would otherwise intersect.
+    assert not _matches_context(measurement, _CatalyticContext(protein_id="p1"))
+
+
+def test_h_existing_complex_and_enzyme_state_selector_tests_remain_green():
+    """Sanity guard: the pre-existing enzyme-state-specific selector test suite (Steps 12/21)
+    is unaffected by this increment -- see the full test_kinetics.py run for the complete
+    regression, this just re-asserts the headline case."""
+    handoff = dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),),
+            compounds=(_compound(), _compound(id="g6p")),
+            reactions=(_reaction(),),
+        ),
+        reaction_participants=(
+            _participant(role="REACTANT", compound_id="glc"),
+            _participant(role="PRODUCT", compound_id="g6p"),
+        ),
+        enzyme_states=(_enzyme_state(id="es1"), _enzyme_state(id="es2")),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, enzyme_state_id="es1"),
+            _enzyme_association(protein_id=None, enzyme_state_id="es2"),
+        ),
+    )
+    assignment_set = _assign(handoff)
+    assert len(assignment_set.assignments) == 2
+
+
+# --- I. Reaction-context unresolved: excluded regardless of protein intersection ----------------
+
+
+def test_i_unresolved_reaction_id_excluded_regardless_of_protein_intersection():
+    handoff = dataclasses.replace(
+        _one_substrate_one_product_handoff(),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-unresolved",
+                reaction_id=None,
+                protein_id="p2",
+                protein_ids=("p1", "p2"),
+            ),
+        ),
+    )
+    assignment_set = _assign(handoff)
+    (assignment,) = assignment_set.assignments
+    assert "km-unresolved" not in assignment.source_measurement_ids
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+
+
+# --- J. Run-4-shaped regression: uniquely-resolved malonyl-CoA measurement survives grouping,
+# and substrate-anchored MM eligibility is reached. -----------------------------------------
+
+
+def test_j_run4_shaped_regression_reaches_substrate_anchored_mm():
+    """Reproduces the exact real failure shape: the reaction's own two curated catalysts are
+    FAS1 (p_fas1) and a DIFFERENT protein (p_other) -- not FAS1+FAS2 -- while the measurement's
+    legacy protein_id names FAS2 (p_fas2, not one of the reaction's own catalysts at all), and
+    its authoritative protein_ids correctly names FAS1 (one of the reaction's own catalysts)
+    alongside FAS2. Before this fix, the measurement was silently dropped from evidence
+    entirely; after it, the measurement is visible and reaches substrate-anchored MM
+    eligibility."""
+    handoff = dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),),
+            compounds=(
+                _compound(id="malonyl-coa", name="Malonyl-CoA"),
+                _compound(id="acp", name="Acyl-carrier protein"),
+                _compound(id="coa", name="CoA"),
+                _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+            ),
+            reactions=(_reaction(),),
+        ),
+        reaction_participants=(
+            _participant(role="REACTANT", compound_id="malonyl-coa"),
+            _participant(role="REACTANT", compound_id="acp"),
+            _participant(role="PRODUCT", compound_id="coa"),
+            _participant(role="PRODUCT", compound_id="malonyl-acp"),
+        ),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id="p_fas1"),
+            _enzyme_association(protein_id="p_other"),
+        ),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-malonyl-run4",
+                parameter_type="KM",
+                value=Decimal("18.0"),
+                unit="uM",
+                compound_id="malonyl-coa",
+                protein_id="p_fas2",
+                protein_ids=("p_fas1", "p_fas2"),
+            ),
+        ),
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert (
+        KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
+        in assignment.reason_codes
+    )
+    assert assignment.source_measurement_ids == ("km-malonyl-run4",)
+
+
+def test_j_downstream_parameter_declaration_receives_the_real_value():
+    """Extends J one stage further (Step 9): the resolved assignment's own real measurement
+    reaches real parameter declaration, exactly as the substrate-anchored MM increment's own
+    (unmodified) machinery already guarantees once the measurement is visible at all."""
+    from app.agent2.characterization import characterize_full_network
+    from app.agent2.network import assemble_full_network
+    from app.agent2.parameters import declare_parameters
+
+    handoff = dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),),
+            compounds=(
+                _compound(id="malonyl-coa", name="Malonyl-CoA"),
+                _compound(id="acp", name="Acyl-carrier protein"),
+                _compound(id="coa", name="CoA"),
+                _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+            ),
+            reactions=(_reaction(),),
+        ),
+        reaction_participants=(
+            _participant(role="REACTANT", compound_id="malonyl-coa"),
+            _participant(role="REACTANT", compound_id="acp"),
+            _participant(role="PRODUCT", compound_id="coa"),
+            _participant(role="PRODUCT", compound_id="malonyl-acp"),
+        ),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id="p_fas1"),
+            _enzyme_association(protein_id="p_other"),
+        ),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-malonyl-run4b",
+                parameter_type="KM",
+                value=Decimal("18.0"),
+                unit="uM",
+                compound_id="malonyl-coa",
+                protein_id="p_fas2",
+                protein_ids=("p_fas1", "p_fas2"),
+            ),
+        ),
+    )
+    network = assemble_full_network(handoff)
+    characterization = characterize_full_network(network)
+    assignments = assign_kinetic_laws(characterization, network)
+    parameters = declare_parameters(assignments, network)
+    real_values = {
+        p.value for p in parameters.parameter_specifications if p.value is not None
+    }
+    assert Decimal("18.0") in real_values

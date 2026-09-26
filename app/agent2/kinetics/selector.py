@@ -69,19 +69,46 @@ class _CatalyticContext:
 
 
 def _is_untagged(measurement: CuratedKineticMeasurement) -> bool:
-    """No catalyst identity at all -- carries only ``reaction_id`` context."""
+    """No catalyst identity at all -- carries only ``reaction_id`` context.
+
+    Uses the authoritative plural ``protein_ids`` -- never the legacy
+    singular ``protein_id`` -- to decide protein-untagged status ("Plural
+    Protein Context Matching for Kinetic Evidence" increment, Real
+    Integration Pilot 2 Run 4). ``protein_id=None`` with a non-empty
+    ``protein_ids`` (e.g. neither of two independently-discovering
+    proteins happens to be recorded as the legacy "first-established"
+    context) is real protein applicability, not an absence of one --
+    ``CuratedKineticMeasurement.__post_init__`` already guarantees
+    ``protein_ids`` is non-empty whenever ``protein_id`` is set, so this
+    check alone is sufficient and never needs to also read ``protein_id``.
+    """
     return (
         measurement.enzyme_state_id is None
-        and measurement.protein_id is None
+        and not measurement.protein_ids
         and measurement.complex_id is None
     )
 
 
 def _matches_context(measurement: CuratedKineticMeasurement, context: _CatalyticContext) -> bool:
+    """Whether ``measurement`` applies to one specific catalytic context.
+
+    ``context.protein_id`` (naming the one protein a general catalytic
+    context is *for*) is matched by **membership** in the measurement's
+    own authoritative plural ``protein_ids`` -- never by equality against
+    its legacy singular ``protein_id`` ("Plural Protein Context Matching
+    for Kinetic Evidence" increment). Real Integration Pilot 2 Run 4's own
+    regression: a measurement's legacy ``protein_id`` named one protein
+    (FAS2) while the reaction's own curated catalyst was a different
+    protein (FAS1) that the *same* measurement's ``protein_ids`` already,
+    correctly, also names -- the pre-fix equality check silently excluded
+    this measurement from every catalytic context on its own, correctly
+    reaction-attributed reaction. Complex/enzyme-state matching is
+    unchanged (Agent 1 has no plural equivalent for either).
+    """
     if context.enzyme_state_id is not None:
         return measurement.enzyme_state_id == context.enzyme_state_id
     if context.protein_id is not None:
-        return measurement.protein_id == context.protein_id and measurement.enzyme_state_id is None
+        return context.protein_id in measurement.protein_ids and measurement.enzyme_state_id is None
     if context.complex_id is not None:
         return measurement.complex_id == context.complex_id and measurement.enzyme_state_id is None
     return _is_untagged(measurement)
@@ -142,7 +169,16 @@ def _build_contexts_with_evidence(
             for evidence in per_catalyst.values()
         ]
         if all(text_set == text_sets[0] for text_set in text_sets):
-            combined = tuple(m for evidence in per_catalyst.values() for m in evidence)
+            # Deduplicate by measurement id, first-occurrence order: with plural protein_ids
+            # membership matching (see _matches_context's own docstring), a single measurement
+            # naming two or more of this reaction's own catalysts now legitimately matches more
+            # than one per_catalyst bucket -- collapsing those buckets together must still
+            # produce exactly one evidence record per measurement, never a duplicate.
+            combined_by_id: dict[str, CuratedKineticMeasurement] = {}
+            for evidence in per_catalyst.values():
+                for m in evidence:
+                    combined_by_id[m.id] = m
+            combined = tuple(combined_by_id.values())
             untagged = tuple(m for m in reaction_measurements if _is_untagged(m))
             return [(_CatalyticContext(), combined + untagged)]
         return [

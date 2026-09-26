@@ -701,6 +701,41 @@ expression disclosure). No core selector rule changed: a substrate-
 anchored measurement still never fabricates a value for any other
 reactant, and no combining algebraic expression is asserted for a
 reaction with more than one reactant.
+
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` was bumped from
+``"kinetic-law-v3"`` to ``"kinetic-law-v4"`` for the "Plural Protein
+Context Matching for Kinetic Evidence" increment, motivated by Real
+Integration Pilot 2 Run 4: the real, uniquely reaction-attributed
+malonyl-CoA ``Km`` -- already confirmed eligible for the substrate-
+anchored Michaelis-Menten approximation above -- was still silently
+excluded from its own reaction's kinetic-law evidence entirely, because
+``app.agent2.kinetics.selector._matches_context``/``_is_untagged``
+(Increment 4 code, predating Agent 1's own C.6 plural-protein-context
+concept) keyed exclusively off ``CuratedKineticMeasurement``'s legacy,
+non-authoritative singular ``protein_id`` field. The real reaction's own
+two curated catalysts did not include the measurement's own legacy
+``protein_id`` (which named a different real protein than either
+catalyst), even though the measurement's authoritative ``protein_ids``
+already, correctly, named one of them. ``_matches_context`` now checks
+**membership** in ``protein_ids`` (never equality against the legacy
+field), and ``_is_untagged`` now checks that ``protein_ids`` is empty
+(never that the legacy field is ``None``) -- the smallest change that
+makes catalytic-context grouping consistent with the authoritative-
+plural-context principle Agent 1.x Increment C.6 and this repository's
+own "Unresolved Kinetic Evidence Disclosure" increment already
+established for every other consumer of this field. A materially
+different, observable result for the same real input (the malonyl-CoA
+measurement now reaches, and is consumed by, the substrate-anchored
+Michaelis-Menten path this file's own ``v2``->``v3`` entry introduced,
+where it previously reached no catalytic context's evidence at all) --
+the version marker tracks behavior, not git history. Complex/enzyme-
+state matching, and every other precedence rule, are unchanged.
+``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` type changed shape -- ``CuratedKineticMeasurement
+.protein_ids`` already existed and was already authoritative (see that
+field's own docstring); only this package's own internal, private
+matching logic changed. ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent
+1 was not modified.
 """
 
 from __future__ import annotations
@@ -709,7 +744,7 @@ AGENT2_CONTRACT_VERSION = "0.9"
 AGENT1_HANDOFF_VERSION = "1.3"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
-KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v3"
+KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v4"
