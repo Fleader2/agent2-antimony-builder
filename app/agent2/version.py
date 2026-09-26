@@ -613,6 +613,34 @@ a new, separate package that may populate the former from the latter.
 step resolves to ``UNIQUE_MATCH`` simply no longer matches that function's
 own pre-existing ``reaction_id is None`` disclosure condition, exactly as
 that condition was already written to handle.
+
+``AGENT1_TRANSLATION_POLICY_VERSION`` is introduced at
+``"agent1-translation-v1"`` for the "Agent 1 -> Agent 2 Translation Layer"
+increment: a new, committed, deterministic translator
+(``app.agent2.handoff.translate_agent1_view_to_agent2``) that replaces the
+uncommitted, pilot-only translation scripts (Real Integration Pilot 2 Run
+1/Run 2's own scratchpad ``build_handoff``) with production code. Field-
+by-field mapping only -- no new biological inference, no name-based or
+EC-based matching, no reaction inference. Corrects one real defect found
+by comparing the pilot scripts against Agent 1's actual real Run 8 data:
+``CuratedKineticMeasurement.protein_id`` is now copied verbatim from
+Agent 1's own value, never nulled out when ``protein_ids`` has more than
+one entry -- the pilot scripts' own "ambiguous -> None" reasoning did not
+match reality (Agent 1's real handoff already reports a resolved, non-
+``None`` legacy ``protein_id`` even when ``protein_ids`` has two entries;
+only ``protein_ids`` itself was ever missing a field to exist in). Also
+confirms, by direct inspection, that Agent 1 does not currently supply a
+resolved kinetic ``compound_id`` (its own field name: ``substrate_id``) for
+any real measurement -- this translator copies whatever value is present
+verbatim and never derives one from a SABIO-RK species label or any other
+text field itself; see ``docs/14_agent1_agent2_translation_layer.md`` §7.
+``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` type changed shape -- the new package lives entirely
+in ``app.agent2.handoff``, consistent with this file's own established
+narrower reading for every other new package
+(``app.agent2.kinetics``/``app.agent2.characterization``/
+``app.agent2.kinetics.reaction_context``). ``AGENT1_HANDOFF_VERSION`` is
+unchanged -- Agent 1 was not modified.
 """
 
 from __future__ import annotations
@@ -627,9 +655,11 @@ MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v3"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
+AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
+    "AGENT1_TRANSLATION_POLICY_VERSION",
     "AGENT2_CONTRACT_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
