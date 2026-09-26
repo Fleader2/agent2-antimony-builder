@@ -641,6 +641,66 @@ narrower reading for every other new package
 (``app.agent2.kinetics``/``app.agent2.characterization``/
 ``app.agent2.kinetics.reaction_context``). ``AGENT1_HANDOFF_VERSION`` is
 unchanged -- Agent 1 was not modified.
+
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` was bumped from ``"kinetic-law-v2"``
+to ``"kinetic-law-v3"`` for the "Substrate-Anchored Michaelis-Menten
+Eligibility Refinement" increment, motivated by Real Integration Pilot 2
+Run 3: a real SABIO-RK Km was uniquely, deterministically reaction-
+attributed to the real malonyl-CoA:[acp] S-malonyltransferase reaction,
+but that reaction has 2 reactants and 2 products, so the pre-existing
+single-substrate Michaelis-Menten heuristic
+(``ENZYMATIC_SIMPLE_SUBSTRATE_PRODUCT``) never applied and every such
+context fell to the tentative mass-action default, whose sole parameter
+(a generic rate constant) is never populated from curated evidence by
+policy -- the real Km was correctly never fabricated into it, but was
+also never used at all.
+``app.agent2.kinetics.selector``/``.policy`` gained a new, narrower
+eligibility path, consulted only after the existing single-substrate
+heuristic has already returned ineligible for the same context: a
+multi-reactant reaction now receives ``MICHAELIS_MENTEN`` (reason code
+``SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION``) when, and only
+when, exactly one curated ``Km`` measurement is unambiguously anchored
+(by resolved ``compound_id``) to exactly one of that reaction's own
+reactant compounds -- never a product, never two or more candidate
+reactants, never two conflicting reports for the same reactant. A
+materially different, observable result for the same real input
+(before this increment, the real malonyl-CoA reaction's own kinetic-law
+assignment was unconditionally the tentative mass-action default) --
+the version marker tracks behavior, not git history, consistent with
+this constant's own ``v1``->``v2`` bump. No existing eligibility
+condition was loosened: every safety check the single-substrate
+heuristic already enforces (enzymatic, known catalyst, no allostery, not
+curated reversible, at most one catalytic enzyme state) is required
+identically here, with only the reactant/product *count* constraint
+relaxed -- and only when real, unambiguous evidence justifies it.
+``app.agent2.parameters.builder``/``app.agent2.model_specification
+.mapping.build_expression_and_species`` were **not modified**: both
+already handled an N-reactant ``MICHAELIS_MENTEN`` assignment correctly
+(one Km parameter slot per reactant, populated only from a measurement
+naming that exact compound; a fabricated combining algebra withheld
+whenever more than one reactant participates) -- this refinement only
+changes *which* reactions reach that already-correct machinery.
+``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` type changed shape -- the new reason code lives
+entirely in ``app.agent2.kinetics.types.KineticLawReasonCode``,
+consistent with this file's own established narrower reading.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v3"`` to ``"model-specification-v4"`` for the same
+increment: ``build_model_assumptions`` gained one new disclosure block
+(the eighth-now-sorted-as-a-distinct category; see that function's own
+docstring) that fires specifically for a
+``SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION`` assignment,
+naming the specific anchored reactant compound and source measurement id
+-- a materially different, observable result for the same real input
+(the real malonyl-CoA reaction's ``ModelSpecification`` now carries one
+additional, more specific ``ModelAssumption`` than it did before,
+layered alongside the pre-existing, unmodified generic multi-substrate-
+expression disclosure). No core selector rule changed: a substrate-
+anchored measurement still never fabricates a value for any other
+reactant, and no combining algebraic expression is asserted for a
+reaction with more than one reactant.
 """
 
 from __future__ import annotations
@@ -649,10 +709,10 @@ AGENT2_CONTRACT_VERSION = "0.9"
 AGENT1_HANDOFF_VERSION = "1.3"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
-KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
+KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v3"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v3"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v4"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"

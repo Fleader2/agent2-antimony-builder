@@ -93,6 +93,23 @@ class KineticLawReasonCode(StrEnum):
       law was available at all for this catalytic context (distinct from
       ``MULTIPLE_DISTINCT_REPORTED_RATE_LAWS``, which records that
       reported laws exist but conflict).
+    * ``SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION`` -- Real
+      Integration Pilot 2 Run 3's own finding: a real curated ``Km``
+      measurement can be uniquely, deterministically anchored (by
+      resolved ``compound_id``) to exactly one reactant of a multi-
+      reactant enzymatic reaction, even though the reaction as a whole
+      does not qualify for the conservative single-substrate Michaelis-
+      Menten heuristic (``ENZYMATIC_SIMPLE_SUBSTRATE_PRODUCT``). This
+      code marks a ``MICHAELIS_MENTEN`` assignment as a **partial, lumped
+      approximation** anchored to that one substrate only -- never a
+      claim that the reaction's full multi-substrate mechanism (ordered,
+      random, ping-pong, ...) has been established, and never a reason to
+      invent a value for any other reactant/co-substrate. Distinct from
+      ``TENTATIVE_MASS_ACTION_DEFAULT``: this is a positively evidence-
+      anchored assignment, not a blind structural default, so it does
+      **not** set ``KineticLawAssignment.is_tentative`` -- see that
+      property's own docstring. See
+      ``docs/07_kinetic_law_assignment.md`` §32 for the full policy.
     """
 
     CURATED_RATE_LAW_PRESENT = "CURATED_RATE_LAW_PRESENT"
@@ -113,6 +130,9 @@ class KineticLawReasonCode(StrEnum):
     STRUCTURAL_RULE_NOT_APPLICABLE = "STRUCTURAL_RULE_NOT_APPLICABLE"
     HEURISTIC_RULE_NOT_APPLICABLE = "HEURISTIC_RULE_NOT_APPLICABLE"
     INSUFFICIENT_CURATED_CONTEXT = "INSUFFICIENT_CURATED_CONTEXT"
+    SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION = (
+        "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -709,3 +709,65 @@ def test_declare_parameters_rejects_forced_calibrated_source(monkeypatch):
     monkeypatch.setattr(builder_module, "initialize_from_evidence", _force_calibrated)
     with pytest.raises(ParameterReferenceError, match="CALIBRATED"):
         _declare(_bare_state_transition_handoff())
+
+
+# --- Substrate-Anchored Michaelis-Menten Eligibility Refinement (Real Integration Pilot 2
+# Run 3 finding): the resolved MICHAELIS_MENTEN assignment for a multi-reactant reaction is
+# consumed by this package's own, completely unmodified declaration policy. -----------------
+
+
+def _malonyl_coa_like_handoff() -> Agent1CuratedKnowledgeViewContract:
+    return dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),),
+            compounds=(
+                _compound(id="malonyl-coa", name="Malonyl-CoA"),
+                _compound(id="acp", name="Acyl-carrier protein"),
+                _compound(id="coa", name="CoA"),
+                _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+            ),
+            reactions=(_reaction(),),
+        ),
+        reaction_participants=(
+            _participant(role="REACTANT", compound_id="malonyl-coa"),
+            _participant(role="REACTANT", compound_id="acp"),
+            _participant(role="PRODUCT", compound_id="coa"),
+            _participant(role="PRODUCT", compound_id="malonyl-acp"),
+        ),
+        reaction_enzyme_associations=(_enzyme_association(),),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-malonyl",
+                parameter_type="KM",
+                value=Decimal("18.0"),
+                unit="uM",
+                compound_id="malonyl-coa",
+            ),
+        ),
+    )
+
+
+def test_substrate_anchored_mm_declares_km_only_for_the_anchored_reactant():
+    declaration = _declare(_malonyl_coa_like_handoff())
+    ids = {s.parameter_id for s in declaration.parameter_specifications}
+    assert ids == {"kcat_r1_p1", "Km_r1_p1_malonyl-coa", "Km_r1_p1_acp"}
+
+    anchored = _by_id(declaration, "Km_r1_p1_malonyl-coa")
+    assert anchored.source is ParameterSource.CURATED
+    assert anchored.value == Decimal("18.0")
+    assert "km-malonyl" in anchored.provenance_refs
+
+
+def test_substrate_anchored_mm_never_invents_a_km_for_the_other_reactant():
+    declaration = _declare(_malonyl_coa_like_handoff())
+    unanchored = _by_id(declaration, "Km_r1_p1_acp")
+    assert unanchored.source is ParameterSource.PLACEHOLDER
+    assert unanchored.value is None
+    assert unanchored.provenance_refs == ()
+
+
+def test_substrate_anchored_mm_kcat_is_not_fabricated_either():
+    declaration = _declare(_malonyl_coa_like_handoff())
+    kcat = _by_id(declaration, "kcat_r1_p1")
+    assert kcat.source is ParameterSource.PLACEHOLDER
+    assert kcat.value is None

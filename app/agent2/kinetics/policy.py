@@ -13,7 +13,23 @@ from __future__ import annotations
 import re
 
 from app.agent2.characterization.types import ReactionCharacterization, ReactionClass
-from app.agent2.types import KineticLawType
+from app.agent2.types import CuratedKineticMeasurement, KineticLawType
+
+#: Mirrors ``app.agent2.parameters.policy.KM_TYPES`` exactly -- transcribed, never imported.
+#: ``app.agent2.kinetics`` is consulted earlier in the pipeline than ``app.agent2.parameters``
+#: and must not depend on it; this is the same "vocabulary exists in two places by
+#: transcription, not cross-layer import" discipline already used throughout this project
+#: (e.g. ``ParticipantRole``, transcribed verbatim across the two sibling repositories).
+_KM_PARAMETER_TYPES = frozenset({"KM", "K_M", "MICHAELIS_CONSTANT"})
+
+
+def is_km_measurement(measurement: CuratedKineticMeasurement) -> bool:
+    """Whether ``measurement.parameter_type`` is recognized as a Michaelis constant.
+
+    Case/whitespace-insensitive, exact-vocabulary match only -- never a
+    substring or fuzzy check.
+    """
+    return measurement.parameter_type.strip().upper() in _KM_PARAMETER_TYPES
 
 #: A bare product-of-terms expression -- letters, digits, underscore, dot, whitespace,
 #: and ``*`` only. No ``+``, ``-``, ``/``, ``(``, ``)``, or ``^`` -- those indicate a
@@ -120,6 +136,64 @@ def michaelis_menten_eligible(
     )
 
 
+def substrate_anchored_michaelis_menten_eligible(
+    rc: ReactionCharacterization, *, catalyst_known: bool, allostery_present: bool
+) -> bool:
+    """Structural preconditions for the substrate-anchored Michaelis-Menten approximation
+    (Real Integration Pilot 2 Run 3 finding), consulted only after ``michaelis_menten_
+    eligible`` has already returned ``False`` for the same context -- never a looser
+    replacement for it, only a fallback for the specific case that rule's own single-
+    reactant/single-product requirement rejects.
+
+    Deliberately does **not** constrain reactant or product count at all: a Km
+    characterizes one substrate's own binding affinity, independent of how many other
+    reactants or products the reaction has (confirmed live: the real malonyl-CoA:[acp]
+    S-malonyltransferase reaction has 2 reactants and 2 products). Every other safety
+    condition is identical to ``michaelis_menten_eligible`` -- enzymatic, a known catalyst,
+    no allostery tied to this context, not curated as reversible, at most one catalytic
+    enzyme state -- this function only asks "is a substrate-anchored approximation
+    *structurally* safe to consider," never "does a qualifying measurement actually exist"
+    (see ``find_substrate_anchored_km`` for the evidence-dependent half of this decision).
+    """
+    return (
+        ReactionClass.ENZYMATIC in rc.reaction_classes
+        and catalyst_known
+        and not allostery_present
+        and rc.reversible is not True
+        and len(rc.catalytic_enzyme_state_ids) <= 1
+    )
+
+
+def find_substrate_anchored_km(
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    *,
+    reactant_compound_ids: frozenset[str],
+) -> CuratedKineticMeasurement | None:
+    """The single, unambiguous ``Km`` measurement anchored to exactly one of this reaction's
+    own reactant compounds -- or ``None`` when no such measurement exists, or the evidence is
+    ambiguous or conflicting.
+
+    Deterministic and conservative, mirroring
+    ``app.agent2.kinetics.reaction_context``'s own "never choose among several" discipline:
+    a measurement counts only when it is recognized as a ``Km`` (``is_km_measurement``), its
+    ``compound_id`` is set, and that id is one of ``reactant_compound_ids`` -- never a
+    product, never a bare name match. **More than one** such measurement -- whether two
+    reports for the same reactant (conflicting evidence) or reports anchored to two different
+    reactants (which would imply a fuller multi-substrate mechanism this function does not
+    attempt to characterize) -- makes this return ``None`` rather than pick one arbitrarily.
+    """
+    anchored = [
+        m
+        for m in evidence
+        if is_km_measurement(m)
+        and m.compound_id is not None
+        and m.compound_id in reactant_compound_ids
+    ]
+    if len(anchored) != 1:
+        return None
+    return anchored[0]
+
+
 def tentative_mass_action_default_eligible(
     rc: ReactionCharacterization, *, catalyst_known: bool
 ) -> bool:
@@ -154,8 +228,11 @@ def tentative_mass_action_default_eligible(
 
 __all__ = [
     "classify_reported_rate_law_text",
+    "find_substrate_anchored_km",
+    "is_km_measurement",
     "is_simple_elementary_transition",
     "michaelis_menten_eligible",
     "normalize_rate_law_text",
+    "substrate_anchored_michaelis_menten_eligible",
     "tentative_mass_action_default_eligible",
 ]

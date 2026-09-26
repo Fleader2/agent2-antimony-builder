@@ -279,6 +279,8 @@ def _decide_heuristic(
     policy_version: str,
     catalyst_known: bool,
     allostery_present: bool,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    reactant_compound_ids: frozenset[str],
 ) -> KineticLawAssignment | None:
     if policy.michaelis_menten_eligible(
         rc, catalyst_known=catalyst_known, allostery_present=allostery_present
@@ -296,6 +298,19 @@ def _decide_heuristic(
                 "law, no conflicting reversibility, and no competing catalytic state."
             ),
         )
+    if policy.substrate_anchored_michaelis_menten_eligible(
+        rc, catalyst_known=catalyst_known, allostery_present=allostery_present
+    ):
+        anchored_km = policy.find_substrate_anchored_km(
+            evidence, reactant_compound_ids=reactant_compound_ids
+        )
+        if anchored_km is not None:
+            return _decide_substrate_anchored_mm(
+                context,
+                anchored_km=anchored_km,
+                reaction_id=reaction_id,
+                policy_version=policy_version,
+            )
     if policy.tentative_mass_action_default_eligible(rc, catalyst_known=catalyst_known):
         return _decide_tentative_mass_action_default(
             rc,
@@ -305,6 +320,52 @@ def _decide_heuristic(
             allostery_present=allostery_present,
         )
     return None
+
+
+def _decide_substrate_anchored_mm(
+    context: _CatalyticContext,
+    *,
+    anchored_km: CuratedKineticMeasurement,
+    reaction_id: str,
+    policy_version: str,
+) -> KineticLawAssignment:
+    """Build the substrate-anchored Michaelis-Menten approximation assignment (Real
+    Integration Pilot 2 Run 3 finding; see ``KineticLawReasonCode
+    .SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION``'s own docstring).
+
+    ``source_measurement_ids`` names the one real measurement this decision is anchored to
+    -- unlike the plain ``michaelis_menten_eligible`` heuristic above (a purely structural
+    decision with no source measurement of its own), this assignment *is* evidence-driven,
+    so its provenance is preserved exactly like ``CURATED_REPORTED``'s own
+    ``source_measurement_ids``. Never claims the reaction's full mechanism is characterized:
+    ``app.agent2.model_specification.mapping.build_expression_and_species`` still withholds a
+    fabricated combining algebra whenever more than one reactant participates (unchanged,
+    pre-existing behavior -- see that function's own "genuinely multi-substrate" branch), and
+    ``app.agent2.parameters.builder._declare_michaelis_menten`` still declares a Km slot only
+    for a reactant an actual measurement names, never inventing one for any other.
+    """
+    return _assignment(
+        reaction_id=reaction_id,
+        context=context,
+        kinetic_law_type=KineticLawType.MICHAELIS_MENTEN,
+        assignment_source=KineticLawAssignmentSource.HEURISTIC,
+        policy_version=policy_version,
+        source_measurement_ids=(anchored_km.id,),
+        reason_codes=(KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION,),
+        unresolved_reasons=(
+            KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION,
+        ),
+        explanation=(
+            f"Assigned MICHAELIS_MENTEN as a conservative, substrate-anchored approximation: "
+            f"curated kinetic measurement {anchored_km.id} reports a Km explicitly and "
+            "uniquely for one reactant of this multi-reactant enzymatic reaction, with no "
+            "ambiguous or conflicting reactant-anchored evidence. This is a partial, lumped "
+            "approximation, not a claim that the reaction's full multi-substrate mechanism "
+            "(ordered, random, ping-pong, ...) has been established -- no value is invented "
+            "for any other reactant or co-substrate, and no combining algebraic expression is "
+            "asserted for a reaction with more than one reactant."
+        ),
+    )
 
 
 def _decide_tentative_mass_action_default(
@@ -420,6 +481,25 @@ def _decide_unassigned(
     )
 
 
+def _reactant_compound_ids(rc: ReactionCharacterization, network: FullNetwork) -> frozenset[str]:
+    """Every reactant compound id for one reaction, resolved from its own
+    ``reactant_species_ids`` via ``FullNetwork.species``.
+
+    Mirrors ``app.agent2.parameters.builder._reactant_compound_ids``'s own
+    ``source_compound_id or species_id`` fallback convention exactly --
+    transcribed rather than imported, since ``app.agent2.kinetics`` is
+    consulted earlier in the pipeline than ``app.agent2.parameters`` and
+    must not depend on it (same discipline as ``policy.is_km_measurement``
+    mirroring ``app.agent2.parameters.policy.KM_TYPES``).
+    """
+    species_by_id = {s.species_id: s for s in network.species}
+    return frozenset(
+        species_by_id[sid].source_compound_id or sid
+        for sid in rc.reactant_species_ids
+        if sid in species_by_id
+    )
+
+
 def _assignment(
     *,
     reaction_id: str,
@@ -461,6 +541,7 @@ def select_reaction_assignments(
     reaction_measurements: tuple[CuratedKineticMeasurement, ...],
     enzyme_state_characterizations_by_id: dict[str, EnzymeStateCharacterization],
     policy_version: str,
+    reactant_compound_ids: frozenset[str] = frozenset(),
 ) -> tuple[KineticLawAssignment, ...]:
     """Decide every catalytic context's kinetic-law assignment for one reaction.
 
@@ -497,6 +578,8 @@ def select_reaction_assignments(
             policy_version=policy_version,
             catalyst_known=catalyst_known,
             allostery_present=allostery_present,
+            evidence=evidence,
+            reactant_compound_ids=reactant_compound_ids,
         )
         if heuristic is not None:
             assignments.append(heuristic)
@@ -549,6 +632,10 @@ def assign_kinetic_laws(
     enzyme_state_characterizations_by_id = {
         state.enzyme_state_id: state for state in characterization.enzyme_state_characterizations
     }
+    reactant_compound_ids_by_reaction = {
+        rc.reaction_id: _reactant_compound_ids(rc, network)
+        for rc in characterization.reaction_characterizations
+    }
 
     assignments: list[KineticLawAssignment] = []
     for rc in characterization.reaction_characterizations:
@@ -558,6 +645,7 @@ def assign_kinetic_laws(
                 reaction_measurements=tuple(measurements_by_reaction.get(rc.reaction_id, ())),
                 enzyme_state_characterizations_by_id=enzyme_state_characterizations_by_id,
                 policy_version=KINETIC_LAW_ASSIGNMENT_POLICY_VERSION,
+                reactant_compound_ids=reactant_compound_ids_by_reaction[rc.reaction_id],
             )
         )
 

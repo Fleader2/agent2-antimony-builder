@@ -43,6 +43,28 @@ preserve directly, or misread a status marker as a real expression:
   same name -- the previous `_catalytic_context_tag` provenance-string
   workaround has been removed entirely, now that the fields exist
   directly (§11).
+**"Substrate-Anchored Michaelis-Menten Eligibility Refinement" increment**
+(motivated by Real Integration Pilot 2 Run 3: a real SABIO-RK Km was
+uniquely, deterministically reaction-attributed to yeast's real malonyl-
+CoA:[acp] S-malonyltransferase reaction, but that reaction has 2 reactants
+and 2 products, so it never qualified for the pre-existing single-
+substrate Michaelis-Menten heuristic and fell to a tentative mass-action
+default whose only parameter is never populated from curated evidence --
+the real Km was correctly never fabricated into it, but also never used
+at all). `app.agent2.kinetics.selector`/`.policy` gained a new, narrowly-
+scoped eligibility path -- `SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_
+APPROXIMATION` -- that assigns `MICHAELIS_MENTEN` to a multi-reactant
+reaction only when exactly one curated `Km` measurement is unambiguously
+anchored (by resolved `compound_id`) to exactly one of that reaction's
+own reactant compounds; nothing here changed to make this possible, since
+`app.agent2.parameters.builder._declare_michaelis_menten` and
+`build_expression_and_species` (this module, unmodified) already declare
+a Km slot per reactant and already withhold a fabricated combining
+expression for 2+ reactants. `build_model_assumptions` gained one new
+disclosure block (below) naming the specific anchored substrate and
+source measurement for this case -- distinct from, and layered alongside,
+the existing generic multi-substrate-expression disclosure.
+
 * A genuinely multi-substrate `MICHAELIS_MENTEN` assignment now produces
   `expression=None` (`law_type` stays `MICHAELIS_MENTEN`,
   `parameter_ids`/`species_ids` stay populated) -- the previous
@@ -291,14 +313,19 @@ def build_model_assumptions(
     candidate_boundary_ids: tuple[str, ...],
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
-    """Deterministic `ModelAssumption` records for six disclosed-incompleteness categories:
+    """Deterministic `ModelAssumption` records for seven disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
     defaults, PLACEHOLDER parameters, UNASSIGNED kinetic laws, unresolved MEDIUM candidate
     boundaries), one added in a later pre-commit revision (unresolved multi-substrate
-    Michaelis-Menten mechanisms, §8), and one added by the "Unresolved Kinetic Evidence
+    Michaelis-Menten mechanisms, §8), one added by the "Unresolved Kinetic Evidence
     Disclosure" increment (a kinetic measurement whose reaction applicability is unresolved,
-    below). Never prose speculation, never a duplicate `assumption_id` (each is keyed
-    deterministically off the one entity id it describes), never invented for a category
+    below), and one added by the "Substrate-Anchored Michaelis-Menten Eligibility Refinement"
+    increment (a `MICHAELIS_MENTEN` law anchored to one real, uniquely-attributed Km for a
+    multi-reactant reaction -- distinct from the plain multi-substrate-expression disclosure
+    above: this one names the specific anchored substrate and source measurement, and fires
+    even in the rare case a future `build_expression_and_species` extension might resolve an
+    expression for it). Never prose speculation, never a duplicate `assumption_id` (each is
+    keyed deterministically off the one entity id it describes), never invented for a category
     this increment has no clean, already-computed signal for (see docs/11 §16 for what was
     deliberately not attempted, e.g. "known incompleteness of regulation context").
 
@@ -306,9 +333,54 @@ def build_model_assumptions(
     caller that does not (yet) pass it -- an empty tuple simply produces no assumptions of
     the new category, exactly as if this parameter did not exist."""
     assumptions: list[ModelAssumption] = []
+    measurements_by_id = {m.id: m for m in kinetic_measurements}
 
     for law in sorted(kinetic_laws, key=lambda law: law.kinetic_law_id):
         assignment = kinetic_law_assignments_by_kinetic_law_id.get(law.kinetic_law_id)
+        if assignment is not None and (
+            KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
+            in assignment.reason_codes
+        ):
+            (anchor_measurement_id,) = assignment.source_measurement_ids
+            anchor_measurement = measurements_by_id.get(anchor_measurement_id)
+            anchored_compound = (
+                anchor_measurement.compound_id if anchor_measurement is not None else None
+            )
+            assumptions.append(
+                ModelAssumption(
+                    assumption_id=(
+                        f"assumption::substrate-anchored-mm-approximation::{law.kinetic_law_id}"
+                    ),
+                    category="kinetics",
+                    statement=(
+                        f"Reaction {law.reaction_id} uses a substrate-anchored "
+                        "Michaelis-Menten approximation: curated measurement "
+                        f"{anchor_measurement_id} reports a Km uniquely and explicitly for "
+                        f"reactant compound {anchored_compound!r}, but this reaction has more "
+                        "than one reactant/co-substrate. This is a partial, lumped "
+                        "approximation anchored to that one substrate only -- it is not a "
+                        "claim that the reaction's full multi-substrate mechanism (ordered, "
+                        "random, ping-pong, ...) has been established, no value is invented "
+                        "for any other reactant, and no combining algebraic expression is "
+                        "asserted (see MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED when this "
+                        "reaction has more than one reactant)."
+                    ),
+                    related_entity_ids=tuple(
+                        eid
+                        for eid in (
+                            law.reaction_id,
+                            law.kinetic_law_id,
+                            anchor_measurement_id,
+                            anchored_compound,
+                        )
+                        if eid is not None
+                    ),
+                    source="app.agent2.kinetics",
+                    reason_code=(
+                        KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION.value
+                    ),
+                )
+            )
         if assignment is not None and _is_tentative(assignment):
             assumptions.append(
                 ModelAssumption(

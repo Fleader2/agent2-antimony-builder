@@ -575,7 +575,57 @@ shift more reactions toward `CUSTOM`/a tentative default rather than a
 fully-justified assignment, which downstream increments must already
 handle.
 
-## 32. Final architectural rule
+## 32. Substrate-Anchored Michaelis-Menten Eligibility Refinement
+
+Motivated by Real Integration Pilot 2 Run 3: a real SABIO-RK `Km` was
+uniquely, deterministically reaction-attributed (by
+`app.agent2.kinetics.reaction_context`, a separate, unmodified increment)
+to the real malonyl-CoA:[acp] S-malonyltransferase reaction. That
+reaction has 2 reactants and 2 products, so it never satisfied the
+single-substrate Michaelis-Menten heuristic (§13-15), and fell to the
+tentative mass-action default -- whose sole parameter (a generic rate
+constant) is never populated from curated evidence by policy (§17). The
+real `Km` was correctly never fabricated into it, but was also never
+used at all.
+
+`policy.substrate_anchored_michaelis_menten_eligible`/
+`policy.find_substrate_anchored_km` add one new, narrower eligibility
+path, consulted only after `michaelis_menten_eligible` has already
+returned ineligible for the same context (never a looser replacement for
+it): a multi-reactant reaction now receives `MICHAELIS_MENTEN`
+(`KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION`)
+when, and only when, **exactly one** curated `Km` measurement is
+unambiguously anchored -- by resolved `compound_id`, never a bare name --
+to exactly one of that reaction's own reactant compounds. Every other
+safety condition `michaelis_menten_eligible` already enforces (enzymatic,
+a known catalyst, no allostery, not curated reversible, at most one
+catalytic enzyme state) is required identically here; only the
+reactant/product *count* constraint is relaxed, and only when real,
+unambiguous evidence justifies it. A `Km` anchored to a product, to two
+different reactants, or reported twice with conflicting values for the
+same reactant all leave the reaction ineligible -- never an arbitrary
+choice among them.
+
+Unlike the plain heuristic, this assignment carries
+`source_measurement_ids` (the one real measurement it is anchored to) --
+it is positively evidence-driven, not a purely structural decision, but
+it is also **not** `is_tentative` (that property checks only for
+`TENTATIVE_MASS_ACTION_DEFAULT` -- a deliberately distinct epistemic
+category, see that reason code's own docstring).
+
+Nothing downstream needed to change: `app.agent2.parameters
+.builder._declare_michaelis_menten` already declares one `Km` slot per
+reactant, populated only from a measurement naming that exact compound,
+for any reactant count; `app.agent2.model_specification.mapping
+.build_expression_and_species` already withholds a fabricated combining
+algebra whenever more than one reactant participates
+(`MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED`, §24). This refinement only
+changes *which* reactions reach that already-correct machinery.
+`build_model_assumptions` gained one additional, more specific disclosure
+block naming the anchored substrate and source measurement, layered
+alongside (never replacing) that existing generic disclosure.
+
+## 33. Final architectural rule
 
 Curated rate laws are preserved as evidence-backed modeling inputs.
 Deterministic and heuristic kinetic-law choices are modeling decisions

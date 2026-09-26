@@ -933,3 +933,79 @@ def test_kinetic_law_selection_and_placeholder_behavior_unchanged_by_deferred_me
     # the separate, deferred measurement's own presence.
     reaction_parameter_values = {p.value for p in model.parameters}
     assert Decimal("3340.0") not in reaction_parameter_values
+
+
+# --- Substrate-Anchored Michaelis-Menten Eligibility Refinement (Real Integration Pilot 2
+# Run 3 finding) --------------------------------------------------------------------------------
+
+
+def _malonyl_coa_like_handoff() -> Agent1CuratedKnowledgeViewContract:
+    return _handoff(
+        compartments=(_compartment(),),
+        compounds=(
+            _compound(id="malonyl-coa", name="Malonyl-CoA"),
+            _compound(id="acp", name="Acyl-carrier protein"),
+            _compound(id="coa", name="CoA"),
+            _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+        ),
+        reactions=(_reaction(id="r1"),),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="malonyl-coa", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="acp", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="coa", role="PRODUCT"),
+            _participant(reaction_id="r1", compound_id="malonyl-acp", role="PRODUCT"),
+        ),
+        reaction_enzyme_associations=(_enzyme_association(reaction_id="r1", protein_id="p1"),),
+        kinetic_measurements=(
+            _measurement(
+                id="km-malonyl",
+                parameter_type="KM",
+                value=Decimal("18.0"),
+                unit="uM",
+                reaction_id="r1",
+                compound_id="malonyl-coa",
+            ),
+        ),
+    )
+
+
+def test_substrate_anchored_mm_produces_dedicated_disclosure_assumption():
+    model = _assemble(_malonyl_coa_like_handoff())
+    matching = [
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+    ]
+    assert len(matching) == 1
+    assumption = matching[0]
+    assert "r1" in assumption.related_entity_ids
+    assert "km-malonyl" in assumption.related_entity_ids
+    assert "malonyl-coa" in assumption.related_entity_ids
+    assert "km-malonyl" in assumption.statement
+    assert "malonyl-coa" in assumption.statement
+
+
+def test_substrate_anchored_mm_law_type_and_no_fabricated_expression():
+    model = _assemble(_malonyl_coa_like_handoff())
+    (law,) = model.kinetic_laws
+    assert law.law_type is KineticLawType.MICHAELIS_MENTEN
+    # Genuinely 2-reactant -- the pre-existing, unmodified expression policy withholds a
+    # fabricated combining algebra regardless of this new eligibility path.
+    assert law.expression is None
+    assert not law.has_expression
+
+
+def test_substrate_anchored_mm_also_produces_multi_substrate_expression_disclosure():
+    """The two disclosures are layered, not exclusive: the generic multi-substrate-expression
+    ModelAssumption (pre-existing, unmodified) still fires alongside the new, more specific
+    substrate-anchored disclosure."""
+    model = _assemble(_malonyl_coa_like_handoff())
+    reason_codes = {a.reason_code for a in model.model_assumptions}
+    assert "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION" in reason_codes
+    assert "MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED" in reason_codes
+
+
+def test_substrate_anchored_mm_no_real_value_leaks_into_any_parameter_other_than_anchor():
+    model = _assemble(_malonyl_coa_like_handoff())
+    real_valued = {p.parameter_id: p.value for p in model.parameters if p.value is not None}
+    assert real_valued == {"Km_r1_p1_malonyl-coa": Decimal("18.0")}

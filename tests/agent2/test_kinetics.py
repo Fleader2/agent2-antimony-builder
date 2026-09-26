@@ -913,3 +913,201 @@ def test_tentative_default_is_immutable_and_reason_code_enforced():
             unresolved_reasons=(KineticLawReasonCode.KINETIC_MECHANISM_NOT_CURATED,),
             explanation="test",
         )
+
+
+# --- Substrate-Anchored Michaelis-Menten Eligibility Refinement (Real Integration Pilot 2
+# Run 3 finding) -----------------------------------------------------------------------------
+
+
+def _malonyl_coa_like_handoff(
+    *, anchored_measurements: tuple[CuratedKineticMeasurement, ...] = ()
+) -> Agent1CuratedKnowledgeViewContract:
+    """Shaped exactly after the real, live malonyl-CoA:[acp] S-malonyltransferase reaction
+    (Real Integration Pilot 2 Run 3): 2 reactants, 2 products, one catalyst, no reported law,
+    no allostery, reversibility unknown."""
+    return dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),),
+            compounds=(
+                _compound(id="malonyl-coa", name="Malonyl-CoA"),
+                _compound(id="acp", name="Acyl-carrier protein"),
+                _compound(id="coa", name="CoA"),
+                _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+            ),
+            reactions=(_reaction(),),
+        ),
+        reaction_participants=(
+            _participant(role="REACTANT", compound_id="malonyl-coa"),
+            _participant(role="REACTANT", compound_id="acp"),
+            _participant(role="PRODUCT", compound_id="coa"),
+            _participant(role="PRODUCT", compound_id="malonyl-acp"),
+        ),
+        reaction_enzyme_associations=(_enzyme_association(),),
+        kinetic_measurements=anchored_measurements,
+    )
+
+
+def _anchored_km(**overrides) -> CuratedKineticMeasurement:
+    merged = {
+        "id": "km-malonyl",
+        "parameter_type": "KM",
+        "value": Decimal("18.0"),
+        "unit": "uM",
+        "reaction_id": "r1",
+        "compound_id": "malonyl-coa",
+    } | overrides
+    return _kinetic_measurement(**merged)
+
+
+def test_single_substrate_mm_unchanged_by_new_policy():
+    """The pre-existing single-substrate/single-product heuristic path is untouched."""
+    assignment = _only(_assign(_one_substrate_one_product_handoff()))
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert assignment.reason_codes == (KineticLawReasonCode.ENZYMATIC_SIMPLE_SUBSTRATE_PRODUCT,)
+
+
+def test_multi_reactant_reaction_with_anchored_km_becomes_eligible():
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=(_anchored_km(),))
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert assignment.assignment_source is KineticLawAssignmentSource.HEURISTIC
+    assert (
+        KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
+        in assignment.reason_codes
+    )
+    assert (
+        KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
+        in assignment.unresolved_reasons
+    )
+    # positively evidence-anchored, never conflated with the blind tentative default.
+    assert not assignment.is_tentative
+
+
+def test_multi_reactant_reaction_without_anchored_km_remains_conservative():
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=())
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is KineticLawType.MASS_ACTION
+    assert assignment.is_tentative
+    assert KineticLawReasonCode.TENTATIVE_MASS_ACTION_DEFAULT in assignment.reason_codes
+
+
+def test_real_source_measurement_id_is_preserved():
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=(_anchored_km(id="km-real-18229"),))
+    assignment = _only(_assign(handoff))
+    assert assignment.source_measurement_ids == ("km-real-18229",)
+
+
+def test_km_anchored_to_a_product_remains_ineligible():
+    handoff = _malonyl_coa_like_handoff(
+        anchored_measurements=(_anchored_km(id="km-product", compound_id="coa"),)
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+    assert assignment.is_tentative
+
+
+def test_vmax_alone_does_not_trigger_substrate_anchored_policy():
+    handoff = _malonyl_coa_like_handoff(
+        anchored_measurements=(
+            _anchored_km(
+                id="vmax-1", parameter_type="VMAX", compound_id="malonyl-coa", unit="1/s"
+            ),
+        )
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+    assert assignment.is_tentative
+
+
+def test_two_measurements_anchored_to_different_reactants_remains_ineligible():
+    """Ambiguous evidence -- would imply a fuller multi-substrate characterization this
+    policy does not attempt -- never arbitrarily picks one."""
+    handoff = _malonyl_coa_like_handoff(
+        anchored_measurements=(
+            _anchored_km(id="km-malonyl", compound_id="malonyl-coa"),
+            _anchored_km(id="km-acp", compound_id="acp", value=Decimal("5.0")),
+        )
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+    assert assignment.is_tentative
+
+
+def test_conflicting_measurements_for_the_same_reactant_remain_conservative():
+    handoff = _malonyl_coa_like_handoff(
+        anchored_measurements=(
+            _anchored_km(id="km-a", compound_id="malonyl-coa", value=Decimal("18.0")),
+            _anchored_km(id="km-b", compound_id="malonyl-coa", value=Decimal("500.0")),
+        )
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+    assert assignment.is_tentative
+
+
+def test_ambiguous_catalytic_context_remains_ineligible():
+    """Multiple distinct catalytic enzyme states on the same reaction -- the same safety
+    condition the plain Michaelis-Menten heuristic already enforces."""
+    from app.agent2.types import CuratedEnzymeState
+
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=(_anchored_km(),))
+    handoff = dataclasses.replace(
+        handoff,
+        enzyme_states=(
+            CuratedEnzymeState(id="es1", state_type="BASE", protein_id="p1"),
+            CuratedEnzymeState(id="es2", state_type="MODIFIED", protein_id="p1"),
+        ),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, enzyme_state_id="es1"),
+            _enzyme_association(protein_id=None, enzyme_state_id="es2"),
+        ),
+    )
+    assignment_set = _assign(handoff)
+    for assignment in assignment_set.assignments:
+        assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+
+
+def test_allostery_blocks_substrate_anchored_eligibility_too():
+    from app.agent2.types import CuratedAllostericInteraction, CuratedEnzymeState
+
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=(_anchored_km(),))
+    handoff = dataclasses.replace(
+        handoff,
+        enzyme_states=(CuratedEnzymeState(id="es1", state_type="BASE", protein_id="p1"),),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, enzyme_state_id="es1"),
+        ),
+        allosteric_interactions=(
+            CuratedAllostericInteraction(
+                id="ai1", enzyme_state_id="es1", ligand_compound_id="acp", effect="INHIBITOR"
+            ),
+        ),
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+    assert assignment.is_tentative
+
+
+def test_reversible_reaction_blocks_substrate_anchored_eligibility_too():
+    handoff = _malonyl_coa_like_handoff(anchored_measurements=(_anchored_km(),))
+    handoff = dataclasses.replace(
+        handoff, reactions=(_reaction(reversible=True),)
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
+
+
+def test_substrate_anchored_decision_is_deterministic_regardless_of_evidence_order():
+    forward = _malonyl_coa_like_handoff(
+        anchored_measurements=(
+            _anchored_km(id="km-malonyl"),
+            _anchored_km(id="km-other", compound_id="unrelated-compound-not-a-reactant"),
+        )
+    )
+    reversed_order = dataclasses.replace(
+        forward, kinetic_measurements=tuple(reversed(forward.kinetic_measurements))
+    )
+    a1 = _only(_assign(forward))
+    a2 = _only(_assign(reversed_order))
+    assert a1.kinetic_law_type == a2.kinetic_law_type == KineticLawType.MICHAELIS_MENTEN
+    assert a1.source_measurement_ids == a2.source_measurement_ids == ("km-malonyl",)
