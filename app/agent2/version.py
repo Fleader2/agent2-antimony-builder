@@ -584,6 +584,35 @@ field can carry is not a shape change, per this file's own bump criterion
 (mirrors the already-recorded precedent for ``"PLACEHOLDER"``/
 ``"MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"``, neither of which bumped
 this constant either).
+
+``REACTION_CONTEXT_RESOLUTION_POLICY_VERSION`` is introduced at
+``"reaction-context-resolution-v1"`` for the "Reaction-Context Resolution
+for Kinetic Evidence" increment: a new, standalone rule set
+(``app.agent2.kinetics.reaction_context``) that deterministically resolves
+a ``CuratedKineticMeasurement.reaction_id`` from ``None`` to exactly one
+curated reaction, using only ``compound_id`` identity (never protein
+identity, EC number, ``ReactionEnzyme`` membership, pathway membership, or
+nearest-name matching) resolved against ``FullNetwork.species[]
+.source_compound_id`` and ``ParticipantRole.REACTANT`` participation --
+see ``docs/13_kinetic_measurement_reaction_context_resolution.md`` for the
+full real-data inspection and matching policy. Only ``KM``/``KI`` are ever
+eligible (a hard rule, not derived from which parameter types happen to
+carry ``compound_id`` today); ``VMAX``/``KCAT`` are never resolved this
+way. This is entirely a new, opt-in pre-processing step over a
+``FullNetwork`` -- ``app.agent2.kinetics.selector.assign_kinetic_laws``
+and ``app.agent2.parameters.builder`` are completely unmodified and
+continue to operate only on measurements that already carry a
+``reaction_id``, whether curated originally or resolved by this new step.
+``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` type changed shape -- ``CuratedKineticMeasurement
+.reaction_id``/``.compound_id`` already existed; this increment only adds
+a new, separate package that may populate the former from the latter.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified.
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` is unchanged --
+``build_model_assumptions`` itself was not touched; a measurement this new
+step resolves to ``UNIQUE_MATCH`` simply no longer matches that function's
+own pre-existing ``reaction_id is None`` disclosure condition, exactly as
+that condition was already written to handle.
 """
 
 from __future__ import annotations
@@ -597,6 +626,7 @@ PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v3"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
+REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -608,4 +638,5 @@ __all__ = [
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
+    "REACTION_CONTEXT_RESOLUTION_POLICY_VERSION",
 ]

@@ -11,6 +11,12 @@ from app.agent2.kinetics.errors import (
     KineticLawReferenceError,
     UnsupportedKineticLawInputError,
 )
+from app.agent2.kinetics.reaction_context import (
+    ReactionContextMatchResult,
+    ReactionContextResolution,
+    apply_resolved_reaction_context,
+    resolve_kinetic_measurement_reaction_context,
+)
 from app.agent2.kinetics.selector import assign_kinetic_laws
 from app.agent2.kinetics.types import (
     KineticLawAssignment,
@@ -26,6 +32,10 @@ __all__ = [
     "KineticLawAssignmentSource",
     "KineticLawReasonCode",
     "KineticLawReferenceError",
+    "ReactionContextMatchResult",
+    "ReactionContextResolution",
     "UnsupportedKineticLawInputError",
+    "apply_resolved_reaction_context",
     "assign_kinetic_laws",
+    "resolve_kinetic_measurement_reaction_context",
 ]
