@@ -90,6 +90,7 @@ def assemble_model_specification(
         kinetic_law_assignments_by_kinetic_law_id=kinetic_law_assignments_by_kinetic_law_id,
         parameters=parameters.parameter_specifications,
         candidate_boundary_ids=decomposition.candidate_boundary_ids,
+        kinetic_measurements=network.kinetic_measurements,
     )
 
     model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"

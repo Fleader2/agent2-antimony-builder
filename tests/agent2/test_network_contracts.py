@@ -517,3 +517,51 @@ def test_full_network_never_converts_kinetic_measurement_to_parameter():
         kinetic_measurements=(_kinetic_measurement(),),
     )
     assert isinstance(network.kinetic_measurements[0], CuratedKineticMeasurement)
+
+
+# --- "Unresolved Kinetic Evidence Disclosure" increment: plural protein_ids ------------------
+#
+# Real Integration Pilot 1 Run 7/8, Pilot 2 Run 2: Agent 1's own real handoff can report
+# that one kinetic measurement is applicable to more than one protein (yeast's real
+# FAS1/FAS2 heterodimer, sharing one EC number). CuratedKineticMeasurement.protein_id's
+# single-value shape could only ever record one of them; protein_ids is the new,
+# authoritative, deterministic, complete representation.
+
+
+def test_plural_protein_ids_are_preserved_verbatim():
+    measurement = _kinetic_measurement(protein_id=None, protein_ids=("fas2", "fas1"))
+    assert set(measurement.protein_ids) == {"fas1", "fas2"}
+
+
+def test_protein_ids_are_deterministically_ordered_regardless_of_input_order():
+    forward = _kinetic_measurement(protein_id=None, protein_ids=("fas2", "fas1"))
+    backward = _kinetic_measurement(protein_id=None, protein_ids=("fas1", "fas2"))
+    assert forward.protein_ids == backward.protein_ids == ("fas1", "fas2")
+
+
+def test_protein_ids_never_arbitrarily_narrowed_to_one():
+    measurement = _kinetic_measurement(protein_id=None, protein_ids=("fas1", "fas2"))
+    assert len(measurement.protein_ids) == 2
+    assert measurement.protein_id is None  # never arbitrarily set to either one
+
+
+def test_single_protein_id_derives_protein_ids_automatically_backward_compatible():
+    """Existing single-protein construction (protein_id set, protein_ids omitted
+    entirely) needs no change and remains fully backward compatible."""
+    measurement = _kinetic_measurement(protein_id="p1")
+    assert measurement.protein_ids == ("p1",)
+
+
+def test_protein_ids_defaults_to_empty_when_neither_supplied():
+    measurement = _kinetic_measurement(protein_id=None)
+    assert measurement.protein_ids == ()
+
+
+def test_protein_ids_deduplicated_defensively():
+    measurement = _kinetic_measurement(protein_id=None, protein_ids=("fas1", "fas1", "fas2"))
+    assert measurement.protein_ids == ("fas1", "fas2")
+
+
+def test_protein_ids_rejects_non_string_tuple():
+    with pytest.raises(TypeError):
+        _kinetic_measurement(protein_id=None, protein_ids=(1, 2))

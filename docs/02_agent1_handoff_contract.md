@@ -56,6 +56,8 @@ increment.
 | `reaction_enzyme_associations` | Each association names a reaction and (a protein or complex) that catalyzes it. | That every reaction has an associated enzyme — some may have none. | Empty tuple if none. | n/a |
 | `regulatory_interactions` | Zero or more entries, each with a regulator, a target, and an effect. | That this list is complete or even present for a well-regulated network — Agent 1 v1's regulation pipeline is schema-ready, not curated end-to-end (§6). | Empty tuple if none — never treated as "no regulation exists," only "no regulation is currently curated." | n/a |
 | `kinetic_measurements` (Agent 1.x Increment A) | Zero or more `CuratedKineticMeasurement` entries, each with a parameter type, an as-reported value/unit, and (when resolved) a reaction/protein/organism/publication reference. | That this list covers every reaction, that it is auto-converted into a `ParameterSpecification`, or that `normalized_value`/`normalized_unit` are ever populated (Agent 1 has no unit-conversion framework yet). | Empty tuple if none for this scope — never "no kinetic data exists," only "none is currently curated for this scope." | `source`/`source_id` name which connector-ingested source produced it; `confidence_score`/`confidence_class` are exposed verbatim, never recomputed by Agent 2. |
+| `CuratedKineticMeasurement.protein_ids` ("Unresolved Kinetic Evidence Disclosure" increment) | The complete, deterministically-ordered set of every protein this measurement is applicable to — always a superset of the legacy `protein_id` (next row). May legitimately contain more than one entry (confirmed live: yeast's real FAS1/FAS2 heterodimer, sharing one EC number, both independently discovering the identical external SABIO-RK record). | That protein applicability is evidence of reaction applicability — it is never used to infer, narrow, or default a measurement's `reaction_id`. That exactly one entry means that protein is somehow "preferred" — every entry is equally applicable evidence. | An empty tuple means no protein context was ever resolved — a distinct fact from `reaction_id` being unresolved (§4C). | Same as `kinetic_measurements` above. |
+| `CuratedKineticMeasurement.protein_id` | The first protein context established for this measurement — kept unmodified for backward compatibility with the single-protein-context case. | **That this is authoritative for protein applicability** — it is a legacy convenience field only; `protein_ids` is authoritative (see `app.agent2.types.CuratedKineticMeasurement`'s own docstring). | `None` when ambiguous (2+ protein contexts) or unresolved. | Same as `kinetic_measurements` above. |
 | `claims` (accepted only) | Every claim in this list has already passed Agent 1's `HUMAN_ACCEPTED` review gate. | That an accepted claim is proven correct — it is evidence-supported and human-reviewed, not infallible. | A claim with no corresponding evidence is possible; check `evidence` before assuming support exists. | See `confidence_summaries`. |
 | `evidence` | Each evidence record references one of the `claims` above and may carry a publication reference and quoted support text. | That every claim has evidence, or that every evidence record has a publication reference. | Represented by the absence of a matching row — never fabricated. | `quoted_support`/publication reference, when present, are the provenance. |
 | `confidence_summaries` | One summary per claim, exposing Agent 1's already-computed confidence score/class and claim status verbatim. | That Agent 2 may recompute or reinterpret this value — Agent 1 is the sole authority on it. | A `None` score/class means Agent 1 recorded none — never inferred. | This *is* the provenance for "how strongly is this claim supported." |
@@ -71,6 +73,37 @@ increment.
 | `allosteric_interactions` | Each entry names an `enzyme_state_id`, a resolved `ligand_compound_id`, and a qualitative `effect` (`ACTIVATOR`/`INHIBITOR`/`MODULATOR`/`UNKNOWN`). | That `effect` implies a specific numeric kinetic consequence — the quantitative effect, if curated, is a separate, state-specific `CuratedKineticMeasurement` sharing the same `enzyme_state_id`, never this record itself. | Empty tuple if none. | n/a |
 | `enzyme_state_transitions` | Each entry names a `from_state_id`, `to_state_id`, and `transition_type` (`MODIFICATION`/`DEMODIFICATION`/`LIGAND_BINDING`/`LIGAND_RELEASE`/`OTHER`); `reaction_id` is present only when Agent 1's own reaction-curation pipeline already resolves it. | That every transition names a reaction, or that Agent 1 ever invents one. | Empty tuple if none. | n/a |
 | `CuratedKineticMeasurement.enzyme_state_id` | `None` unless the measurement was specifically reported for one defined state. | That a state-specific measurement applies to the parent protein/complex generally, or to any other state of it. | `None` means not state-specific, or not yet resolved to one. | Same as `kinetic_measurements` above. |
+
+## 4C. Unresolved kinetic evidence disclosure ("Unresolved Kinetic Evidence Disclosure" increment)
+
+Motivated by Real Integration Pilot 2 Run 2: 14 real SABIO-RK kinetic
+measurements survived the Agent 1 handoff and Agent 2's own assembly
+completely intact, correctly excluded from reaction-specific kinetic-law
+assignment (none had a resolved `reaction_id`) — but that exclusion was
+invisible in the final `ModelSpecification`, indistinguishable from "no
+kinetic evidence exists at all."
+
+**Agent 2 distinguishes absence of kinetic evidence from kinetic evidence
+that exists but cannot yet be assigned to a specific reaction.** The
+former produces nothing — `kinetic_measurements` is simply empty, or every
+entry already has a resolved `reaction_id`. The latter — a
+`CuratedKineticMeasurement` present in the handoff with `reaction_id is
+None` — now produces exactly one `ModelAssumption` (`app.agent2.types
+.ModelAssumption`, `category="kinetics"`) per such measurement, with
+`reason_code="KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"` and
+`related_entity_ids` naming the measurement's own id and every one of its
+`protein_ids`, in `ModelSpecification.model_assumptions`
+(`app.agent2.model_specification.mapping.build_model_assumptions`).
+
+**Protein applicability is not sufficient evidence of reaction
+applicability.** A measurement's `protein_ids` being resolved (even to
+exactly one protein) never causes, and must never be read as implying,
+that its `reaction_id` should be inferred from that protein's own
+`ReactionEnzyme` associations. The disclosure above makes an
+already-true exclusion visible to a reviewer; it never reverses it, and
+it never causes a real-valued parameter to be generated from the
+measurement it describes. This remains true regardless of how many
+reactions the named protein(s) catalyze.
 
 ## 5. General assumptions Agent 2 may make
 

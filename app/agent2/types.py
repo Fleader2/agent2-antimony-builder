@@ -352,6 +352,27 @@ class CuratedKineticMeasurement:
     version -- Agent 1 has no unit-conversion framework yet. No field here
     is ever averaged, converted, or reinterpreted from what Agent 1
     reported.
+
+    **``protein_id`` is a legacy convenience field, not authoritative for
+    protein applicability -- use ``protein_ids`` instead** (Increment: see
+    the "Unresolved Kinetic Evidence Disclosure" entry below,
+    ``AGENT1_HANDOFF_VERSION`` "1.2" -> "1.3"). Agent 1's own real handoff
+    (Agent 1.x Increment C.6) can now legitimately report that one
+    measurement is applicable to *more than one* protein (confirmed live,
+    Real Integration Pilot 1 Run 7/8: yeast's real FAS1/FAS2 heterodimer,
+    sharing one EC number, both independently discovering the identical
+    external source record) -- ``protein_id``'s own single-value shape can
+    only ever record one of them. ``protein_ids`` is the authoritative,
+    deterministically-ordered, complete set; ``protein_id`` is kept
+    unmodified, exactly as before, purely so existing single-protein-context
+    callers/tests/catalytic-context-matching code (``app.agent2.kinetics
+    .selector``, ``app.agent2.parameters.builder`` -- both operate only on
+    already reaction-attributed measurements, an entirely different,
+    unaffected population, and neither was changed) continue to work without
+    modification. This mirrors Agent 1's own, identically-named,
+    identically-reasoned ``protein_id``/``protein_ids`` split exactly (Agent
+    1.x Increment C.6, ``app.agent1.types.CuratedKineticMeasurement``) --
+    never invented independently here.
     """
 
     id: str
@@ -381,6 +402,19 @@ class CuratedKineticMeasurement:
     #: defined ``CuratedEnzymeState`` -- never applicable to the parent
     #: protein/complex generally, or to any other state, when set.
     enzyme_state_id: str | None = None
+    #: ``AGENT1_HANDOFF_VERSION`` "1.2" -> "1.3". **The authoritative record
+    #: of every protein this measurement is applicable to** -- always a
+    #: superset of ``protein_id`` (see that field's own comment above).
+    #: Deterministically sorted (never input-order-dependent); never
+    #: arbitrarily narrowed to one entry. When left at its default (``()``)
+    #: and ``protein_id`` is set, ``__post_init__`` derives
+    #: ``(protein_id,)`` automatically -- existing single-protein
+    #: construction (``CuratedKineticMeasurement(protein_id=...)`` with no
+    #: ``protein_ids`` argument at all) needs no change and remains fully
+    #: backward compatible. Never used to infer reaction attribution by
+    #: anything in this module: protein applicability is not evidence of
+    #: reaction applicability (see ``docs/07_kinetic_law_assignment.md``).
+    protein_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
@@ -410,6 +444,17 @@ class CuratedKineticMeasurement:
             "confidence_score",
             _require_decimal_or_none(self.confidence_score, field_name="confidence_score"),
         )
+        protein_ids = _require_str_tuple(self.protein_ids, field_name="protein_ids")
+        if not protein_ids and self.protein_id is not None:
+            # Backward compatibility: existing single-protein construction
+            # (protein_id set, protein_ids left at its default) derives the
+            # one-entry authoritative set automatically -- see the field's
+            # own comment above.
+            protein_ids = (self.protein_id,)
+        # Deterministic ordering, never input-order-dependent; deduplicated
+        # defensively (Agent 1's own real data never sends duplicates, but
+        # this type never trusts that without checking).
+        object.__setattr__(self, "protein_ids", tuple(sorted(set(protein_ids))))
 
 
 @dataclass(frozen=True, slots=True)

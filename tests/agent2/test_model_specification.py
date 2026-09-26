@@ -789,3 +789,147 @@ def test_model_specification_carries_full_provenance():
     assert model.boundary_assessments == boundaries.assessments
     for law in model.kinetic_laws:
         assert any(ref.startswith("kinetic-law-assignment::") for ref in law.provenance_refs)
+
+
+# --- "Unresolved Kinetic Evidence Disclosure" increment ---------------------------------------
+#
+# Real Integration Pilot 2 Run 2: 14 real SABIO-RK kinetic measurements survived the Agent 1
+# handoff and assembly untouched, correctly excluded from reaction-specific kinetic-law
+# assignment (none has a resolved reaction_id), but that exclusion was invisible in the final
+# ModelSpecification -- indistinguishable from "no kinetic evidence exists at all." These
+# tests use a regression fixture modeled directly on the real situation: a normal, working
+# reaction (its own reported-rate-law catalyst, unaffected) plus a separate measurement
+# shared by two proteins (FAS1/FAS2-shaped) with unresolved reaction attribution.
+
+
+def _shared_protein_unresolved_reaction_handoff() -> Agent1CuratedKnowledgeViewContract:
+    return _handoff(
+        compartments=(_compartment(),),
+        compounds=(_compound(id="a"), _compound(id="b")),
+        reactions=(_reaction(id="r1"),),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="a", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="b", role="PRODUCT"),
+        ),
+        reaction_enzyme_associations=(
+            CuratedReactionEnzymeAssociation(
+                reaction_id="r1", protein_id="fas2", relationship="CATALYZES"
+            ),
+        ),
+        kinetic_measurements=(
+            _measurement(
+                id="km-r1-reported",
+                reaction_id="r1",
+                protein_id="fas2",
+                reported_rate_law="k1*a",
+            ),
+            _measurement(
+                id="km-fas-shared",
+                reaction_id=None,
+                protein_id=None,
+                protein_ids=("fas2", "fas1"),
+                parameter_type="VMAX",
+                value=Decimal("3340.0"),
+                unit="nmol/(min*mg)",
+                source="SABIORK",
+                source_id="18229:Vmax",
+            ),
+        ),
+    )
+
+
+def test_deferred_measurement_excluded_from_reaction_specific_kinetic_assignment():
+    _network, assignments, _parameters, _boundaries, _modules, _model = _assemble_full(
+        _shared_protein_unresolved_reaction_handoff()
+    )
+    referenced_measurement_ids = {
+        mid for a in assignments.assignments for mid in a.source_measurement_ids
+    }
+    assert "km-fas-shared" not in referenced_measurement_ids
+    assert "km-r1-reported" in referenced_measurement_ids  # regression: normal case unaffected
+
+
+def test_deferred_measurement_produces_explicit_disclosure():
+    model = _assemble(_shared_protein_unresolved_reaction_handoff())
+    disclosures = [
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
+    ]
+    assert len(disclosures) == 1
+    assert disclosures[0].assumption_id == (
+        "assumption::kinetic-measurement-reaction-unresolved::km-fas-shared"
+    )
+
+
+def test_disclosure_references_correct_measurement_and_protein_provenance():
+    model = _assemble(_shared_protein_unresolved_reaction_handoff())
+    disclosure = next(
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
+    )
+    assert "km-fas-shared" in disclosure.related_entity_ids
+    assert "fas1" in disclosure.related_entity_ids
+    assert "fas2" in disclosure.related_entity_ids
+    assert "km-fas-shared" in disclosure.statement
+    assert "fas1" in disclosure.statement and "fas2" in disclosure.statement
+    assert disclosure.category == "kinetics"
+    assert disclosure.source == "app.agent2.model_specification"
+
+
+def test_reaction_attributed_measurement_produces_no_such_disclosure():
+    """Regression: a normal, reaction-attributed measurement (km-r1-reported) must not
+    itself trigger the new disclosure -- only the genuinely unresolved one does."""
+    model = _assemble(_shared_protein_unresolved_reaction_handoff())
+    disclosure_targets = {
+        a.assumption_id.removeprefix("assumption::kinetic-measurement-reaction-unresolved::")
+        for a in model.model_assumptions
+        if a.reason_code == "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
+    }
+    assert "km-r1-reported" not in disclosure_targets
+
+
+def test_absent_kinetic_evidence_produces_no_disclosure_of_this_kind():
+    """'No kinetic evidence exists' must remain distinguishable from 'kinetic evidence
+    exists but is deferred' -- the former produces zero disclosures of this reason code,
+    never a false-positive placeholder disclosure."""
+    model = _assemble(_one_reaction_no_evidence_handoff())
+    disclosures = [
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
+    ]
+    assert disclosures == []
+
+
+def test_no_real_parameter_generated_from_deferred_measurement():
+    model = _assemble(_shared_protein_unresolved_reaction_handoff())
+    # The deferred measurement's own real value (3340.0) must never appear as any
+    # parameter's value -- zero fabrication from unresolved-reaction-context evidence.
+    real_valued = [p for p in model.parameters if p.value is not None]
+    assert all(p.value != Decimal("3340.0") for p in real_valued)
+
+
+def test_deferred_measurement_repeated_assembly_is_deterministic():
+    handoff = _shared_protein_unresolved_reaction_handoff()
+    first = _assemble(handoff)
+    second = _assemble(handoff)
+    assert first.model_assumptions == second.model_assumptions
+
+
+def test_kinetic_law_selection_and_placeholder_behavior_unchanged_by_deferred_measurement():
+    """The core selector rule and placeholder behavior are completely unaffected by the
+    presence of a deferred measurement: r1's own catalyzed, reported-rate-law kinetic law
+    is still correctly assigned CURATED_REPORTED with its verbatim expression, exactly as
+    it would be with no deferred measurement present at all."""
+    model = _assemble(_shared_protein_unresolved_reaction_handoff())
+    assert len(model.kinetic_laws) == 1
+    law = model.kinetic_laws[0]
+    assert law.assignment_source == KineticLawAssignmentSource.CURATED_REPORTED
+    assert law.has_expression
+    # And the reaction's own declared parameters remain PLACEHOLDER, exactly as
+    # every other reported-rate-law fixture in this file produces -- untouched by
+    # the separate, deferred measurement's own presence.
+    reaction_parameter_values = {p.value for p in model.parameters}
+    assert Decimal("3340.0") not in reaction_parameter_values

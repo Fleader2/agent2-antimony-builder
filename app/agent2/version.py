@@ -547,18 +547,55 @@ information, consistent with the identical precedent already recorded
 above for ``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION``. A *future*
 correction to already-released Antimony-generation behavior should still
 bump this constant -- this entry is not license to skip bumps generally.
+
+``AGENT1_HANDOFF_VERSION`` was bumped from ``"1.2"`` to ``"1.3"`` for the
+"Unresolved Kinetic Evidence Disclosure" increment, motivated by Real
+Integration Pilot 2 Run 2: Agent 1's own ``CuratedKineticMeasurement``
+gained ``protein_ids`` (``AGENT1_CONTRACT_VERSION`` "1.2" -> "1.3" in the
+Agent 1 repository, Increment C.6 -- confirmed live: yeast's real FAS1/FAS2
+heterodimer, sharing one EC number, both independently discovering the
+identical external source record, a single ``protein_id`` could only ever
+record one of them), so this repository's local ``CuratedKineticMeasurement``
+was extended to match exactly (see ``docs/02_agent1_handoff_contract.md``).
+``AGENT2_CONTRACT_VERSION`` is unchanged, following the identical precedent
+recorded above for Increment B's own ``enzyme_state_id`` addition to the
+same type: no field of Agent 2's own *output* contracts changed shape;
+only the input handoff mirror gained a field (``protein_id`` itself, and
+every existing single-protein-context construction, is completely
+unaffected -- ``protein_ids`` is derived automatically when omitted).
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v2"`` to ``"model-specification-v3"`` for the same
+increment: ``build_model_assumptions`` now also emits one ``ModelAssumption``
+(reason code ``KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED``) per
+``CuratedKineticMeasurement`` with an unresolved ``reaction_id`` -- a
+materially different, observable result for the same real input (Pilot 2
+Run 2's own 14 real measurements previously produced zero assumptions
+about themselves; the identical input now produces 14, one per
+measurement) -- the version marker tracks behavior, not git history,
+consistent with this constant's own ``v1``->``v2`` bump above. No core
+selector rule changed: reaction-specific kinetic evidence still requires
+justified reaction attribution, no measurement is assigned to a reaction
+via ``ReactionEnzyme``, spread across a protein's reactions, or given a
+real-valued parameter from unresolved-reaction-context evidence.
+``AGENT2_CONTRACT_VERSION`` is unchanged -- ``ModelAssumption`` itself
+already had an open ``reason_code: str | None`` field; a new value that
+field can carry is not a shape change, per this file's own bump criterion
+(mirrors the already-recorded precedent for ``"PLACEHOLDER"``/
+``"MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"``, neither of which bumped
+this constant either).
 """
 
 from __future__ import annotations
 
 AGENT2_CONTRACT_VERSION = "0.9"
-AGENT1_HANDOFF_VERSION = "1.2"
+AGENT1_HANDOFF_VERSION = "1.3"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v2"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v2"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v3"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
 
 __all__ = [

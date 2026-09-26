@@ -234,8 +234,11 @@ def test_handoff_contract_enzyme_state_family_defaults_empty():
     assert view.enzyme_state_transitions == ()
 
 
-def test_handoff_version_updated_to_one_dot_two():
-    assert AGENT1_HANDOFF_VERSION == "1.2"
+def test_handoff_version_updated_to_one_dot_three():
+    # Bumped again by the "Unresolved Kinetic Evidence Disclosure" increment
+    # (CuratedKineticMeasurement.protein_ids) -- see app/agent2/version.py's
+    # own history for the full rationale.
+    assert AGENT1_HANDOFF_VERSION == "1.3"
 
 
 # --- Scope safety: no parameter mapping, kinetic-law assignment, or model semantics ---------------

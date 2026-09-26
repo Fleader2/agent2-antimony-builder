@@ -8,6 +8,26 @@ likelihood is reinterpreted, no module cut is revisited. See
 ``docs/11_model_specification_assembly.md`` §6-11/§16 for the full
 rationale behind each choice made here.
 
+**"Unresolved Kinetic Evidence Disclosure" increment** (motivated by Real
+Integration Pilot 2 Run 2: 14 real SABIO-RK kinetic measurements survived
+the Agent 1 handoff and this module's own assembly untouched, but their
+exclusion from reaction-specific kinetic-law assignment -- correct,
+required, since none has a resolved ``reaction_id`` -- was invisible in the
+final ``ModelSpecification``, indistinguishable from "no kinetic evidence
+exists at all"). ``build_model_assumptions`` now also emits one
+``ModelAssumption`` (reason code
+``KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED``) per
+``CuratedKineticMeasurement`` with ``reaction_id is None`` -- a pure,
+deterministic disclosure of an already-true fact, never a new inference:
+the core selector rule (reaction-specific kinetic evidence requires
+justified reaction attribution) is completely unchanged, and this
+increment does not, and must not, cause any such measurement to start
+contributing a real-valued parameter. Protein applicability
+(``CuratedKineticMeasurement.protein_ids``) is disclosed alongside each
+such assumption for reviewer context, but is never treated as evidence of
+reaction applicability -- see that field's own docstring in ``app.agent2
+.types``.
+
 **Pre-commit revisions.** Several prior choices were corrected before
 this increment's first commit, each because it would have forced
 Increment 9 to parse text, rediscover a fact this module could simply
@@ -43,6 +63,7 @@ from __future__ import annotations
 from app.agent2.kinetics.types import KineticLawAssignment, KineticLawReasonCode
 from app.agent2.model_specification.errors import ModelSpecificationReferenceError
 from app.agent2.types import (
+    CuratedKineticMeasurement,
     KineticLawSpecification,
     KineticLawType,
     ModelAssumption,
@@ -50,6 +71,19 @@ from app.agent2.types import (
     ParticipantRole,
     ReactionSpecification,
 )
+
+#: Stable, machine-readable reason code (Agent 2 "Unresolved Kinetic
+#: Evidence Disclosure" increment): a kinetic measurement exists but its
+#: reaction applicability is unresolved -- distinct from "no kinetic
+#: evidence exists at all," which produces no assumption of this kind
+#: (there is nothing to disclose). Not a ``KineticLawReasonCode`` member:
+#: that enum's own domain is reasons a kinetic-law *assignment* made a
+#: particular choice for a reaction it was already grouped under; this
+#: category describes a measurement that never reached grouping at all,
+#: mirroring how ``"PLACEHOLDER"``/``"MEDIUM"``/
+#: ``"MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"`` above are also plain,
+#: purpose-specific strings outside that enum.
+KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED = "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
 
 
 def _is_tentative(assignment: KineticLawAssignment) -> bool:
@@ -255,16 +289,22 @@ def build_model_assumptions(
     kinetic_law_assignments_by_kinetic_law_id: dict[str, KineticLawAssignment],
     parameters: tuple[ParameterSpecification, ...],
     candidate_boundary_ids: tuple[str, ...],
+    kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
-    """Deterministic `ModelAssumption` records for five disclosed-incompleteness categories:
+    """Deterministic `ModelAssumption` records for six disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
     defaults, PLACEHOLDER parameters, UNASSIGNED kinetic laws, unresolved MEDIUM candidate
-    boundaries), plus one added in this increment's own pre-commit revision (unresolved
-    multi-substrate Michaelis-Menten mechanisms, §8). Never prose speculation, never a
-    duplicate `assumption_id` (each is keyed deterministically off the one entity id it
-    describes), never invented for a category this increment has no clean, already-computed
-    signal for (see docs/11 §16 for what was deliberately not attempted, e.g. "known
-    incompleteness of regulation context")."""
+    boundaries), one added in a later pre-commit revision (unresolved multi-substrate
+    Michaelis-Menten mechanisms, §8), and one added by the "Unresolved Kinetic Evidence
+    Disclosure" increment (a kinetic measurement whose reaction applicability is unresolved,
+    below). Never prose speculation, never a duplicate `assumption_id` (each is keyed
+    deterministically off the one entity id it describes), never invented for a category
+    this increment has no clean, already-computed signal for (see docs/11 §16 for what was
+    deliberately not attempted, e.g. "known incompleteness of regulation context").
+
+    ``kinetic_measurements`` defaults to ``()`` for backward compatibility with any existing
+    caller that does not (yet) pass it -- an empty tuple simply produces no assumptions of
+    the new category, exactly as if this parameter did not exist."""
     assumptions: list[ModelAssumption] = []
 
     for law in sorted(kinetic_laws, key=lambda law: law.kinetic_law_id):
@@ -353,10 +393,55 @@ def build_model_assumptions(
             )
         )
 
+    for measurement in sorted(kinetic_measurements, key=lambda m: m.id):
+        if measurement.reaction_id is not None:
+            continue
+        # "Kinetic evidence exists but reaction applicability is unresolved" --
+        # distinct from "no kinetic evidence exists" (which produces no
+        # assumption of any kind, since there is nothing to disclose). This
+        # measurement is, and remains, correctly excluded from
+        # reaction-specific kinetic-law assignment (app.agent2.kinetics
+        # .selector groups strictly by reaction_id) -- this assumption only
+        # makes that already-true exclusion visible, never reverses it.
+        # Protein applicability (protein_ids) is never treated as evidence of
+        # reaction applicability here or anywhere else in this package.
+        source_ref = (
+            f"{measurement.source}:{measurement.source_id}"
+            if measurement.source and measurement.source_id
+            else "unknown source"
+        )
+        protein_ref = (
+            ", ".join(measurement.protein_ids)
+            if measurement.protein_ids
+            else "no resolved protein"
+        )
+        assumptions.append(
+            ModelAssumption(
+                assumption_id=(
+                    f"assumption::kinetic-measurement-reaction-unresolved::{measurement.id}"
+                ),
+                category="kinetics",
+                statement=(
+                    f"Kinetic measurement {measurement.id} ({measurement.parameter_type} = "
+                    f"{measurement.value} {measurement.unit}, {source_ref}) exists and is "
+                    "structurally preserved, but has no resolved reaction attribution -- it "
+                    "is excluded from reaction-specific kinetic-law assignment until Agent 1 "
+                    "(or another upstream source) establishes which reaction it applies to. "
+                    f"Applicable protein(s): {protein_ref}; protein applicability is not, by "
+                    "itself, evidence of reaction applicability, and is never used to infer "
+                    "it."
+                ),
+                related_entity_ids=(measurement.id, *measurement.protein_ids),
+                source="app.agent2.model_specification",
+                reason_code=KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED,
+            )
+        )
+
     return tuple(assumptions)
 
 
 __all__ = [
+    "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED",
     "build_expression_and_species",
     "build_model_assumptions",
     "materialize_kinetic_law",
