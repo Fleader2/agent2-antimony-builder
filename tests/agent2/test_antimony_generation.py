@@ -312,14 +312,46 @@ def test_irreversible_reaction_disclosed_in_comment():
     assert "reversible=irreversible" in text
 
 
-def test_unresolved_reversibility_blocks_executable_status():
+def test_unresolved_reversibility_no_longer_blocks_executable_status():
+    """Agent 2 increment (Conservative Reversibility Default): motivated by Real Integration
+    Pilot 2 Run 5 -- an otherwise fully-resolved law/reaction must not be blocked from
+    EXECUTABLE status merely because Agent 1's own curated reversible is None; it is modeled
+    as tentatively reversible instead, disclosed via the reaction's own comment."""
     model = _model(
         full_network=_network(reactions=(_reaction(reversible=None),)), module_specifications=()
     )
     artifact = generate_antimony(model).full_antimony
+    assert artifact.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert artifact.unresolved_kinetic_law_ids == ()
+    assert artifact.unresolved_reaction_ids == ()
+    assert "reversible=reversible(assumed)" in artifact.antimony_text
+
+
+def test_reversible_reaction_with_unresolved_reverse_kinetics_remains_non_executable():
+    """Scenario 6/11: structural reversibility (curated True *or* assumed from None) never
+    forces numerical executability -- a REVERSIBLE_MASS_ACTION law with an unresolved ``kr``
+    stays a PLACEHOLDER, and the reaction/law/model all remain NON_EXECUTABLE."""
+    law = _kinetic_law(
+        law_type=KineticLawType.REVERSIBLE_MASS_ACTION,
+        expression="kf * a - kr * b",
+        parameter_ids=("kf", "kr"),
+        species_ids=("a", "b"),
+    )
+    model = _model(
+        full_network=_network(reactions=(_reaction(reversible=None),)),
+        kinetic_laws=(law,),
+        parameters=(
+            _parameter(parameter_id="kf", value=Decimal("0.5")),
+            _parameter(parameter_id="kr", value=None, source=ParameterSource.PLACEHOLDER),
+        ),
+        module_specifications=(),
+    )
+    artifact = generate_antimony(model).full_antimony
     assert artifact.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
-    assert artifact.unresolved_kinetic_law_ids == ("k1",)
-    assert "REACTION_REVERSIBILITY_UNRESOLVED" in artifact.antimony_text
+    assert law.kinetic_law_id in artifact.unresolved_kinetic_law_ids
+    assert not any(
+        line.strip().startswith("p_kr =") for line in artifact.antimony_text.splitlines()
+    )
 
 
 def test_stoichiometric_coefficients_preserved_verbatim():

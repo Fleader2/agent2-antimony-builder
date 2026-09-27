@@ -1009,3 +1009,89 @@ def test_substrate_anchored_mm_no_real_value_leaks_into_any_parameter_other_than
     model = _assemble(_malonyl_coa_like_handoff())
     real_valued = {p.parameter_id: p.value for p in model.parameters if p.value is not None}
     assert real_valued == {"Km_r1_p1_malonyl-coa": Decimal("18.0")}
+
+
+# --- Conservative Reversibility Default for Unresolved Reactions -------------------------------
+
+
+def test_curated_reversible_reaction_remains_reversible_after_full_assembly():
+    handoff = dataclasses.replace(
+        _michaelis_menten_handoff(), reactions=(_reaction(id="r1", reversible=True),)
+    )
+    model = _assemble(handoff)
+    (reaction,) = model.full_network.reactions
+    assert reaction.reversible is True
+
+
+def test_curated_irreversible_reaction_remains_irreversible_after_full_assembly():
+    handoff = dataclasses.replace(
+        _michaelis_menten_handoff(), reactions=(_reaction(id="r1", reversible=False),)
+    )
+    model = _assemble(handoff)
+    (reaction,) = model.full_network.reactions
+    assert reaction.reversible is False
+
+
+def test_unresolved_reversibility_is_never_rewritten_as_curated_evidence():
+    """Scenario 5: the original Agent 1 uncertainty (None) is preserved verbatim on the
+    curated contract, never silently upgraded to True anywhere in ModelSpecification."""
+    model = _assemble(_malonyl_coa_like_handoff())
+    (reaction,) = model.full_network.reactions
+    assert reaction.reversible is None
+
+
+def test_reversibility_assumed_produces_a_machine_readable_model_assumption():
+    model = _assemble(_malonyl_coa_like_handoff())
+    matching = [
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE"
+    ]
+    assert len(matching) == 1
+    assumption = matching[0]
+    assert assumption.related_entity_ids == ("r1",)
+    assert assumption.source == "app.agent2.reversibility"
+
+
+def test_curated_reactions_never_produce_a_reversibility_assumed_assumption():
+    handoff = dataclasses.replace(
+        _michaelis_menten_handoff(), reactions=(_reaction(id="r1", reversible=True),)
+    )
+    model = _assemble(handoff)
+    reason_codes = {a.reason_code for a in model.model_assumptions}
+    assert "REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE" not in reason_codes
+
+
+def test_assumed_reversibility_never_fabricates_a_reverse_kinetic_parameter():
+    """Scenario 9/10: no kr/equilibrium-constant/reverse parameter is invented; the reaction's
+    own kinetic-law type and parameter set are completely unaffected by this assumption."""
+    model = _assemble(_malonyl_coa_like_handoff())
+    parameter_ids = {p.parameter_id for p in model.parameters}
+    assert not any("kr" in pid or "keq" in pid.lower() for pid in parameter_ids)
+    # The two declared parameters (kcat, one Km) are exactly what the pre-existing,
+    # unmodified substrate-anchored MM policy already declares -- unchanged by this increment.
+    placeholder_ids = {
+        p.parameter_id for p in model.parameters if p.value is None
+    }
+    assert placeholder_ids == {
+        "kcat_r1_p1",
+        "Km_r1_p1_acp",
+    }
+
+
+def test_reversibility_assumption_generation_is_deterministic():
+    handoff = _malonyl_coa_like_handoff()
+    first = _assemble(handoff)
+    second = _assemble(handoff)
+    assert first.model_assumptions == second.model_assumptions
+
+
+def test_module_decomposition_never_manufactures_a_boundary_from_assumed_reversibility():
+    """Scenario 8: ``app.agent2.modules`` never references ``reversible`` at all (confirmed by
+    inspection) -- an assumed-reversible reaction (reversible=None) contributes no boundary
+    candidate and no module-boundary interface on its own."""
+    model = _assemble(_malonyl_coa_like_handoff())
+    assert model.boundary_assessments == ()
+    assert model.module_decomposition.candidate_boundary_ids == ()
+    for module in model.module_specifications:
+        assert module.boundary_interface_ids == ()

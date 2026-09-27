@@ -91,6 +91,7 @@ def assemble_model_specification(
         parameters=parameters.parameter_specifications,
         candidate_boundary_ids=decomposition.candidate_boundary_ids,
         kinetic_measurements=network.kinetic_measurements,
+        reactions=network.reactions,
     )
 
     model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"

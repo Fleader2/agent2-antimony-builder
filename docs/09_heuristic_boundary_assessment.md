@@ -679,7 +679,18 @@ a genuinely measured constitutive/conditional distinction.
 * **Implementation:** fires when the *upstream* reaction of the
   candidate (the one feeding the interface) is explicitly curated
   `reversible=False`. `NEUTRAL` when `reversible` is `True` or
-  unrecorded (`None`) -- never guessed.
+  unrecorded (`None`) -- never guessed. **("Conservative Reversibility
+  Default for Unresolved Reactions" increment, confirmatory, no code
+  change here)**: this file's own §4 critical invariant already held
+  before `app.agent2.reversibility` existed -- only *explicitly curated*
+  irreversibility (`reversible is False`) may contribute this evidence.
+  The new "assumed reversible" model-construction default
+  (`app.agent2.reversibility.effective_reversible`, used only by
+  Antimony generation and `ModelSpecification.model_assumptions`, see
+  `docs/12_antimony_generation.md` §13) is never consulted here; an
+  unresolved `reversible` reaction remains `NEUTRAL` for this rule
+  exactly as before, locked in by regression tests in
+  `tests/agent2/test_boundaries.py`.
 * **Limitations:** cannot distinguish *why* a reaction is irreversible
   (proteolysis vs. an irreversible modification vs. a favorable
   equilibrium) -- `ReactionSpecification.reversible` is a single

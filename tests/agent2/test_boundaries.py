@@ -782,6 +782,55 @@ def test_very_high_requires_genuine_functional_isolation_evidence():
     )
 
 
+def test_unresolved_reversibility_never_triggers_irreversible_output_boundary_evidence():
+    """Conservative Reversibility Default increment: an unresolved upstream reversible
+    (`None` -- modeled elsewhere as tentatively reversible for model-construction purposes
+    only) must never itself contribute IRREVERSIBLE_OUTPUT_ISOLATION support, exactly like a
+    curated `reversible=True` upstream reaction -- only explicit `reversible=False` may. This
+    package's own `app.agent2.reversibility` "assumed reversible" concept is never consulted
+    here at all: `CandidateFacts.upstream_reversible` is populated directly from the curated,
+    unmodified `ReactionSpecification.reversible`."""
+    handoff = _handoff(
+        compartments=(_compartment(),),
+        compounds=(_compound(id="a"), _compound(id="b"), _compound(id="c")),
+        reactions=(_reaction(id="r1", reversible=None), _reaction(id="r2")),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="a", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="b", role="PRODUCT"),
+            _participant(reaction_id="r2", compound_id="b", role="REACTANT"),
+            _participant(reaction_id="r2", compound_id="c", role="PRODUCT"),
+        ),
+    )
+    assessment = _only(_assess(handoff))
+    assert assessment.likelihood is not BoundaryLikelihood.VERY_HIGH
+    assert (
+        BoundaryReasonCode.IRREVERSIBLE_OUTPUT_ISOLATION.value
+        not in assessment.supporting_reason_codes
+    )
+
+
+def test_curated_reversible_true_upstream_also_never_triggers_irreversible_output_boundary():
+    """Mirrors the None case -- an explicitly curated `reversible=True` upstream reaction is
+    just as ineligible for IRREVERSIBLE_OUTPUT_ISOLATION as an unresolved one; only explicit
+    `False` qualifies."""
+    handoff = _handoff(
+        compartments=(_compartment(),),
+        compounds=(_compound(id="a"), _compound(id="b"), _compound(id="c")),
+        reactions=(_reaction(id="r1", reversible=True), _reaction(id="r2")),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="a", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="b", role="PRODUCT"),
+            _participant(reaction_id="r2", compound_id="b", role="REACTANT"),
+            _participant(reaction_id="r2", compound_id="c", role="PRODUCT"),
+        ),
+    )
+    assessment = _only(_assess(handoff))
+    assert (
+        BoundaryReasonCode.IRREVERSIBLE_OUTPUT_ISOLATION.value
+        not in assessment.supporting_reason_codes
+    )
+
+
 def test_low_reachable_via_no_support_weak_opposition_or_none():
     handoff = dataclasses.replace(
         _linear_chain_handoff(),

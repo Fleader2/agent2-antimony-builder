@@ -84,6 +84,10 @@ from __future__ import annotations
 
 from app.agent2.kinetics.types import KineticLawAssignment, KineticLawReasonCode
 from app.agent2.model_specification.errors import ModelSpecificationReferenceError
+from app.agent2.reversibility import (
+    REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
+    is_assumed,
+)
 from app.agent2.types import (
     CuratedKineticMeasurement,
     KineticLawSpecification,
@@ -312,8 +316,9 @@ def build_model_assumptions(
     parameters: tuple[ParameterSpecification, ...],
     candidate_boundary_ids: tuple[str, ...],
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = (),
+    reactions: tuple[ReactionSpecification, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
-    """Deterministic `ModelAssumption` records for seven disclosed-incompleteness categories:
+    """Deterministic `ModelAssumption` records for eight disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
     defaults, PLACEHOLDER parameters, UNASSIGNED kinetic laws, unresolved MEDIUM candidate
     boundaries), one added in a later pre-commit revision (unresolved multi-substrate
@@ -324,14 +329,19 @@ def build_model_assumptions(
     multi-reactant reaction -- distinct from the plain multi-substrate-expression disclosure
     above: this one names the specific anchored substrate and source measurement, and fires
     even in the rare case a future `build_expression_and_species` extension might resolve an
-    expression for it). Never prose speculation, never a duplicate `assumption_id` (each is
-    keyed deterministically off the one entity id it describes), never invented for a category
+    expression for it), and one added by the "Conservative Reversibility Default for
+    Unresolved Reactions" increment (a reaction whose curated `reversible` is `None` is
+    modeled as tentatively reversible for model-construction purposes -- see
+    `app.agent2.reversibility` -- and that assumption is disclosed here explicitly, never
+    silently). Never prose speculation, never a duplicate `assumption_id` (each is keyed
+    deterministically off the one entity id it describes), never invented for a category
     this increment has no clean, already-computed signal for (see docs/11 §16 for what was
     deliberately not attempted, e.g. "known incompleteness of regulation context").
 
-    ``kinetic_measurements`` defaults to ``()`` for backward compatibility with any existing
-    caller that does not (yet) pass it -- an empty tuple simply produces no assumptions of
-    the new category, exactly as if this parameter did not exist."""
+    ``kinetic_measurements``/``reactions`` both default to ``()`` for backward compatibility
+    with any existing caller that does not (yet) pass them -- an empty tuple simply produces
+    no assumptions of the corresponding new category, exactly as if that parameter did not
+    exist."""
     assumptions: list[ModelAssumption] = []
     measurements_by_id = {m.id: m for m in kinetic_measurements}
 
@@ -506,6 +516,33 @@ def build_model_assumptions(
                 related_entity_ids=(measurement.id, *measurement.protein_ids),
                 source="app.agent2.model_specification",
                 reason_code=KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED,
+            )
+        )
+
+    for reaction in sorted(reactions, key=lambda r: r.reaction_id):
+        if not is_assumed(reaction.reversible):
+            continue
+        # "Conservative Reversibility Default for Unresolved Reactions" increment: Agent 1's
+        # own curated reversible is None (evidence absent or conflicting, per Agent 1.x
+        # Increment C.8) -- this reaction is modeled as tentatively reversible for model-
+        # construction purposes only. The original curated value is never rewritten; this
+        # assumption is the sole, explicit record that the reaction's own effective
+        # reversibility is a modeling decision, not curated biochemical knowledge.
+        assumptions.append(
+            ModelAssumption(
+                assumption_id=f"assumption::reversibility-assumed::{reaction.reaction_id}",
+                category="kinetics",
+                statement=(
+                    f"Reaction {reaction.reaction_id} has no curated reversibility evidence "
+                    "(reversible=None) -- it is modeled as tentatively reversible for model-"
+                    "construction purposes only, never as curated biochemical fact. This "
+                    "assumption never fabricates a reverse rate constant, equilibrium "
+                    "constant, or other reverse-direction kinetic parameter, and is never used "
+                    "as evidence for module-boundary isolation."
+                ),
+                related_entity_ids=(reaction.reaction_id,),
+                source="app.agent2.reversibility",
+                reason_code=REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
             )
         )
 

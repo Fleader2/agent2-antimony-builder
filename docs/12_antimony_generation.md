@@ -315,18 +315,41 @@ rate law, if any, is already encoded structurally by the law's own
 
 ## 13. Reversibility
 
-`reaction.reversible` is read verbatim, never inferred, and disclosed as
-a `reversible=reversible|irreversible|unresolved` comment. This
-increment made an explicit choice among Step 14's two preferred
-policies: rather than trying to encode reversibility as a special arrow
-token (no Antimony parser is available in this repository to verify a
-claimed syntax construct, per Step 37 -- see §28), **an unresolved
-(`None`) `reversible` flag disqualifies that reaction's kinetic law from
-executable status**, folded into the same
-`NON_EXECUTABLE_UNRESOLVED_KINETICS`/`unresolved_kinetic_law_ids`
-mechanism as an unresolved expression (reason code
-`REACTION_REVERSIBILITY_UNRESOLVED`) -- never a silent default to
-irreversible or reversible.
+`reaction.reversible` is read verbatim, never inferred or rewritten, and
+disclosed as a `reversible=reversible|irreversible|reversible(assumed)`
+comment (`_reversible_comment`, via `app.agent2.reversibility
+.classify_reversibility_basis`). Encoding reversibility as a special
+Antimony arrow token remains out of scope for the same reason as before
+(no Antimony parser is available in this repository to verify a claimed
+syntax construct, per Step 37 -- see §28).
+
+**Conservative Reversibility Default for Unresolved Reactions**
+(Agent 2 increment, motivated by Real Integration Pilot 2 Run 5):
+an unresolved (`None`) curated `reversible` flag no longer disqualifies
+a reaction's kinetic law from executable status on its own. Superseding
+this section's original policy, `app.agent2.reversibility
+.effective_reversible` treats `None` as tentatively reversible *for
+model-construction purposes only* -- the reaction's own curated
+`reversible` field is never mutated, and the assumption is disclosed
+twice: via the non-blocking `REACTION_REVERSIBILITY_ASSUMED` reason in
+`_resolve_law`'s own reasons list (informational only, never withheld
+from executable status by itself), and authoritatively via a
+`ModelSpecification.model_assumptions` entry (reason code
+`REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE`; see
+`docs/11_model_specification_assembly.md`). A law with an unresolved
+`reversible` reaches `EXECUTABLE` if, and only if, its expression is
+rendered and every referenced parameter already has a numeric value --
+exactly the same bar an already-curated-reversible reaction must clear.
+This assumption is purely structural: it never fabricates a reverse rate
+constant, an equilibrium constant, or any other reverse-direction
+kinetic parameter, so a `REVERSIBLE_MASS_ACTION` law with a genuinely
+unresolved `kr` remains `NON_EXECUTABLE_UNRESOLVED_KINETICS` regardless
+of reversibility basis. It is also never treated as boundary evidence:
+only a curated `reversible is False` may support an irreversible-output
+boundary rule (`app.agent2.boundaries.rules
+.irreversible_output_isolation`); curated-reversible and assumed-
+reversible reactions never can (see `docs/09_heuristic_boundary_
+assessment.md`).
 
 ## 14. Kinetic-law serialization
 
@@ -704,9 +727,13 @@ fitting, calibration, critique, ...) remains enforced unchanged.
   confirmed `[S]`-bracket convention) -- no Antimony parser exists in
   this repository to confirm one, and asserting an unverified syntax
   claim as fact would be worse than an honest, explicit comment.
-* Reversibility (§13) is disclosed only via a comment and an
-  executability gate, not via a dedicated Antimony arrow token -- the
-  same "no parser to verify against" reasoning applies.
+* Reversibility (§13) is disclosed only via a comment, not via a
+  dedicated Antimony arrow token -- the same "no parser to verify
+  against" reasoning applies. Unresolved curated reversibility (`None`)
+  is disclosed, not gated: it is modeled as tentatively reversible for
+  structural purposes, distinguishable in the comment
+  (`reversible(assumed)`) and in `ModelSpecification.model_assumptions`,
+  never silently upgraded to curated evidence.
 * `CUSTOM` laws (§19) can never reach `EXECUTABLE` status under this
   increment's policy, however well-formed their curated text is -- there
   is no structured, verified symbol mapping to substitute safely.

@@ -736,6 +736,63 @@ state matching, and every other precedence rule, are unchanged.
 field's own docstring); only this package's own internal, private
 matching logic changed. ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent
 1 was not modified.
+
+``ANTIMONY_GENERATION_POLICY_VERSION`` was bumped from
+``"antimony-generation-v1"`` to ``"antimony-generation-v2"`` for the
+"Conservative Reversibility Default for Unresolved Reactions" increment,
+motivated by Real Integration Pilot 2 Run 5: ``app.agent2.antimony
+.generator._resolve_law`` no longer requires
+``reaction.reversible is not None`` as a precondition for a kinetic
+law's own resolution -- an otherwise fully-resolved law/reaction (every
+referenced parameter has a numeric value, its expression rendered) now
+reaches ``AntimonyArtifactReadiness.EXECUTABLE`` even when Agent 1's own
+curated reversibility is unresolved, via the new
+``app.agent2.reversibility.effective_reversible`` conservative default
+(``None`` -> tentatively reversible, for model-construction purposes
+only). A materially different, observable result for the same real
+input (the real malonyl-CoA reaction, ``reversible=None``, whose Antimony
+artifact previously carried a ``REACTION_REVERSIBILITY_UNRESOLVED``
+blocking reason and now instead carries the disclosed, non-blocking
+``REACTION_REVERSIBILITY_ASSUMED`` reason) -- the version marker tracks
+behavior, not git history. The reaction's own curated ``reversible``
+field is never mutated or rewritten; the reversible-vs-irreversible
+Antimony comment (``_reversible_comment``) now reads
+``"reversible(assumed)"`` specifically for this case, distinguishing it
+from genuinely curated ``"reversible"``/``"irreversible"``. No reverse
+rate constant, equilibrium constant, or other kinetic parameter is
+fabricated by this change: a ``REVERSIBLE_MASS_ACTION`` law with a still-
+unresolved ``kr`` remains ``NON_EXECUTABLE_UNRESOLVED_KINETICS``
+regardless of reversibility basis, exactly as before.
+``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` type changed shape. ``AGENT1_HANDOFF_VERSION`` is
+unchanged -- Agent 1 was not modified.
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v4"`` to ``"model-specification-v5"`` for the same
+increment: ``build_model_assumptions`` gained an eighth disclosure block
+(see that function's own docstring) that fires for exactly the reactions
+whose curated ``reversible`` is unresolved (``app.agent2.reversibility
+.is_assumed``), naming the affected reaction id and stating plainly that
+the reaction is modeled as tentatively reversible for model-construction
+purposes only, never as curated biochemical fact, and that this
+assumption never fabricates a reverse kinetic parameter or contributes
+irreversible-output boundary evidence. A materially different, observable
+result for the same real input (the real malonyl-CoA reaction's
+``ModelSpecification`` now carries one additional ``ModelAssumption``,
+reason code ``REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE``, layered
+alongside its pre-existing, unmodified disclosures). The new function
+parameter (``build_model_assumptions(..., reactions=...)``) lives outside
+``app.agent2.types``, defaulted for backward compatibility, consistent
+with this file's own established narrower reading: no core assembly
+behavior for any other artifact changed, and
+``boundaries.rules.irreversible_output_isolation`` -- confirmed by direct
+inspection and by new regression tests to already check
+``upstream_reversible is False`` specifically -- required no code change
+at all.
+``AGENT2_CONTRACT_VERSION`` is unchanged for the same reason.
+``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified; the
+underlying curated ``reversible`` value and Agent 1.x Increment C.8's own
+evidence policy are untouched.
 """
 
 from __future__ import annotations
@@ -747,8 +804,8 @@ REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v4"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v1"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v5"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 

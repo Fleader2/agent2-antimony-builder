@@ -393,10 +393,10 @@ Increment 7's concern.
 ## 16. Model assumptions
 
 `ModelAssumption` (already existing, `app.agent2.types`) is populated
-deterministically from five disclosed-incompleteness categories
+deterministically from eight disclosed-incompleteness categories
 (`app.agent2.model_specification.mapping.build_model_assumptions`): the
-four Increment 8 instructions' own Step 18 names concretely, plus one
-added in this increment's own pre-commit revision:
+four Increment 8 instructions' own Step 18 names concretely, plus four
+added by later increments:
 
 * one per tentative mass-action law (`category="kinetics"`, `reason_code
   ="TENTATIVE_MASS_ACTION_DEFAULT"`);
@@ -416,7 +416,33 @@ added in this increment's own pre-commit revision:
   text names all four required facts: the law family is Michaelis-
   Menten, multiple substrates are present, no justified canonical
   multi-substrate algebra has been specified, and serialization must be
-  withheld until a concrete expression is available.
+  withheld until a concrete expression is available;
+* **("Unresolved Kinetic Evidence Disclosure" increment)** one per
+  curated kinetic measurement whose reaction applicability remains
+  unresolved (`category="kinetics"`, `reason_code=
+  "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"`), naming the
+  measurement id and any tagged protein ids;
+* **("Substrate-Anchored Michaelis-Menten Eligibility Refinement"
+  increment)** one per `MICHAELIS_MENTEN` law anchored to one real,
+  uniquely-attributed `Km` for a multi-reactant reaction
+  (`category="kinetics"`, `reason_code=
+  "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"`) -- distinct
+  from the plain multi-substrate-expression disclosure above: this one
+  names the specific anchored substrate and source measurement, and
+  fires even in the rare case a future `build_expression_and_species`
+  extension might resolve an expression for it;
+* **("Conservative Reversibility Default for Unresolved Reactions"
+  increment)** one per reaction whose curated `reversible` is `None`
+  (`category="kinetics"`, `reason_code=
+  "REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE"`, `source=
+  "app.agent2.reversibility"`) -- the authoritative, machine-readable
+  record that the reaction is modeled as tentatively reversible for
+  model-construction purposes only (see
+  `docs/12_antimony_generation.md` §13), never as curated biochemical
+  fact, never fabricating a reverse kinetic parameter, and never usable
+  as irreversible-output boundary evidence (§15, `docs/
+  09_heuristic_boundary_assessment.md`). The original curated
+  `reversible` value on `ReactionSpecification` is never rewritten.
 
 Each `assumption_id` is deterministic, keyed off exactly the one entity
 id it describes (e.g. `f"assumption::tentative-law::{kinetic_law_id}"`),

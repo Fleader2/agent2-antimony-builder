@@ -39,6 +39,7 @@ from app.agent2.antimony.serializer import (
     render_kinetic_law_expression,
 )
 from app.agent2.antimony.validation import validate_serializer_integrity
+from app.agent2.reversibility import ReversibilityBasis, classify_reversibility_basis
 from app.agent2.types import (
     Agent2OutputPackage,
     AntimonyArtifactReadiness,
@@ -256,11 +257,22 @@ def _resolve_law(
     parameters_by_id: dict[str, ParameterSpecification],
     id_map: IdentifierMap,
 ) -> _LawResolution:
-    """A kinetic law is executable, *considered alone*, only when its expression is resolved,
-    every parameter it references has a numeric value, and the owning reaction's
-    reversibility is known -- never because Increment 9 fabricated a missing fact for any of
-    the three. This is a necessary, but not sufficient, condition for the *reaction's* rate to
-    be resolved -- see ``resolve_reaction_rate_expression`` for the reaction-level policy."""
+    """A kinetic law is executable, *considered alone*, only when its expression is resolved
+    and every parameter it references has a numeric value -- never because Increment 9
+    fabricated a missing fact for either. This is a necessary, but not sufficient, condition
+    for the *reaction's* rate to be resolved -- see ``resolve_reaction_rate_expression`` for
+    the reaction-level policy.
+
+    **Conservative reversibility default** (Agent 2 increment, motivated by Real Integration
+    Pilot 2 Run 5 and Agent 1.x Increment C.8): an unresolved curated ``reversible`` (``None``)
+    no longer blocks this law's own resolution -- ``app.agent2.reversibility
+    .effective_reversible`` treats it as tentatively reversible for model-construction
+    purposes, disclosed via ``REACTION_REVERSIBILITY_ASSUMED`` (never silently). The original
+    curated value is never mutated; ``ReactionSpecification.reversible`` still reads exactly
+    what Agent 1 supplied, and the authoritative disclosure of this assumption lives in
+    ``ModelSpecification.model_assumptions`` (``REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE``),
+    not here -- this reason string is a convenience surfaced in the Antimony comment only.
+    """
     reasons: list[str] = []
     rendered = render_kinetic_law_expression(law, id_map)
 
@@ -280,9 +292,9 @@ def _resolve_law(
         reasons.append("PARAMETER_VALUE_UNRESOLVED:" + ",".join(missing_parameters))
 
     if reaction.reversible is None:
-        reasons.append("REACTION_REVERSIBILITY_UNRESOLVED")
+        reasons.append("REACTION_REVERSIBILITY_ASSUMED")
 
-    resolved = rendered is not None and not missing_parameters and reaction.reversible is not None
+    resolved = rendered is not None and not missing_parameters
     return _LawResolution(rendered_expression=rendered, resolved=resolved, reasons=tuple(reasons))
 
 
@@ -323,9 +335,10 @@ def _species_lines(
 
 
 def _reversible_comment(reaction: ReactionSpecification) -> str:
-    if reaction.reversible is None:
-        return "unresolved"
-    return "reversible" if reaction.reversible else "irreversible"
+    basis = classify_reversibility_basis(reaction.reversible)
+    if basis is ReversibilityBasis.ASSUMED_REVERSIBLE:
+        return "reversible(assumed)"
+    return "reversible" if basis is ReversibilityBasis.CURATED_REVERSIBLE else "irreversible"
 
 
 def _law_context(law: KineticLawSpecification) -> str | None:
