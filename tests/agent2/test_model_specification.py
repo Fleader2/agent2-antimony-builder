@@ -17,6 +17,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.agent2.antimony import generate_antimony
 from app.agent2.boundaries import assess_boundaries
 from app.agent2.characterization import characterize_full_network
 from app.agent2.kinetics import assign_kinetic_laws
@@ -31,6 +32,7 @@ from app.agent2.network import assemble_full_network
 from app.agent2.parameters import declare_parameters
 from app.agent2.types import (
     Agent1CuratedKnowledgeViewContract,
+    AntimonyArtifactReadiness,
     CuratedCompartment,
     CuratedCompound,
     CuratedEnzymeState,
@@ -41,6 +43,7 @@ from app.agent2.types import (
     KineticLawAssignmentSource,
     KineticLawType,
     ModelSpecification,
+    ParameterSource,
 )
 from app.agent2.version import AGENT2_CONTRACT_VERSION
 
@@ -1005,10 +1008,24 @@ def test_substrate_anchored_mm_also_produces_multi_substrate_expression_disclosu
     assert "MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED" in reason_codes
 
 
-def test_substrate_anchored_mm_no_real_value_leaks_into_any_parameter_other_than_anchor():
+def test_substrate_anchored_mm_no_curated_value_leaks_into_any_parameter_other_than_anchor():
+    """Heuristic Simulation Parameter Initialization increment: kcat_r1_p1/Km_r1_p1_acp now
+    carry real *heuristic* values (never bare PLACEHOLDERs any more), but the real curated
+    malonyl-CoA evidence itself never leaks beyond its own anchored parameter -- distinguished
+    by source, not merely by whether a numeric value is present."""
     model = _assemble(_malonyl_coa_like_handoff())
-    real_valued = {p.parameter_id: p.value for p in model.parameters if p.value is not None}
-    assert real_valued == {"Km_r1_p1_malonyl-coa": Decimal("18.0")}
+    curated_or_literature = {
+        p.parameter_id: p.value
+        for p in model.parameters
+        if p.source in (ParameterSource.CURATED, ParameterSource.LITERATURE_DERIVED)
+    }
+    assert curated_or_literature == {"Km_r1_p1_malonyl-coa": Decimal("18.0")}
+    heuristic_ids = {
+        p.parameter_id
+        for p in model.parameters
+        if p.source is ParameterSource.HEURISTIC_INITIALIZATION
+    }
+    assert heuristic_ids == {"kcat_r1_p1", "Km_r1_p1_acp"}
 
 
 # --- Conservative Reversibility Default for Unresolved Reactions -------------------------------
@@ -1070,10 +1087,15 @@ def test_assumed_reversibility_never_fabricates_a_reverse_kinetic_parameter():
     assert not any("kr" in pid or "keq" in pid.lower() for pid in parameter_ids)
     # The two declared parameters (kcat, one Km) are exactly what the pre-existing,
     # unmodified substrate-anchored MM policy already declares -- unchanged by this increment.
-    placeholder_ids = {
-        p.parameter_id for p in model.parameters if p.value is None
+    # Heuristic Simulation Parameter Initialization increment: both now carry a real
+    # heuristic value rather than a bare PLACEHOLDER, but neither is ever confused with
+    # real curated/AI-predicted evidence.
+    non_evidence_ids = {
+        p.parameter_id
+        for p in model.parameters
+        if p.source is ParameterSource.HEURISTIC_INITIALIZATION
     }
-    assert placeholder_ids == {
+    assert non_evidence_ids == {
         "kcat_r1_p1",
         "Km_r1_p1_acp",
     }
@@ -1095,3 +1117,38 @@ def test_module_decomposition_never_manufactures_a_boundary_from_assumed_reversi
     assert model.module_decomposition.candidate_boundary_ids == ()
     for module in model.module_specifications:
         assert module.boundary_interface_ids == ()
+
+
+# --- Heuristic Simulation Parameter Initialization: Antimony executability consequence ----------
+
+
+def test_heuristic_initialization_makes_a_value_only_blocked_reaction_executable():
+    """§8: a single-substrate Michaelis-Menten reaction with no curated evidence at all has
+    a fully resolved rate-law *expression* from Increment 6/7 onward -- its only blocker was
+    ever missing parameter *values*. Once those are heuristically initialized, this reaction
+    must become genuinely ``EXECUTABLE``: ``ParameterSpecification.has_value`` is a pure,
+    source-agnostic value-presence check (``app/agent2/types.py``), so it is satisfied by
+    ``HEURISTIC_INITIALIZATION`` exactly as it would be by real evidence. This is the
+    intended, positive consequence of the whole increment, not a bug."""
+    _, _, _, _, _, model = _assemble_full(_michaelis_menten_handoff())
+    assert all(p.source is ParameterSource.HEURISTIC_INITIALIZATION for p in model.parameters)
+
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert package.full_antimony.unresolved_reaction_ids == ()
+    assert package.full_antimony.unresolved_kinetic_law_ids == ()
+
+
+def test_heuristic_initialization_never_makes_an_unresolved_expression_law_executable():
+    """§7/§8: a multi-substrate Michaelis-Menten reaction's overall expression stays
+    unresolved regardless of parameter initialization -- every one of its parameters now
+    has a heuristically-initialized value, but the reaction and the full model must both
+    remain correctly non-executable, since the blocker was never a missing value."""
+    _, _, _, _, _, model = _assemble_full(_multi_substrate_michaelis_menten_handoff())
+    (law,) = model.kinetic_laws
+    assert law.expression is None
+    assert all(p.has_value for p in model.parameters if p.kinetic_law_assignment_id)
+
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is not AntimonyArtifactReadiness.EXECUTABLE
+    assert law.reaction_id in package.full_antimony.unresolved_reaction_ids

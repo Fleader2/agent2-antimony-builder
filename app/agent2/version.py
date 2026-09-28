@@ -33,8 +33,22 @@ names actually changes.
   deterministic parameter declaration/initialization rule set
   (``app.agent2.parameters``) a ``ParameterDeclarationSet`` was produced
   under (e.g. which curated measurement types map to which kinetic-law
-  parameter slot, the multiple-measurement agreement policy). Also a
-  *behavioral rule set* version, not a data shape.
+  parameter slot, the multiple-measurement agreement policy, and, since
+  the Heuristic Simulation Parameter Initialization increment, the
+  AI-predicted/heuristic-default fallback precedence). Also a *behavioral
+  rule set* version, not a data shape.
+* ``HEURISTIC_INITIALIZATION_POLICY_VERSION`` -- the version of the
+  centralized heuristic-default policy
+  (``app.agent2.parameters.heuristic_defaults``) a
+  ``ParameterSource.HEURISTIC_INITIALIZATION`` parameter's own default
+  value/unit was chosen under (e.g. the reference rate/concentration
+  constants, the molecularity-to-unit mapping for mass-action rate
+  constants). Recorded on each such parameter's own
+  ``source_reference`` (a per-parameter string, not a
+  ``ParameterDeclarationSet``-level field) precisely because it can, in
+  principle, change independently of the broader parameter-declaration
+  rule set above -- distinct axes that happen to co-evolve today, not
+  reused as a single version for both.
 * ``MODULE_DECOMPOSITION_POLICY_VERSION`` -- the version of the
   deterministic module-decomposition rule set (``app.agent2.modules``) a
   ``ModuleDecompositionSet`` was produced under (e.g. which
@@ -793,6 +807,46 @@ at all.
 ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not modified; the
 underlying curated ``reversible`` value and Agent 1.x Increment C.8's own
 evidence policy are untouched.
+
+``PARAMETER_DECLARATION_POLICY_VERSION`` was bumped from
+``"parameter-declaration-v1"`` to ``"parameter-declaration-v2"`` for the
+Heuristic Simulation Parameter Initialization increment: a real,
+observable output change for the same real input -- a parameter slot that
+was unconditionally ``PLACEHOLDER`` before this increment (no experimental
+evidence, and no prior concept of AI-predicted evidence at all) can now
+resolve to ``ParameterSource.AI_PREDICTED`` (a real GotEnzymes2 measurement
+Agent 1 already attributed to this exact reaction/context, using its own
+canonical ``normalized_value``/``.normalized_unit``, Agent 1.x Increment
+C.12) or ``ParameterSource.HEURISTIC_INITIALIZATION`` (a centralized,
+documented default, only when no evidence of either kind exists at all).
+``initialize_from_evidence`` itself also gained one real behavior change
+beyond the new fallback tiers: it now excludes GotEnzymes2-sourced
+measurements from its own ``LITERATURE_DERIVED``/``CURATED`` consideration
+unconditionally (previously, a GotEnzymes2 measurement with no
+``publication_id`` -- true of every real one -- would have been
+mislabeled ``CURATED``, since this function had no way to distinguish an
+AI-predicted measurement from a genuinely curated experimental one before
+Agent 1.x Increment C.11 made such measurements reachable at all). Real,
+disagreeing experimental or AI-predicted evidence is never overwritten by
+a lower-precedence tier -- only a *genuine, complete absence* of matching
+evidence at one tier ever proceeds to the next (see
+``app.agent2.parameters.initializer.initialize_with_fallback``'s own
+docstring for the full precedence and this specific safeguard).
+``HEURISTIC_INITIALIZATION_POLICY_VERSION`` is introduced at
+``"heuristic-initialization-v1"`` for the first real heuristic-default
+policy (``app.agent2.parameters.heuristic_defaults``): two reference
+constants (1 per second; 1000 nM) from which every default -- concentration,
+first-order rate, concentration flux, and any mass-action rate constant of
+any molecularity via ``[k] = nM^(1-n) * s^-1`` -- is deterministically
+derived, never an unexplained magic number chosen independently per
+parameter kind. ``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` dataclass changed shape -- ``ParameterSource`` gained
+two new enum *values* (``AI_PREDICTED``, ``HEURISTIC_INITIALIZATION``),
+consistent with this file's own established narrower reading (an enum
+value addition is not a data-shape change, exactly as Agent 1's own
+``SourceType.GOTENZYMES`` addition did not bump ``AGENT1_CONTRACT_VERSION``
+either). ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not
+modified by this Agent 2 increment.
 """
 
 from __future__ import annotations
@@ -802,7 +856,8 @@ AGENT1_HANDOFF_VERSION = "1.3"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v2"
+HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v5"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
@@ -815,6 +870,7 @@ __all__ = [
     "AGENT2_CONTRACT_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "HEURISTIC_INITIALIZATION_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",

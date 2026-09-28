@@ -14,6 +14,8 @@ anywhere in its call graph.
 
 from __future__ import annotations
 
+import dataclasses
+
 from app.agent2.kinetics.types import (
     KineticLawAssignment,
     KineticLawAssignmentSet,
@@ -21,7 +23,12 @@ from app.agent2.kinetics.types import (
 )
 from app.agent2.parameters import policy
 from app.agent2.parameters.errors import ParameterReferenceError
-from app.agent2.parameters.initializer import Initialization, initialize_from_evidence
+from app.agent2.parameters.heuristic_defaults import ParameterKind
+from app.agent2.parameters.initializer import (
+    Initialization,
+    initialize_from_evidence,
+    initialize_with_fallback,
+)
 from app.agent2.parameters.types import ParameterDeclarationSet
 from app.agent2.parameters.validation import (
     require_full_network,
@@ -165,43 +172,109 @@ def _placeholder_spec(
     )
 
 
+def _reaction_molecularity(
+    network: FullNetwork, reaction_id: str, role: ParticipantRole
+) -> int:
+    """The total stoichiometry of every participant with the given role -- the reaction
+    order a mass-action rate constant's own dimensionality depends on (Heuristic Simulation
+    Parameter Initialization increment: ``[k] = nM^(1-n) * s^-1``, ``n`` the *reactant*
+    molecularity for a forward rate constant, the *product* molecularity for a reverse one).
+    Never rounded or approximated -- stoichiometry is already schema-guaranteed to be a
+    whole number (``ReactionParticipantSpecification``'s own docstring); this only sums it.
+    """
+    (reaction,) = (r for r in network.reactions if r.reaction_id == reaction_id)
+    total = sum(
+        p.stoichiometry for p in reaction.participants if p.role is role
+    )
+    return int(total)
+
+
 def _declare_mass_action(
-    assignment: KineticLawAssignment, evidence: tuple[CuratedKineticMeasurement, ...]
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    network: FullNetwork,
 ) -> tuple[ParameterSpecification, ...]:
+    molecularity = _reaction_molecularity(network, assignment.reaction_id, ParticipantRole.REACTANT)
     if _is_tentative(assignment):
-        # Increment 5 instructions, Step 16: never attempt curated mapping for a tentative
-        # default -- the mechanism itself is unconfirmed, so no measurement could justifiably
-        # initialize its rate constant even if one happens to exist for this context.
+        # Increment 5 instructions, Step 16: never attempt curated (or, since the Heuristic
+        # Simulation Parameter Initialization increment, AI-predicted) mapping for a tentative
+        # default -- the *mechanism itself* is unconfirmed, so no real evidentiary value could
+        # justifiably initialize its rate constant even if one happens to exist for this
+        # context (doing so would misrepresent that evidence as validating an assumed,
+        # unconfirmed mechanism). This is narrower than the Heuristic increment's own §7
+        # boundary, which excludes only ``expression=None``, an unsupported ``KineticLawType``
+        # (``CUSTOM``), or no declared parameter structure -- none of which is true here: the
+        # law type is still ``MASS_ACTION``, its expression is built, and its one ``k`` slot is
+        # fully declared. A *heuristic* value makes no evidentiary claim at all (disclosed as
+        # ``HEURISTIC_INITIALIZATION``, never ``CURATED``/``LITERATURE_DERIVED``/
+        # ``AI_PREDICTED``), so it carries none of the original concern and is still assigned
+        # here -- passing an empty evidence tuple so ``initialize_with_fallback`` skips
+        # straight past both evidence tiers to its own heuristic-default tier. The generic
+        # heuristic/no-match uncertainty text it returns says nothing about *why* no evidence
+        # was even attempted, so it is replaced with one that names the tentative mechanism
+        # explicitly, preserving every other field verbatim.
+        tentative_initialization = initialize_with_fallback(
+            (), kind=ParameterKind.MASS_ACTION_RATE, molecularity=molecularity
+        )
+        tentative_initialization = dataclasses.replace(
+            tentative_initialization,
+            uncertainty_text=(
+                "Tentative mass-action default (TENTATIVE_MASS_ACTION_DEFAULT): the "
+                "underlying mechanism is unconfirmed, so no curated or AI-predicted value is "
+                "used even if one exists for this context. "
+                + (tentative_initialization.uncertainty_text or "")
+            ).strip(),
+        )
         return (
-            _placeholder_spec(
-                "k",
-                assignment=assignment,
-                uncertainty_text=(
-                    "Tentative mass-action default (TENTATIVE_MASS_ACTION_DEFAULT): the "
-                    "underlying mechanism is unconfirmed, so no curated value is used even if "
-                    "one exists for this context. Requires calibration."
-                ),
+            _spec_from_initialization(
+                "k", assignment=assignment, initialization=tentative_initialization
             ),
         )
     matches = policy.measurements_of_kind(evidence, policy.RATE_CONSTANT_TYPES)
     return (
         _spec_from_initialization(
-            "k", assignment=assignment, initialization=initialize_from_evidence(matches)
+            "k",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                matches, kind=ParameterKind.MASS_ACTION_RATE, molecularity=molecularity
+            ),
         ),
     )
 
 
 def _declare_reversible_mass_action(
-    assignment: KineticLawAssignment, evidence: tuple[CuratedKineticMeasurement, ...]
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    network: FullNetwork,
 ) -> tuple[ParameterSpecification, ...]:
     forward = policy.measurements_of_kind(evidence, policy.FORWARD_RATE_TYPES)
     reverse = policy.measurements_of_kind(evidence, policy.REVERSE_RATE_TYPES)
+    # Forward and reverse molecularity are computed independently -- a reaction need not be
+    # symmetric (e.g. A + B <=> C is bimolecular forward, unimolecular reverse). Each
+    # direction's own rate constant is heuristically initialized purely from its own
+    # molecularity; the two are never related through a fabricated equilibrium constant
+    # (Increment instructions §5: "Do not claim the resulting pair is an experimentally
+    # known equilibrium").
+    forward_molecularity = _reaction_molecularity(
+        network, assignment.reaction_id, ParticipantRole.REACTANT
+    )
+    reverse_molecularity = _reaction_molecularity(
+        network, assignment.reaction_id, ParticipantRole.PRODUCT
+    )
     return (
         _spec_from_initialization(
-            "kf", assignment=assignment, initialization=initialize_from_evidence(forward)
+            "kf",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                forward, kind=ParameterKind.MASS_ACTION_RATE, molecularity=forward_molecularity
+            ),
         ),
         _spec_from_initialization(
-            "kr", assignment=assignment, initialization=initialize_from_evidence(reverse)
+            "kr",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                reverse, kind=ParameterKind.MASS_ACTION_RATE, molecularity=reverse_molecularity
+            ),
         ),
     )
 
@@ -228,8 +301,12 @@ def _declare_michaelis_menten(
         _spec_from_initialization(
             "kcat",
             assignment=assignment,
-            initialization=initialize_from_evidence(
-                policy.measurements_of_kind(evidence, policy.KCAT_TYPES)
+            initialization=initialize_with_fallback(
+                policy.measurements_of_kind(evidence, policy.KCAT_TYPES),
+                # kcat (a turnover number) is always first-order regardless of the
+                # reaction's own molecularity -- never molecularity-dependent the way a
+                # mass-action rate constant is.
+                kind=ParameterKind.RATE_FIRST_ORDER,
             ),
         )
     ]
@@ -245,7 +322,9 @@ def _declare_michaelis_menten(
             _spec_from_initialization(
                 "Km",
                 assignment=assignment,
-                initialization=initialize_from_evidence(substrate_matches),
+                initialization=initialize_with_fallback(
+                    substrate_matches, kind=ParameterKind.CONCENTRATION
+                ),
                 substrate_id=compound_id,
             )
         )
@@ -261,22 +340,28 @@ def _declare_hill(
         _spec_from_initialization(
             "Vmax",
             assignment=assignment,
-            initialization=initialize_from_evidence(
-                policy.measurements_of_kind(evidence, policy.VMAX_TYPES)
+            initialization=initialize_with_fallback(
+                policy.measurements_of_kind(evidence, policy.VMAX_TYPES), kind=ParameterKind.FLUX
             ),
         ),
         _spec_from_initialization(
             "Km",
             assignment=assignment,
-            initialization=initialize_from_evidence(
-                policy.measurements_of_kind(evidence, policy.KM_TYPES)
+            initialization=initialize_with_fallback(
+                policy.measurements_of_kind(evidence, policy.KM_TYPES),
+                kind=ParameterKind.CONCENTRATION,
             ),
         ),
         _spec_from_initialization(
             "n",
             assignment=assignment,
-            initialization=initialize_from_evidence(
-                policy.measurements_of_kind(evidence, policy.HILL_COEFFICIENT_TYPES)
+            # A Hill coefficient has no centralized heuristic default (Increment
+            # instructions §4 names only concentration/rate/flux/mass-action-rate
+            # families as supported) -- ParameterKind.UNSUPPORTED always falls through to
+            # the plain, undecorated PLACEHOLDER, never an invented convention.
+            initialization=initialize_with_fallback(
+                policy.measurements_of_kind(evidence, policy.HILL_COEFFICIENT_TYPES),
+                kind=ParameterKind.UNSUPPORTED,
             ),
         ),
     )
@@ -323,9 +408,9 @@ def _declare_for_assignment(
     evidence = _evidence_for(assignment, reaction_measurements, sibling_count=sibling_count)
 
     if assignment.kinetic_law_type is KineticLawType.MASS_ACTION:
-        return _declare_mass_action(assignment, evidence)
+        return _declare_mass_action(assignment, evidence, network)
     if assignment.kinetic_law_type is KineticLawType.REVERSIBLE_MASS_ACTION:
-        return _declare_reversible_mass_action(assignment, evidence)
+        return _declare_reversible_mass_action(assignment, evidence, network)
     if assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN:
         reactant_compound_ids = _reactant_compound_ids(
             network, assignment.reaction_id, species_by_id

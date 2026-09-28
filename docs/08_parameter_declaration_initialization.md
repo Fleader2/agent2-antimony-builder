@@ -285,10 +285,22 @@ This increment never: selects, fits, estimates, optimizes, or calibrates
 a numeric parameter value; assesses a `BoundaryLikelihood`; decomposes a
 module; generates Antimony; or implements Agent 3 validation, Agent 4
 simulation/fitting, or Agent 5 critique. It never invents a
-`ParameterSource.CALIBRATED` value, never fabricates a plausible number
-for a `PLACEHOLDER`, and never converts or reconciles units. Structural
-tests in `tests/agent2/test_parameters_scope.py` verify none of these
-concepts appear anywhere in `app.agent2.parameters`.
+`ParameterSource.CALIBRATED` value, and never converts or reconciles a
+real, evidence-based measurement's units. Structural tests in
+`tests/agent2/test_parameters_scope.py` verify none of these concepts
+appear anywhere in `app.agent2.parameters`.
+
+**Since the Heuristic Simulation Parameter Initialization increment**
+(§24), a true `PLACEHOLDER` -- one with neither experimental nor
+AI-predicted evidence, for a parameter kind this package's own
+centralized policy supports -- *is* assigned a disclosed, non-evidentiary
+starting number (`ParameterSource.HEURISTIC_INITIALIZATION`), never
+silently and never confused with any evidence-based source. This is a
+narrower, more precise restatement of the original "never fabricates a
+plausible number for a `PLACEHOLDER`" non-goal, not a reversal of it: the
+number is real (a simulator can use it), but it is exhaustively
+disclosed as an Agent-2-invented initialization assumption, never as a
+biochemical claim -- see §24 for the full boundary.
 
 ## 20. Future Agent 4 interaction
 
@@ -301,7 +313,12 @@ or confirm, and `kinetic_law_assignment_id` lets Agent 4 cross-reference
 back to `is_tentative` (Increment 4) to prioritize a tentative
 assignment's parameters for scrutiny first. `ParameterSource.CALIBRATED`
 is the value Agent 4's own feedback, and only that feedback, may
-eventually assign -- never this package.
+eventually assign -- never this package. Since §24, a
+`HEURISTIC_INITIALIZATION` parameter is exactly as much a calibration
+target as a bare `PLACEHOLDER` ever was -- Agent 4 should treat both as
+"no real evidence exists here yet," distinguishing only `AI_PREDICTED`
+(a weaker, but non-arbitrary, prior) as a separate category worth
+weighting differently during fitting.
 
 ## 21. Testing
 
@@ -316,20 +333,32 @@ preservation; determinism under permuted order-insensitive collections;
 parameter-identity stability; duplicate detection; and every documented
 validation failure (including a forbidden `CALIBRATED`).
 `tests/agent2/test_parameters_scope.py` covers structural scope-safety
-(§19).
+(§19). `tests/agent2/test_heuristic_initialization.py` (§24) covers the
+full 4-tier precedence waterfall, every supported parameter kind's
+molecularity-dependent unit, the unsupported/no-expression-law boundary,
+determinism, explicit provenance, and a Run-6-shaped mixed-evidence
+fixture; `tests/agent2/test_model_specification.py` additionally confirms
+the Antimony-executability consequence (§24.6).
 
 ## 22. Versioning
 
-`PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v1"`
-introduced for the first real parameter-declaration rule set.
-`AGENT2_CONTRACT_VERSION` bumped `"0.4"` -> `"0.5"`:
-`ParameterSpecification` (`app.agent2.types`) gained
-`kinetic_law_assignment_id` (§5) -- a real `app.agent2.types` shape
-change per this repository's own bump criterion, unlike Increment 4
-(which added no field to any `app.agent2.types` type and so did not
-bump it). `AGENT1_HANDOFF_VERSION` is unchanged -- Agent 1 was not
-modified. Full reasoning recorded in `app/agent2/version.py`'s own
-docstring.
+`PARAMETER_DECLARATION_POLICY_VERSION` introduced as
+`"parameter-declaration-v1"` for the first real parameter-declaration
+rule set; bumped to `"parameter-declaration-v2"` by the Heuristic
+Simulation Parameter Initialization increment (§24) -- a narrower-reading
+policy-version bump (new, additive initialization behavior; no existing
+declaration behavior changed for a parameter that already had real
+evidence). `HEURISTIC_INITIALIZATION_POLICY_VERSION =
+"heuristic-initialization-v1"` introduced by that same increment,
+versioning the heuristic-default policy (`heuristic_defaults.py`)
+independently of the declaration policy that consumes it. `AGENT2_CONTRACT_VERSION`
+bumped `"0.4"` -> `"0.5"` for this increment's original
+`kinetic_law_assignment_id` field addition (§5) -- unchanged again by
+§24, which added two `ParameterSource` enum values (never a shape change
+under this repository's own bump criterion) but no new field to any
+`app.agent2.types` type. `AGENT1_HANDOFF_VERSION` is unchanged by either
+-- Agent 1 was not modified for this increment. Full reasoning recorded
+in `app/agent2/version.py`'s own docstring.
 
 ## 23. Final architectural statement
 
@@ -337,3 +366,169 @@ docstring.
 > the best currently available curated initialization. It never performs
 > optimization, estimation, fitting, or calibration. Numerical refinement
 > is exclusively the responsibility of Agent 4.
+
+## 24. Heuristic Simulation Parameter Initialization increment
+
+### 24.1 Purpose
+
+A parameter left as a bare `PLACEHOLDER` after §1-23's own curated/
+AI-predicted initialization has *no* numeric value at all -- Antimony
+correctly refuses to generate an executable rate law for it (§12). This
+increment closes that gap for every parameter kind its own policy
+supports, assigning a deterministic, disclosed, non-evidentiary starting
+value so a simulator has *something* numerically well-behaved to run
+with, while making it structurally impossible to confuse that value with
+real biochemical evidence or a future Agent 4 calibration result.
+
+### 24.2 Precedence
+
+`LITERATURE_DERIVED`/`CURATED` > `AI_PREDICTED` >
+`HEURISTIC_INITIALIZATION` > `PLACEHOLDER`
+(`app.agent2.parameters.initializer.initialize_with_fallback`). A lower
+tier is consulted **only** when the previous tier found a genuine,
+complete absence of matching evidence (`provenance_refs == ()`) --
+disagreeing real evidence at any tier is preserved as its own disclosed,
+terminal `PLACEHOLDER` (with every conflicting candidate's id retained),
+never silently discarded in favor of a lower-precedence guess.
+
+`ParameterSource.AI_PREDICTED` is new: a GotEnzymes2-sourced measurement
+(Agent 1.x Increment C.11, identified on this side by the literal string
+`CuratedKineticMeasurement.source == "GOTENZYMES"`) is excluded
+unconditionally from `initialize_from_evidence` (which would otherwise
+mislabel it `CURATED`, since it never carries a `publication_id`) and
+resolved instead by the new `initialize_from_ai_predicted_evidence`,
+using its own canonical `normalized_value`/`normalized_unit` (Agent 1.x
+Increment C.12) rather than its raw, source-specific reported figure --
+an AI-predicted value is never a human-authored, source-attributed
+report the way a real literature figure is.
+
+### 24.3 Heuristic defaults
+
+`app.agent2.parameters.heuristic_defaults` centralizes every default
+behind exactly two reference constants: `REFERENCE_RATE_PER_SEC = 1`
+(per second) and `REFERENCE_CONCENTRATION_NM = 1000` (nM). Every other
+default is derived, never chosen independently:
+
+| `ParameterKind` | Default value | Canonical unit |
+|---|---|---|
+| `CONCENTRATION` (Km/Ki-like) | `REFERENCE_CONCENTRATION_NM` | `nM` |
+| `RATE_FIRST_ORDER` (kcat, ...) | `REFERENCE_RATE_PER_SEC` | `per_sec` |
+| `FLUX` (Vmax-like) | `REFERENCE_RATE_PER_SEC * REFERENCE_CONCENTRATION_NM` | `nM_per_s` |
+| `MASS_ACTION_RATE` (k/kf/kr) | `REFERENCE_RATE_PER_SEC / REFERENCE_CONCENTRATION_NM ** (n - 1)` | `per_sec` (n=1) / `nM_per_s` (n=0) / `per_nMs` (n=2) / `"nM^{1-n} s^-1"` (any other n) |
+| `UNSUPPORTED` (Hill n, Keq) | -- | -- (`None`; never an invented convention) |
+
+The mass-action formula is chosen so that, at exactly the reference
+concentration (every reactant/product at `REFERENCE_CONCENTRATION_NM`),
+*every* heuristically-initialized mass-action reaction -- regardless of
+its own order -- produces the identical characteristic flux
+(`REFERENCE_RATE_PER_SEC * REFERENCE_CONCENTRATION_NM`, `nM_per_s`): one
+coherent rationale for every order's magnitude, never an unexplained
+per-order magic number. `n` is the reaction's own molecularity for the
+direction being initialized -- reactant-stoichiometry sum for a forward
+constant, product-stoichiometry sum for a reverse one
+(`app.agent2.parameters.builder._reaction_molecularity`) -- computed
+independently per direction, never symmetrized or related through a
+fabricated equilibrium constant (§24.4).
+
+### 24.4 Reversible reactions
+
+`_declare_reversible_mass_action` computes forward and reverse
+molecularity independently (from `ParticipantRole.REACTANT` and
+`ParticipantRole.PRODUCT` respectively) and initializes each direction's
+own rate constant through the same 4-tier waterfall. A reaction need not
+be symmetric (`A + B <=> C` is bimolecular forward, unimolecular
+reverse); the two resulting values are never claimed to be an
+experimentally known equilibrium, and no `kr`/equilibrium constant is
+ever invented for a law that does not itself declare one.
+
+### 24.5 The `TENTATIVE_MASS_ACTION_DEFAULT` boundary
+
+A `MASS_ACTION` assignment flagged `TENTATIVE_MASS_ACTION_DEFAULT`
+(Increment 5, Step 16) never maps *real* evidence -- curated or
+AI-predicted -- to its rate constant, even when a matching measurement
+exists for the exact context: the underlying mechanism assumption itself
+is unconfirmed, so attributing real evidence to it would misrepresent
+that evidence as validating an assumed mechanism. This increment does
+**not** extend that exclusion to heuristic initialization: the law type
+is still `MASS_ACTION` with a built expression and a fully declared `k`
+slot -- not `expression=None`, not an unsupported `KineticLawType`, and
+not "no declared parameter structure" (the three conditions §24.6's own
+boundary actually excludes) -- and a heuristic value makes no
+evidentiary claim the tentative mechanism could be misrepresented as
+validating. `_declare_mass_action` therefore always calls
+`initialize_with_fallback` for a tentative default too, but with an
+empty evidence tuple (skipping straight to the heuristic tier), and
+overrides the resulting `uncertainty_text` to still name the tentative
+mechanism explicitly.
+
+### 24.6 Rate-law boundary: parameters only, never a new rate law
+
+This increment initializes declared parameter *slots* only. A reaction
+whose kinetic law has `expression=None` (an unresolved multi-substrate
+Michaelis-Menten, `UNASSIGNED`, or `CUSTOM`) never gets a new rate law
+invented for it here -- `_declare_custom` is deliberately unmodified
+(CUSTOM structurally means "unsupported mechanism"; no molecularity or
+dimension can be safely inferred for its generic `k`/`kf`/`kr`/etc. slot,
+so it stays a bare `PLACEHOLDER`), and a substrate-anchored
+multi-substrate Michaelis-Menten's every Km slot (anchored or not) and
+its kcat are still heuristically initialized even though the reaction's
+overall `expression` stays `None` -- initializing a law's *parameters*
+is legitimate independent of whether its *expression* is resolved.
+
+The practical, positive consequence: `ParameterSpecification.has_value`
+is a pure, source-agnostic value-presence check
+(`self.value is not None`), so a reaction whose *only* prior blocker was
+missing parameter numbers (never an unresolved expression) now correctly
+becomes `AntimonyArtifactReadiness.EXECUTABLE` once every one of its
+parameters is heuristically initialized -- confirmed by
+`tests/agent2/test_model_specification.py::test_heuristic_initialization_makes_a_value_only_blocked_reaction_executable`.
+A reaction with a genuinely unresolved expression remains correctly
+non-executable regardless
+(`test_heuristic_initialization_never_makes_an_unresolved_expression_law_executable`).
+
+### 24.7 Boundary-assessment interaction
+
+`app.agent2.boundaries.policy.compute_parameter_basis` (§9's own
+Increment 6 policy) treats `HEURISTIC_INITIALIZATION` identically to the
+pre-existing `ParameterSource.DEFAULT` for the `BoundaryParameterBasis
+.DEFAULT_ONLY` classification: both are values Agent 2 invented itself,
+from its own policy, never real evidence -- conceptually identical for
+this qualitative disclosure, even though they remain two distinct,
+never-confused `ParameterSource` values everywhere else.
+`ParameterSource.AI_PREDICTED` is deliberately left unhandled there (it
+falls through to the safe `MIXED` classification) -- a separate design
+question this increment did not need to resolve.
+
+### 24.8 Real coverage evaluation (Pilot 2 Run 6 network, sce00061)
+
+Run against the real, saved Agent 1 handoff for the 38-reaction yeast
+fatty-acid-biosynthesis network (the same handoff Pilot 2 Run 6's own
+report used), *not* through Agent 4:
+
+| | Before (Run 6 report) | After (this increment) |
+|---|---|---|
+| Total parameters | 41 | 41 |
+| `LITERATURE_DERIVED` | 1 | 1 |
+| `AI_PREDICTED` | 0 | 0 (none of this handoff's own measurements happen to be GotEnzymes2-sourced) |
+| `HEURISTIC_INITIALIZATION` | 0 | 40 |
+| `PLACEHOLDER` | 40 | 0 |
+| Reactions | 38 | 38 |
+| Non-executable (`expression=None`) | -- | 1 (a multi-substrate Michaelis-Menten reaction; unaffected by this increment, per §24.6) |
+| Non-executable (other reasons -- missing values) | -- | 0 |
+
+Heuristic-initialized parameters by canonical unit: `per_nMs` 25 (the
+network's dominant shape -- catalyzed, reversible, bimolecular
+`TENTATIVE_MASS_ACTION_DEFAULT` reactions), `per_sec` 10, `nM^-2 s^-1` 3
+(trimolecular mass-action reactions), `nM` 2 (Km-like slots). The one
+remaining non-executable reaction is exactly the real, already-known
+ACC1/malonyl-CoA-ACP substrate-anchored multi-substrate Michaelis-Menten
+case (§24.6) -- correctly left for a future "Executable Rate-Law
+Fallback" increment, never guessed at here.
+
+### 24.9 Explicit non-goals (this increment specifically)
+
+Never invents a new rate law for `expression=None`; never assigns
+`ParameterSource.CALIBRATED`; never runs Agent 4 calibration or a full
+pilot; never overwrites `LITERATURE_DERIVED`/`CURATED`/`AI_PREDICTED`
+evidence, even when it disagrees with itself (§24.2); never assigns a
+heuristic default to a parameter kind not named in §24.3's own table.

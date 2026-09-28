@@ -120,7 +120,14 @@ def compute_parameter_basis(
     distinct = set(parameter_sources)
     if distinct == {ParameterSource.PLACEHOLDER}:
         return BoundaryParameterBasis.PLACEHOLDER_ONLY
-    if distinct == {ParameterSource.DEFAULT}:
+    # HEURISTIC_INITIALIZATION (Heuristic Simulation Parameter Initialization increment)
+    # joins DEFAULT here, never PLACEHOLDER_ONLY/CURATED_OR_LITERATURE: both DEFAULT and
+    # HEURISTIC_INITIALIZATION are values Agent 2 invented itself, from its own policy,
+    # never real evidence of any kind -- conceptually identical for the purpose of this
+    # qualitative disclosure, even though they are two distinct, never-confused
+    # ParameterSource values everywhere else (a heuristic value is at least numerically
+    # present, unlike a bare PLACEHOLDER, but still not evidence-based).
+    if distinct <= {ParameterSource.DEFAULT, ParameterSource.HEURISTIC_INITIALIZATION}:
         return BoundaryParameterBasis.DEFAULT_ONLY
     if distinct == {ParameterSource.CALIBRATED}:
         return BoundaryParameterBasis.CALIBRATED

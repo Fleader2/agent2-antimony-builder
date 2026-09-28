@@ -735,12 +735,31 @@ capability exists.
 
 ## 28. `BoundaryParameterBasis`
 
-Unchanged. `NONE`/`PLACEHOLDER_ONLY`/`DEFAULT_ONLY`/
-`CURATED_OR_LITERATURE`/`CALIBRATED`/`MIXED`, computed from the actual
-set of `ParameterSource` values involved on both sides. This is the
-*only* place parameter provenance is disclosed on a `BoundaryAssessment`
-after this revision -- never through `supporting_reason_codes`/
-`opposing_reason_codes` (§11, §20).
+`NONE`/`PLACEHOLDER_ONLY`/`DEFAULT_ONLY`/`CURATED_OR_LITERATURE`/
+`CALIBRATED`/`MIXED`, computed from the actual set of `ParameterSource`
+values involved on both sides. This is the *only* place parameter
+provenance is disclosed on a `BoundaryAssessment` after this revision --
+never through `supporting_reason_codes`/`opposing_reason_codes` (§11,
+§20).
+
+**Heuristic Simulation Parameter Initialization increment:**
+`compute_parameter_basis` (`app.agent2.boundaries.policy`) now treats the
+new `ParameterSource.HEURISTIC_INITIALIZATION` identically to the
+pre-existing `ParameterSource.DEFAULT` for this classification -- a set
+containing only `DEFAULT` and/or `HEURISTIC_INITIALIZATION` values still
+resolves to `DEFAULT_ONLY`, never `PLACEHOLDER_ONLY`/`MIXED`. Both are
+values Agent 2 invented itself from its own policy, never real evidence
+-- conceptually identical for this qualitative disclosure, even though
+they remain two distinct `ParameterSource` values everywhere else. A
+practical consequence: a candidate boundary whose only reactions are bare
+state-transition-shaped `MASS_ACTION` reactions with no curated evidence
+at all -- previously `PLACEHOLDER_ONLY` -- is now `DEFAULT_ONLY`, since
+those reactions' rate constants are heuristically initialized rather than
+left as bare placeholders (see
+`tests/agent2/test_boundaries.py::test_placeholder_only_region_gives_default_only_basis`).
+`ParameterSource.AI_PREDICTED` is deliberately left unhandled here (it
+falls through to the safe `MIXED` classification) -- a separate design
+question this increment did not need to resolve.
 
 ## 29. Audit/provenance
 

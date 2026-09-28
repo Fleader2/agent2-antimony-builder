@@ -691,10 +691,29 @@ class ParameterSource(StrEnum):
     the dedicated enum this field now uses instead, and
     ``docs/11_model_specification_assembly.md`` §10 for the full
     rationale.
+
+    **`AI_PREDICTED`/`HEURISTIC_INITIALIZATION`** (Heuristic Simulation
+    Parameter Initialization increment): two new, distinct rungs inserted
+    into the existing precedence, never confused with each other or with
+    any value above them --
+    ``LITERATURE_DERIVED``/``CURATED`` > ``AI_PREDICTED`` >
+    ``HEURISTIC_INITIALIZATION`` > ``PLACEHOLDER``. ``AI_PREDICTED`` is a
+    curated-but-non-experimental value Agent 1 itself already attributed
+    to a specific reaction/protein/substrate (today, exclusively
+    GotEnzymes2 predictions, ``CuratedKineticMeasurement.source ==
+    "GOTENZYMES"``) -- real, attributable evidence, but never a
+    laboratory measurement. ``HEURISTIC_INITIALIZATION`` is a value this
+    package itself invented, from a small, centralized, documented default
+    policy (``app.agent2.parameters.heuristic_defaults``), used only when
+    no experimental or AI-predicted evidence exists at all -- never a
+    biochemical claim of any kind, purely a numerically well-behaved
+    starting point for later Agent 4 calibration.
     """
 
     CURATED = "CURATED"
     LITERATURE_DERIVED = "LITERATURE_DERIVED"
+    AI_PREDICTED = "AI_PREDICTED"
+    HEURISTIC_INITIALIZATION = "HEURISTIC_INITIALIZATION"
     DEFAULT = "DEFAULT"
     PLACEHOLDER = "PLACEHOLDER"
     CALIBRATED = "CALIBRATED"

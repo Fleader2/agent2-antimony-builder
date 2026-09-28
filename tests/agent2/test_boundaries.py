@@ -645,7 +645,12 @@ def test_curated_to_placeholder_parameter_change_never_supports_a_boundary():
     assert assessment.parameter_basis is BoundaryParameterBasis.MIXED
 
 
-def test_placeholder_only_region_gives_placeholder_only_basis():
+def test_placeholder_only_region_gives_default_only_basis():
+    """Heuristic Simulation Parameter Initialization increment: with no curated/AI-predicted
+    evidence at all, these reactions' parameters are now heuristically initialized rather
+    than left bare PLACEHOLDERs -- DEFAULT_ONLY (which HEURISTIC_INITIALIZATION joins,
+    conceptually identical to DEFAULT for this qualitative disclosure: an Agent-2-invented,
+    non-evidence-based value) is the correct classification, not PLACEHOLDER_ONLY."""
     handoff = dataclasses.replace(
         _linear_chain_handoff(),
         reaction_enzyme_associations=(
@@ -654,7 +659,7 @@ def test_placeholder_only_region_gives_placeholder_only_basis():
         ),
     )
     assessment = _only(_assess(handoff))
-    assert assessment.parameter_basis is BoundaryParameterBasis.PLACEHOLDER_ONLY
+    assert assessment.parameter_basis is BoundaryParameterBasis.DEFAULT_ONLY
 
 
 def test_no_parameters_at_all_gives_none_basis():

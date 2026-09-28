@@ -150,12 +150,16 @@ def _bare_state_transition_handoff(**reaction_overrides) -> Agent1CuratedKnowled
 
 
 def test_mass_action_structural_declares_single_k():
+    """No curated/AI-predicted evidence exists for this bare, unimolecular state
+    transition, so its rate constant is heuristically initialized (Heuristic Simulation
+    Parameter Initialization increment) rather than left an undecorated PLACEHOLDER."""
     declaration = _declare(_bare_state_transition_handoff())
     assert len(declaration.parameter_specifications) == 1
     spec = declaration.parameter_specifications[0]
     assert spec.parameter_id == "k_r1"
-    assert spec.source is ParameterSource.PLACEHOLDER
-    assert spec.value is None
+    assert spec.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert spec.value == Decimal("1")
+    assert spec.unit == "per_sec"
 
 
 def test_mass_action_curated_rate_constant_initializes():
@@ -173,10 +177,15 @@ def test_mass_action_curated_rate_constant_initializes():
     assert spec.provenance_refs == ("km1",)
 
 
-def test_mass_action_tentative_always_placeholder_even_with_matching_measurement():
+def test_mass_action_tentative_never_curated_but_is_heuristically_initialized():
     """A TENTATIVE_MASS_ACTION_DEFAULT assignment's k is never mapped to a curated
     measurement, even when one exists for this exact context (Increment 5 instructions,
-    Step 16)."""
+    Step 16) -- but, since the Heuristic Simulation Parameter Initialization increment, it is
+    still heuristically initialized rather than left a bare placeholder: the law type is still
+    ``MASS_ACTION`` with a built expression and a fully declared ``k`` slot, so it is not
+    excluded by that increment's own §7 boundary (``expression=None``/unsupported law
+    type/no declared parameter structure), and a heuristic value makes no evidentiary claim
+    the tentative mechanism could be misrepresented as validating."""
     handoff = dataclasses.replace(
         _one_substrate_one_product_handoff(reversible=True),
         kinetic_measurements=(
@@ -187,8 +196,10 @@ def test_mass_action_tentative_always_placeholder_even_with_matching_measurement
     (assignment,) = assignments.assignments
     assert assignment.is_tentative
     spec = _by_id(declaration, "k_r1_p1")
-    assert spec.source is ParameterSource.PLACEHOLDER
-    assert spec.value is None
+    assert spec.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert spec.value is not None
+    assert spec.value != Decimal("99")
+    assert spec.provenance_refs == ()
     assert "tentative" in spec.uncertainty_text.lower()
 
 
@@ -282,9 +293,14 @@ def test_reversible_mass_action_missing_reverse_measurement_is_placeholder():
     )
     declaration = _declare(handoff)
     assert _by_id(declaration, "kf_r1").source is ParameterSource.CURATED
+    # No curated/AI-predicted evidence exists for the reverse direction, so it is
+    # heuristically initialized (Heuristic Simulation Parameter Initialization increment)
+    # -- never left an undecorated PLACEHOLDER, and never confused with the real curated
+    # forward value above.
     kr = _by_id(declaration, "kr_r1")
-    assert kr.source is ParameterSource.PLACEHOLDER
-    assert kr.value is None
+    assert kr.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kr.value is not None
+    assert kr.provenance_refs == ()
 
 
 # --- CUSTOM --------------------------------------------------------------------------------------
@@ -455,8 +471,12 @@ def test_state_specific_parameters_remain_distinct():
     assert ids == {"k_r1_e", "k_r1_ep"}
     e_spec = _by_id(declaration, "k_r1_e")
     ep_spec = _by_id(declaration, "k_r1_ep")
-    assert e_spec.source is ParameterSource.PLACEHOLDER
-    assert ep_spec.source is ParameterSource.PLACEHOLDER  # tentative default -> never curated
+    # tentative default -> never curated, but still heuristically initialized (Heuristic
+    # Simulation Parameter Initialization increment)
+    assert e_spec.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert ep_spec.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert e_spec.provenance_refs == ()
+    assert ep_spec.provenance_refs == ()
     assert e_spec.kinetic_law_assignment_id != ep_spec.kinetic_law_assignment_id
 
 
@@ -692,11 +712,14 @@ def test_declare_parameters_rejects_network_id_mismatch():
 
 def test_declare_parameters_rejects_forced_calibrated_source(monkeypatch):
     """Defensive backstop: even if an internal initializer somehow produced CALIBRATED,
-    declare_parameters must refuse to return it."""
+    declare_parameters must refuse to return it. Patches initialize_with_fallback --
+    builder.py's own mass-action call site (Heuristic Simulation Parameter Initialization
+    increment) -- rather than initialize_from_evidence directly, since that is no longer
+    what the mass-action path calls."""
     import app.agent2.parameters.builder as builder_module
     from app.agent2.parameters.initializer import Initialization
 
-    def _force_calibrated(evidence_of_kind):
+    def _force_calibrated(evidence_of_kind, **kwargs):
         return Initialization(
             source=ParameterSource.CALIBRATED,
             value=Decimal("1"),
@@ -706,7 +729,7 @@ def test_declare_parameters_rejects_forced_calibrated_source(monkeypatch):
             uncertainty_text=None,
         )
 
-    monkeypatch.setattr(builder_module, "initialize_from_evidence", _force_calibrated)
+    monkeypatch.setattr(builder_module, "initialize_with_fallback", _force_calibrated)
     with pytest.raises(ParameterReferenceError, match="CALIBRATED"):
         _declare(_bare_state_transition_handoff())
 
@@ -758,16 +781,20 @@ def test_substrate_anchored_mm_declares_km_only_for_the_anchored_reactant():
     assert "km-malonyl" in anchored.provenance_refs
 
 
-def test_substrate_anchored_mm_never_invents_a_km_for_the_other_reactant():
+def test_substrate_anchored_mm_never_invents_curated_evidence_for_the_other_reactant():
+    """No curated/AI-predicted Km exists for ACP -- it is heuristically initialized
+    (Heuristic Simulation Parameter Initialization increment), never fabricated as if it
+    were real evidence, and never citing the malonyl-CoA measurement's own provenance."""
     declaration = _declare(_malonyl_coa_like_handoff())
     unanchored = _by_id(declaration, "Km_r1_p1_acp")
-    assert unanchored.source is ParameterSource.PLACEHOLDER
-    assert unanchored.value is None
+    assert unanchored.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert unanchored.value is not None
     assert unanchored.provenance_refs == ()
 
 
-def test_substrate_anchored_mm_kcat_is_not_fabricated_either():
+def test_substrate_anchored_mm_kcat_is_heuristically_initialized_not_fabricated_as_evidence():
     declaration = _declare(_malonyl_coa_like_handoff())
     kcat = _by_id(declaration, "kcat_r1_p1")
-    assert kcat.source is ParameterSource.PLACEHOLDER
-    assert kcat.value is None
+    assert kcat.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kcat.value == Decimal("1")
+    assert kcat.unit == "per_sec"
