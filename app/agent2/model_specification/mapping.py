@@ -86,6 +86,7 @@ from app.agent2.kinetics.types import KineticLawAssignment, KineticLawReasonCode
 from app.agent2.model_specification.errors import ModelSpecificationReferenceError
 from app.agent2.reversibility import (
     REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
+    effective_reversible,
     is_assumed,
 )
 from app.agent2.types import (
@@ -111,9 +112,41 @@ from app.agent2.types import (
 #: purpose-specific strings outside that enum.
 KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED = "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED"
 
+#: Stable, machine-readable reason codes (Executable Rate-Law Fallback increment): a
+#: selected kinetic law was otherwise structurally valid (reactants/products known, parameter
+#: structure declared) but its normal expression builder could not produce a safe combining
+#: algebra, so a generic, disclosed, non-mechanistic simulation-only expression was
+#: substituted instead -- never a claim about the true biochemical mechanism, never a reason
+#: to discard or reinterpret any curated/AI-predicted evidence already declared for that law
+#: (which remains present, simply unused by the fallback expression). Plain strings, not
+#: ``KineticLawReasonCode`` members, mirroring ``MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED``'s
+#: identical precedent -- that enum's own domain is reasons a kinetic-law *assignment* chose a
+#: law *family*, not a fact about how this later stage rendered that family's algebra.
+EXECUTABLE_RATE_LAW_FALLBACK = "EXECUTABLE_RATE_LAW_FALLBACK"
+#: The one currently-implemented specific case of the above: a genuinely multi-substrate
+#: Michaelis-Menten assignment (more than one reactant), for which no single combining
+#: algebra can be justified from independently-declared Km values alone (Increment 8's own
+#: original finding) -- resolved here by a generic mass-action-style approximation instead of
+#: withholding the expression entirely.
+MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK = "MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK"
+
 
 def _is_tentative(assignment: KineticLawAssignment) -> bool:
     return KineticLawReasonCode.TENTATIVE_MASS_ACTION_DEFAULT in assignment.reason_codes
+
+
+def _used_multi_substrate_mm_fallback(
+    assignment: KineticLawAssignment, reaction: ReactionSpecification
+) -> bool:
+    """Whether ``build_expression_and_species`` took the Executable Rate-Law Fallback
+    increment's own multi-substrate branch for this assignment -- re-derived structurally
+    (never a stored flag) from exactly the same condition that branch itself checks, so this
+    can never drift out of sync with it: a ``MICHAELIS_MENTEN`` assignment for a reaction with
+    more than one reactant participant."""
+    return (
+        assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+        and len(_reactant_species_ids(reaction)) > 1
+    )
 
 
 def _reactant_species_ids(reaction: ReactionSpecification) -> tuple[str, ...]:
@@ -178,21 +211,29 @@ def build_expression_and_species(
 
     if law_type is KineticLawType.MICHAELIS_MENTEN:
         _require_parameter_count(assignment, law_parameters, at_least=1)
-        kcat_param, *km_params = law_parameters
+        kcat_param = law_parameters[0]
         kcat = kcat_param.parameter_id
+        km_params = law_parameters[1 : 1 + len(reactants)]
         if not reactants or not km_params:
             # No curated reactant/Km pairing at all -- an honest, minimal fallback rather than
             # a fabricated substrate term.
             return kcat, tuple(reactants)
         terms = list(zip(reactants, km_params, strict=False))
         if len(terms) > 1:
-            # Genuinely multi-substrate: no single combining algebra is scientifically
-            # justified from independently-declared Km values alone. The law family is known
-            # (law_type stays MICHAELIS_MENTEN) but the exact algebra is not -- expression=None
-            # discloses that honestly, never a fabricated equation and never a non-expression
-            # status marker in this field (see module docstring; the disclosure itself lives in
-            # `_assumptions_for` and the dedicated ModelAssumption in `build_model_assumptions`).
-            return None, tuple(reactants)
+            # Genuinely multi-substrate: no single combining algebra involving kcat/Km alone is
+            # scientifically justified (ordered-sequential, ping-pong, and random mechanisms all
+            # differ, and nothing curated distinguishes among them) -- kcat/Km stay declared and
+            # preserved (never removed, never reinterpreted) but are not referenced by what
+            # follows. Executable Rate-Law Fallback increment: rather than leaving this law
+            # entirely unexpressed (`expression=None`, this branch's own pre-increment
+            # behavior), a generic, disclosed, non-mechanistic mass-action-style simulation
+            # expression is substituted instead, using the dedicated fallback parameter(s)
+            # `_declare_multi_substrate_mm_fallback` appended after kcat/Km for exactly this
+            # case -- never a claim that this is the true enzyme mechanism (see
+            # `_assumptions_for`/`build_model_assumptions` for the required disclosure).
+            return _build_multi_substrate_mm_fallback_expression(
+                assignment, reaction, law_parameters[1 + len(reactants) :], reactants, products
+            )
         (s, km) = terms[0]
         numerator = f"{kcat} * {s}"
         denominator = f"{km.parameter_id} + {s}"
@@ -210,6 +251,48 @@ def build_expression_and_species(
         f"build_expression_and_species has no expression policy for law_type={law_type!r} "
         f"(assignment_id={assignment.assignment_id!r})"
     )
+
+
+def _build_multi_substrate_mm_fallback_expression(
+    assignment: KineticLawAssignment,
+    reaction: ReactionSpecification,
+    fallback_params: tuple[ParameterSpecification, ...],
+    reactants: tuple[str, ...],
+    products: tuple[str, ...],
+) -> tuple[str, tuple[str, ...]]:
+    """The smallest generic mass-action-style expression consistent with the reaction's own
+    already-decided directionality (Executable Rate-Law Fallback increment §3/§7) -- never
+    ordered/random bi-bi, ping-pong, Hill, or any other mechanism-specific algebra, and never
+    an invented equilibrium relating the forward/reverse terms.
+
+    Reversibility is read from ``reaction.reversible`` through
+    ``app.agent2.reversibility.effective_reversible`` -- the same policy already applied by
+    ``_declare_reversible_mass_action``'s own parameter-declaration logic and by a later
+    per-law resolution stage: curated ``True``/``False`` pass through unchanged, curated
+    ``None`` (assumed reversible) is treated as reversible for this model-construction purpose
+    only, exactly as already disclosed by the pre-existing
+    ``REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE`` assumption -- this function adds no new
+    reversibility decision of its own.
+    """
+    reversible = effective_reversible(reaction.reversible)
+    expected = 2 if reversible else 1
+    if len(fallback_params) != expected:
+        raise ModelSpecificationReferenceError(
+            f"kinetic-law assignment {assignment.assignment_id!r} "
+            f"(law_type={assignment.kinetic_law_type.value}, multi-substrate fallback, "
+            f"reversible={reversible}) expects exactly {expected} fallback rate-constant "
+            f"parameter(s), found {len(fallback_params)}"
+        )
+    if not reversible:
+        (k_param,) = fallback_params
+        k = k_param.parameter_id
+        expression = " * ".join((k, *reactants))
+        return expression, tuple(reactants)
+    kf_param, kr_param = fallback_params
+    forward = " * ".join((kf_param.parameter_id, *reactants))
+    reverse = " * ".join((kr_param.parameter_id, *products)) if products else kr_param.parameter_id
+    expression = f"{forward} - {reverse}"
+    return expression, tuple(sorted(set(reactants) | set(products)))
 
 
 def _require_parameter_count(
@@ -242,7 +325,7 @@ def _require_parameter_count(
 
 
 def _assumptions_for(
-    assignment: KineticLawAssignment, *, expression: str | None
+    assignment: KineticLawAssignment, *, expression: str | None, reaction: ReactionSpecification
 ) -> tuple[str, ...]:
     """Deterministic, template-based disclosure text -- never prose speculation."""
     reason_codes = ", ".join(sorted(code.value for code in assignment.reason_codes))
@@ -258,17 +341,24 @@ def _assumptions_for(
     if assignment.unresolved_reasons:
         unresolved = ", ".join(sorted(code.value for code in assignment.unresolved_reasons))
         sentences.append(f"Unresolved: ({unresolved}).")
-    if expression is None and assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN:
-        # The only way a MICHAELIS_MENTEN assignment produces expression=None is the
-        # genuinely-multi-substrate branch of build_expression_and_species -- the single-
-        # substrate and no-curated-Km fallback paths both always return a non-None string.
+    if _used_multi_substrate_mm_fallback(assignment, reaction):
+        # Executable Rate-Law Fallback increment: expression is no longer withheld
+        # (expression=None) for this case -- a generic, disclosed, non-mechanistic
+        # mass-action-style simulation expression was substituted instead (see
+        # `_build_multi_substrate_mm_fallback_expression`). This must never be read as
+        # confirmation of the true enzyme mechanism.
         sentences.append(
             "Multi-substrate Michaelis-Menten mechanism: the law family is known, but no "
-            "single combining algebra is asserted -- ordered-sequential, ping-pong, and "
-            "random mechanisms all differ, and no curated or deterministic evidence "
-            "distinguishes among them. The declared parameters (kcat, one Km per substrate) "
-            "are preserved regardless. Serialization must be withheld until a concrete "
-            "expression is available."
+            "single combining algebra involving kcat/Km is asserted -- ordered-sequential, "
+            "ping-pong, and random mechanisms all differ, and no curated or deterministic "
+            "evidence distinguishes among them. The declared kcat/Km parameters (one Km per "
+            "substrate) are preserved regardless, though the fallback below does not "
+            "reference them. EXECUTABLE_RATE_LAW_FALLBACK "
+            "(MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK): a generic mass-action-style "
+            f"expression ({expression!r}) was substituted purely to make this reaction "
+            "simulatable -- it is never a claim about the true biochemical mechanism, and "
+            "requires later calibration/refinement (or a future, more specific mechanism "
+            "increment) like any other heuristically-initialized rate law."
         )
     return tuple(sentences)
 
@@ -304,7 +394,7 @@ def materialize_kinetic_law(
         enzyme_state_id=assignment.enzyme_state_id,
         protein_id=assignment.protein_id,
         complex_id=assignment.complex_id,
-        assumptions=_assumptions_for(assignment, expression=expression),
+        assumptions=_assumptions_for(assignment, expression=expression, reaction=reaction),
         provenance_refs=_provenance_for(assignment),
     )
 
@@ -344,6 +434,7 @@ def build_model_assumptions(
     exist."""
     assumptions: list[ModelAssumption] = []
     measurements_by_id = {m.id: m for m in kinetic_measurements}
+    reactions_by_id = {r.reaction_id: r for r in reactions}
 
     for law in sorted(kinetic_laws, key=lambda law: law.kinetic_law_id):
         assignment = kinetic_law_assignments_by_kinetic_law_id.get(law.kinetic_law_id)
@@ -419,28 +510,40 @@ def build_model_assumptions(
                     reason_code=KineticLawType.UNASSIGNED.value,
                 )
             )
-        if law.law_type is KineticLawType.MICHAELIS_MENTEN and law.expression is None:
-            # The only way a MICHAELIS_MENTEN law reaches this state is the genuinely-multi-
-            # substrate branch of build_expression_and_species (see that function's own
-            # docstring) -- the single-substrate and no-curated-Km fallback paths both always
-            # produce a non-None expression.
+        reaction = reactions_by_id.get(law.reaction_id)
+        if (
+            assignment is not None
+            and reaction is not None
+            and _used_multi_substrate_mm_fallback(assignment, reaction)
+        ):
+            # Executable Rate-Law Fallback increment: this law's expression is no longer
+            # withheld (expression=None, the "MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"
+            # disclosure this replaces) -- a generic, disclosed, non-mechanistic mass-action-
+            # style simulation expression was substituted instead, see
+            # `_build_multi_substrate_mm_fallback_expression`.
             assumptions.append(
                 ModelAssumption(
-                    assumption_id=f"assumption::unresolved-multi-substrate::{law.kinetic_law_id}",
+                    assumption_id=f"assumption::executable-rate-law-fallback::{law.kinetic_law_id}",
                     category="kinetics",
                     statement=(
-                        f"Reaction {law.reaction_id}: the kinetic-law family is "
-                        "Michaelis-Menten; multiple substrates are present; no justified "
-                        "canonical multi-substrate algebra has been specified (ordered-"
-                        "sequential, ping-pong, and random mechanisms all differ, and no "
-                        "curated or deterministic evidence distinguishes among them); "
-                        "serialization must be withheld until a concrete expression is "
-                        "available. The declared parameters (kcat, one Km per substrate) are "
-                        "preserved regardless."
+                        f"EXECUTABLE_RATE_LAW_FALLBACK. Reaction {law.reaction_id}: the "
+                        "kinetic-law family is Michaelis-Menten; multiple substrates are "
+                        "present; no justified canonical multi-substrate algebra has been "
+                        "specified (ordered-sequential, ping-pong, and random mechanisms all "
+                        "differ, and no curated or deterministic evidence distinguishes among "
+                        "them). The selected biochemical law could not be expressed safely, so "
+                        f"a generic mass-action-style simulation law ({law.expression!r}) was "
+                        "substituted -- it is never a claim about the true enzyme mechanism. "
+                        "The declared kcat/Km parameters (one Km per substrate) remain "
+                        "preserved but are unused by the fallback expression; the fallback's "
+                        "own rate constant(s) are heuristically initialized, never curated/AI-"
+                        "predicted evidence unless a real matching measurement happened to "
+                        "exist. Requires later calibration/refinement, or a future, more "
+                        "specific mechanism increment."
                     ),
                     related_entity_ids=(law.reaction_id, law.kinetic_law_id),
-                    source="app.agent2.kinetics",
-                    reason_code="MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED",
+                    source="app.agent2.model_specification",
+                    reason_code=MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK,
                 )
             )
 
@@ -550,7 +653,9 @@ def build_model_assumptions(
 
 
 __all__ = [
+    "EXECUTABLE_RATE_LAW_FALLBACK",
     "KINETIC_MEASUREMENT_REACTION_CONTEXT_UNRESOLVED",
+    "MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK",
     "build_expression_and_species",
     "build_model_assumptions",
     "materialize_kinetic_law",

@@ -773,12 +773,37 @@ def _malonyl_coa_like_handoff() -> Agent1CuratedKnowledgeViewContract:
 def test_substrate_anchored_mm_declares_km_only_for_the_anchored_reactant():
     declaration = _declare(_malonyl_coa_like_handoff())
     ids = {s.parameter_id for s in declaration.parameter_specifications}
-    assert ids == {"kcat_r1_p1", "Km_r1_p1_malonyl-coa", "Km_r1_p1_acp"}
+    # Executable Rate-Law Fallback increment: kf/kr are now also declared for this genuinely
+    # multi-substrate assignment (§6 of that increment) -- kcat/Km are otherwise completely
+    # unaffected.
+    assert ids == {
+        "kcat_r1_p1",
+        "Km_r1_p1_malonyl-coa",
+        "Km_r1_p1_acp",
+        "kf_r1_p1",
+        "kr_r1_p1",
+    }
 
     anchored = _by_id(declaration, "Km_r1_p1_malonyl-coa")
     assert anchored.source is ParameterSource.CURATED
     assert anchored.value == Decimal("18.0")
     assert "km-malonyl" in anchored.provenance_refs
+
+
+def test_multi_substrate_mm_fallback_rate_constants_are_heuristic_and_molecularity_derived():
+    """Executable Rate-Law Fallback increment §6/§7: the fallback's own kf/kr are heuristically
+    initialized (never fabricated as curated/AI-predicted evidence), and each direction's unit
+    is derived from its own molecularity independently (forward: malonyl-coa + acp = 2;
+    reverse: coa + malonyl-acp = 2) -- never related through a fabricated equilibrium."""
+    declaration = _declare(_malonyl_coa_like_handoff())
+    kf = _by_id(declaration, "kf_r1_p1")
+    kr = _by_id(declaration, "kr_r1_p1")
+    assert kf.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kr.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kf.provenance_refs == ()
+    assert kr.provenance_refs == ()
+    assert kf.unit == "per_nMs"
+    assert kr.unit == "per_nMs"
 
 
 def test_substrate_anchored_mm_never_invents_curated_evidence_for_the_other_reactant():

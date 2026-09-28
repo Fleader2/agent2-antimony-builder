@@ -34,6 +34,7 @@ from app.agent2.parameters.validation import (
     require_full_network,
     require_kinetic_law_assignment_set,
 )
+from app.agent2.reversibility import effective_reversible
 from app.agent2.types import (
     CuratedKineticMeasurement,
     FullNetwork,
@@ -296,6 +297,7 @@ def _declare_michaelis_menten(
     assignment: KineticLawAssignment,
     evidence: tuple[CuratedKineticMeasurement, ...],
     reactant_compound_ids: tuple[str, ...],
+    network: FullNetwork,
 ) -> tuple[ParameterSpecification, ...]:
     specs = [
         _spec_from_initialization(
@@ -330,7 +332,77 @@ def _declare_michaelis_menten(
         )
     # Ki is deliberately never declared here (Increment 5 instructions, Step 8:
     # "Do not invent inhibition constants") -- plain Michaelis-Menten has no inhibition term.
+    if len(reactant_compound_ids) > 1:
+        # Executable Rate-Law Fallback increment: a genuinely multi-substrate assignment's
+        # kcat/Km parameters (above) can never combine into one justified algebraic
+        # expression (app.agent2.model_specification.mapping.build_expression_and_species),
+        # so that module substitutes a generic, disclosed, non-mechanistic mass-action-style
+        # simulation fallback there instead -- this is exactly the minimal extra parameter
+        # structure that fallback needs, appended *after* kcat/Km (never replacing or
+        # reordering them; both real-evidence-eligible slots remain fully declared and
+        # preserved even though the fallback expression never references them). Reuses the
+        # same evidence this assignment's kcat/Km slots already saw -- a real curated/
+        # AI-predicted rate-constant measurement (K/KF/KR) for this exact context still takes
+        # precedence over a heuristic guess, exactly as everywhere else in this module; only
+        # in the (expected, common) case no such measurement exists does this fall through to
+        # HEURISTIC_INITIALIZATION.
+        specs.extend(_declare_multi_substrate_mm_fallback(assignment, evidence, network))
     return tuple(specs)
+
+
+def _declare_multi_substrate_mm_fallback(
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    network: FullNetwork,
+) -> tuple[ParameterSpecification, ...]:
+    """The minimal mass-action-style rate constant(s) a genuinely multi-substrate
+    Michaelis-Menten assignment's simulation fallback needs -- one ``k`` if the reaction is
+    (curated or assumed) irreversible, or independently-molecularity-derived ``kf``/``kr`` if
+    it is (curated or assumed) reversible, mirroring ``_declare_reversible_mass_action``'s own
+    policy exactly (§5/§7 of the increment instructions: never relate the two through a
+    fabricated equilibrium constant, never invent a reverse constant the reaction's own
+    effective reversibility does not call for).
+    """
+    forward_molecularity = _reaction_molecularity(
+        network, assignment.reaction_id, ParticipantRole.REACTANT
+    )
+    if not effective_reversible(_reaction_reversible(network, assignment.reaction_id)):
+        matches = policy.measurements_of_kind(evidence, policy.RATE_CONSTANT_TYPES)
+        return (
+            _spec_from_initialization(
+                "k",
+                assignment=assignment,
+                initialization=initialize_with_fallback(
+                    matches, kind=ParameterKind.MASS_ACTION_RATE, molecularity=forward_molecularity
+                ),
+            ),
+        )
+    reverse_molecularity = _reaction_molecularity(
+        network, assignment.reaction_id, ParticipantRole.PRODUCT
+    )
+    forward = policy.measurements_of_kind(evidence, policy.FORWARD_RATE_TYPES)
+    reverse = policy.measurements_of_kind(evidence, policy.REVERSE_RATE_TYPES)
+    return (
+        _spec_from_initialization(
+            "kf",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                forward, kind=ParameterKind.MASS_ACTION_RATE, molecularity=forward_molecularity
+            ),
+        ),
+        _spec_from_initialization(
+            "kr",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                reverse, kind=ParameterKind.MASS_ACTION_RATE, molecularity=reverse_molecularity
+            ),
+        ),
+    )
+
+
+def _reaction_reversible(network: FullNetwork, reaction_id: str) -> bool | None:
+    (reaction,) = (r for r in network.reactions if r.reaction_id == reaction_id)
+    return reaction.reversible
 
 
 def _declare_hill(
@@ -415,7 +487,7 @@ def _declare_for_assignment(
         reactant_compound_ids = _reactant_compound_ids(
             network, assignment.reaction_id, species_by_id
         )
-        return _declare_michaelis_menten(assignment, evidence, reactant_compound_ids)
+        return _declare_michaelis_menten(assignment, evidence, reactant_compound_ids, network)
     if assignment.kinetic_law_type is KineticLawType.HILL:
         return _declare_hill(assignment, evidence)
     if assignment.kinetic_law_type is KineticLawType.CUSTOM:

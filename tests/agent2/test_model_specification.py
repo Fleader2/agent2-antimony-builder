@@ -349,40 +349,50 @@ def test_michaelis_menten_expression_matches_canonical_form():
     assert law.expression == f"{kcat_id} * {species_id} / ({km_id} + {species_id})"
 
 
-def test_multi_substrate_michaelis_menten_does_not_assert_unjustified_algebra():
-    """Case A (final pre-commit revision): a genuinely multi-substrate MM law must never
-    receive a simplified, scientifically-unjustified combining expression, nor a non-
-    expression status marker in `expression` -- the law family is preserved
-    (`law_type=MICHAELIS_MENTEN`), `expression` is `None` (the law family is known, the exact
-    algebra is not), and the unresolved state is disclosed only through assumptions/reason
-    codes."""
+def test_multi_substrate_michaelis_menten_gets_a_disclosed_simulation_fallback():
+    """Executable Rate-Law Fallback increment: a genuinely multi-substrate MM law must never
+    receive a fabricated *mechanistic* combining expression (ordered/random/ping-pong), but no
+    longer stays unexpressed either -- the law family is preserved
+    (`law_type=MICHAELIS_MENTEN`), the original kcat/Km parameters are preserved untouched,
+    and a generic, explicitly-disclosed, non-mechanistic mass-action-style simulation
+    expression is substituted using new fallback rate-constant parameter(s), reversible since
+    this fixture's own `reversible` is uncurated (`None` -> assumed reversible, per
+    `app.agent2.reversibility.effective_reversible`)."""
     model = _assemble(_multi_substrate_michaelis_menten_handoff())
     (law,) = model.kinetic_laws
     assert law.law_type is KineticLawType.MICHAELIS_MENTEN
-    assert law.expression is None
-    assert law.has_expression is False
-    # Parameter declarations are preserved -- the unresolved expression does not erase them.
-    assert len(law.parameter_ids) == 3  # kcat + one Km per substrate, still preserved
-    assert len(law.species_ids) == 2  # both substrates still preserved
+    assert law.has_expression is True
+    # kcat + one Km per substrate (preserved, unused by the fallback) + kf/kr (new, reversible
+    # fallback -- this fixture's reaction is uncurated/assumed reversible).
+    assert len(law.parameter_ids) == 5
+    assert law.expression == "kf_r1 * a::in::cyto * b::in::cyto - kr_r1 * c::in::cyto"
+    # Both substrates and the one product are all referenced (reversible fallback).
+    assert len(law.species_ids) == 3
     # Catalytic context and assignment source are preserved exactly as decided upstream.
     assert law.assignment_source is KineticLawAssignmentSource.CURATED_REPORTED
     assert law.enzyme_state_id is None
     assert law.protein_id is None
     assert law.complex_id is None
-    assert any("no single combining algebra is asserted" in a for a in law.assumptions)
-    unresolved_assumptions = [
+    assert any("EXECUTABLE_RATE_LAW_FALLBACK" in a for a in law.assumptions)
+    fallback_assumptions = [
         a
         for a in model.model_assumptions
-        if a.assumption_id.startswith("assumption::unresolved-multi-substrate::")
+        if a.assumption_id.startswith("assumption::executable-rate-law-fallback::")
     ]
-    assert len(unresolved_assumptions) == 1
-    assumption = unresolved_assumptions[0]
-    assert assumption.reason_code == "MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED"
-    # The assumption statement names all four required facts (Increment 8 revision, Step 2).
+    assert len(fallback_assumptions) == 1
+    assumption = fallback_assumptions[0]
+    assert assumption.reason_code == "MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK"
     assert "Michaelis-Menten" in assumption.statement
     assert "multiple substrates" in assumption.statement.lower()
     assert "no justified canonical multi-substrate algebra" in assumption.statement
-    assert "serialization must be withheld" in assumption.statement.lower()
+    assert "never a claim about the true enzyme mechanism" in assumption.statement.lower()
+    fallback_params = {p.parameter_id: p for p in model.parameters if p.reaction_id == "r1"}
+    kf = fallback_params["kf_r1"]
+    kr = fallback_params["kr_r1"]
+    assert kf.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kr.source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert kf.unit == "per_nMs"  # forward molecularity 2 (a, b)
+    assert kr.unit == "per_sec"  # reverse molecularity 1 (c)
 
 
 def test_no_expression_sentinel_leakage_anywhere():
@@ -988,31 +998,39 @@ def test_substrate_anchored_mm_produces_dedicated_disclosure_assumption():
     assert "malonyl-coa" in assumption.statement
 
 
-def test_substrate_anchored_mm_law_type_and_no_fabricated_expression():
+def test_substrate_anchored_mm_law_type_and_disclosed_fallback_expression():
+    """Executable Rate-Law Fallback increment: this genuinely 2-reactant reaction no longer
+    stays unexpressed -- a generic, disclosed, non-mechanistic mass-action-style simulation
+    expression is substituted (reversible, since this fixture's own `reversible` is uncurated
+    -> assumed reversible), never a fabricated *mechanistic* combining algebra involving
+    kcat/Km."""
     model = _assemble(_malonyl_coa_like_handoff())
     (law,) = model.kinetic_laws
     assert law.law_type is KineticLawType.MICHAELIS_MENTEN
-    # Genuinely 2-reactant -- the pre-existing, unmodified expression policy withholds a
-    # fabricated combining algebra regardless of this new eligibility path.
-    assert law.expression is None
-    assert not law.has_expression
+    assert law.has_expression
+    assert law.expression == (
+        "kf_r1_p1 * malonyl-coa::in::cyto * acp::in::cyto - "
+        "kr_r1_p1 * coa::in::cyto * malonyl-acp::in::cyto"
+    )
 
 
-def test_substrate_anchored_mm_also_produces_multi_substrate_expression_disclosure():
-    """The two disclosures are layered, not exclusive: the generic multi-substrate-expression
-    ModelAssumption (pre-existing, unmodified) still fires alongside the new, more specific
-    substrate-anchored disclosure."""
+def test_substrate_anchored_mm_also_produces_executable_rate_law_fallback_disclosure():
+    """The two disclosures are layered, not exclusive: the executable-rate-law-fallback
+    ModelAssumption now fires (replacing the old, permanently-unresolved disclosure) alongside
+    the more specific substrate-anchored disclosure."""
     model = _assemble(_malonyl_coa_like_handoff())
     reason_codes = {a.reason_code for a in model.model_assumptions}
     assert "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION" in reason_codes
-    assert "MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED" in reason_codes
+    assert "MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK" in reason_codes
 
 
 def test_substrate_anchored_mm_no_curated_value_leaks_into_any_parameter_other_than_anchor():
     """Heuristic Simulation Parameter Initialization increment: kcat_r1_p1/Km_r1_p1_acp now
     carry real *heuristic* values (never bare PLACEHOLDERs any more), but the real curated
     malonyl-CoA evidence itself never leaks beyond its own anchored parameter -- distinguished
-    by source, not merely by whether a numeric value is present."""
+    by source, not merely by whether a numeric value is present. Executable Rate-Law Fallback
+    increment: the new kf/kr fallback rate constants are heuristically initialized too, and
+    never reference or reinterpret the anchored Km."""
     model = _assemble(_malonyl_coa_like_handoff())
     curated_or_literature = {
         p.parameter_id: p.value
@@ -1025,7 +1043,7 @@ def test_substrate_anchored_mm_no_curated_value_leaks_into_any_parameter_other_t
         for p in model.parameters
         if p.source is ParameterSource.HEURISTIC_INITIALIZATION
     }
-    assert heuristic_ids == {"kcat_r1_p1", "Km_r1_p1_acp"}
+    assert heuristic_ids == {"kcat_r1_p1", "Km_r1_p1_acp", "kf_r1_p1", "kr_r1_p1"}
 
 
 # --- Conservative Reversibility Default for Unresolved Reactions -------------------------------
@@ -1079,26 +1097,38 @@ def test_curated_reactions_never_produce_a_reversibility_assumed_assumption():
     assert "REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE" not in reason_codes
 
 
-def test_assumed_reversibility_never_fabricates_a_reverse_kinetic_parameter():
-    """Scenario 9/10: no kr/equilibrium-constant/reverse parameter is invented; the reaction's
-    own kinetic-law type and parameter set are completely unaffected by this assumption."""
-    model = _assemble(_malonyl_coa_like_handoff())
+def test_assumed_reversibility_alone_never_fabricates_a_reverse_kinetic_parameter():
+    """Scenario 9/10, still true: the reversibility-assumption mechanism itself
+    (`app.agent2.reversibility`) never, on its own, fabricates a reverse-direction rate
+    constant or equilibrium constant -- confirmed here on a single-substrate MM reaction
+    (assumed reversible, since its own curated `reversible` is `None`, but ineligible for the
+    Executable Rate-Law Fallback increment's own multi-substrate trigger), so no kf/kr/keq is
+    ever declared for it."""
+    model = _assemble(_michaelis_menten_handoff())
     parameter_ids = {p.parameter_id for p in model.parameters}
-    assert not any("kr" in pid or "keq" in pid.lower() for pid in parameter_ids)
-    # The two declared parameters (kcat, one Km) are exactly what the pre-existing,
-    # unmodified substrate-anchored MM policy already declares -- unchanged by this increment.
-    # Heuristic Simulation Parameter Initialization increment: both now carry a real
-    # heuristic value rather than a bare PLACEHOLDER, but neither is ever confused with
-    # real curated/AI-predicted evidence.
+    assert not any("kr" in pid or "kf" in pid or "keq" in pid.lower() for pid in parameter_ids)
+
+
+def test_executable_rate_law_fallback_reverse_parameter_is_disclosed_never_evidence():
+    """A genuinely multi-substrate, assumed-reversible reaction (the real malonyl-CoA case)
+    DOES now get a kf/kr pair -- but only from the Executable Rate-Law Fallback increment's own
+    explicit, disclosed simulation substitution, never as a claim that the reaction's real
+    equilibrium/reverse rate was measured or curated. The pre-existing kcat/Km (substrate-
+    anchored MM policy, unmodified) and the new kf/kr fallback parameters are all
+    heuristically initialized, never confused with real curated/AI-predicted evidence."""
+    model = _assemble(_malonyl_coa_like_handoff())
     non_evidence_ids = {
         p.parameter_id
         for p in model.parameters
         if p.source is ParameterSource.HEURISTIC_INITIALIZATION
     }
-    assert non_evidence_ids == {
-        "kcat_r1_p1",
-        "Km_r1_p1_acp",
+    assert non_evidence_ids == {"kcat_r1_p1", "Km_r1_p1_acp", "kf_r1_p1", "kr_r1_p1"}
+    fallback_reason_codes = {
+        a.reason_code
+        for a in model.model_assumptions
+        if a.assumption_id.startswith("assumption::executable-rate-law-fallback::")
     }
+    assert fallback_reason_codes == {"MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK"}
 
 
 def test_reversibility_assumption_generation_is_deterministic():
@@ -1139,16 +1169,32 @@ def test_heuristic_initialization_makes_a_value_only_blocked_reaction_executable
     assert package.full_antimony.unresolved_kinetic_law_ids == ()
 
 
-def test_heuristic_initialization_never_makes_an_unresolved_expression_law_executable():
-    """§7/§8: a multi-substrate Michaelis-Menten reaction's overall expression stays
-    unresolved regardless of parameter initialization -- every one of its parameters now
-    has a heuristically-initialized value, but the reaction and the full model must both
-    remain correctly non-executable, since the blocker was never a missing value."""
-    _, _, _, _, _, model = _assemble_full(_multi_substrate_michaelis_menten_handoff())
+def test_heuristic_initialization_never_makes_a_custom_law_executable():
+    """§7/§8, and unaffected by the later Executable Rate-Law Fallback increment: CUSTOM means
+    an unsupported/unparsed mechanism -- no fallback ever applies to it (§7 of that increment
+    too: "do not apply to arbitrary unsupported CUSTOM laws"), and
+    ``render_kinetic_law_expression`` already refuses to serialize any CUSTOM law regardless of
+    its expression/parameter state, so heuristic initialization elsewhere in the model can
+    never accidentally make a CUSTOM reaction executable."""
+    _, _, _, _, _, model = _assemble_full(_reported_law_handoff("some_proprietary_fn(A, B)"))
     (law,) = model.kinetic_laws
-    assert law.expression is None
-    assert all(p.has_value for p in model.parameters if p.kinetic_law_assignment_id)
+    assert law.law_type is KineticLawType.CUSTOM
 
     package = generate_antimony(model)
     assert package.full_antimony.readiness is not AntimonyArtifactReadiness.EXECUTABLE
     assert law.reaction_id in package.full_antimony.unresolved_reaction_ids
+
+
+def test_executable_rate_law_fallback_makes_a_multi_substrate_mm_reaction_executable():
+    """§8/§9: the one reaction the whole Executable Rate-Law Fallback increment exists for --
+    a multi-substrate Michaelis-Menten reaction whose *only* prior blocker was an unresolved
+    expression -- is now genuinely `EXECUTABLE` once the fallback expression and its
+    heuristically-initialized rate constant(s) are in place."""
+    _, _, _, _, _, model = _assemble_full(_multi_substrate_michaelis_menten_handoff())
+    (law,) = model.kinetic_laws
+    assert law.expression is not None
+    assert all(p.has_value for p in model.parameters if p.kinetic_law_assignment_id)
+
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert package.full_antimony.unresolved_reaction_ids == ()

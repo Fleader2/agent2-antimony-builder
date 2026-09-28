@@ -103,6 +103,18 @@ deterministic, stable, and reproducible from the same inputs.
   participant of the reaction (zero reactants -> zero `Km` parameters).
   No `Ki` is ever declared here (Step 8: "do not invent inhibition
   constants" -- plain Michaelis-Menten has no inhibition term).
+  **Executable Rate-Law Fallback increment**: when the reaction has more
+  than one `REACTANT` participant (genuinely multi-substrate -- no single
+  kcat/Km combining algebra is ever asserted, §24 of this document), one
+  additional `k` (if the reaction's effective reversibility --
+  `app.agent2.reversibility.effective_reversible` -- is irreversible) or
+  independently-molecularity-derived `kf`/`kr` (if reversible) is
+  declared *after* kcat/Km, never replacing or reordering them --
+  `app.agent2.parameters.builder._declare_multi_substrate_mm_fallback`.
+  Real curated/AI-predicted rate-constant evidence (a `K`/`KF`/`KR`
+  measurement for this exact context) still takes precedence over a
+  heuristic default here, exactly like every other mass-action-style slot
+  in this package.
 * **`HILL`** -- `Vmax`, `Km`, `n` (the Hill coefficient).
 * **`CUSTOM`** -- never symbolically parsed (Step 8/12). Every curated
   measurement in this context whose `parameter_type` matches a
@@ -532,3 +544,72 @@ Never invents a new rate law for `expression=None`; never assigns
 pilot; never overwrites `LITERATURE_DERIVED`/`CURATED`/`AI_PREDICTED`
 evidence, even when it disagrees with itself (§24.2); never assigns a
 heuristic default to a parameter kind not named in §24.3's own table.
+
+## 25. Executable Rate-Law Fallback increment
+
+The one real limitation §24.8 found -- the last remaining non-executable
+reaction, a genuinely multi-substrate Michaelis-Menten law -- is resolved
+by this increment, entirely on the parameter-declaration side by
+`app.agent2.parameters.builder._declare_multi_substrate_mm_fallback`
+(the expression-construction side lives in
+`app.agent2.model_specification.mapping` -- see
+`docs/11_model_specification_assembly.md` §8 for the full picture).
+
+### 25.1 What gets declared
+
+Fires only when a `MICHAELIS_MENTEN` assignment's own reactant count is
+greater than one (§7's own MICHAELIS_MENTEN bullet, updated). Never
+touches the existing kcat/Km declarations -- appends after them:
+
+* **Irreversible** (curated `reversible=False`, or curated `True`/`None`
+  routed through `app.agent2.reversibility.effective_reversible` as
+  `False` -- today, only an explicit curated `False` ever produces this):
+  one `k`, molecularity from summed `REACTANT` stoichiometry.
+* **Reversible** (curated `True`, or curated `None` -- "assumed
+  reversible" -- via the same `effective_reversible`): `kf` (forward
+  molecularity) and `kr` (reverse molecularity, from summed `PRODUCT`
+  stoichiometry), computed and initialized completely independently --
+  never related through a fabricated equilibrium constant, mirroring
+  `_declare_reversible_mass_action`'s own established policy exactly.
+
+Each new parameter is resolved through the same `initialize_with_fallback`
+waterfall (§24.2) using this assignment's own already-filtered evidence,
+restricted to the `K`/`KF`/`KR` recognized families (§9) -- a real
+curated or AI-predicted rate-constant measurement for this exact context
+still wins; only in the (expected, common) case none exists does this
+fall through to `HEURISTIC_INITIALIZATION`.
+
+### 25.2 Real coverage evaluation (Pilot 2 Run 6 network, sce00061)
+
+Run against the same real, saved Agent 1 handoff as §24.8:
+
+| | Before (§24.8) | After (this increment) |
+|---|---|---|
+| Total parameters | 41 | 43 |
+| `LITERATURE_DERIVED` | 1 | 1 |
+| `HEURISTIC_INITIALIZATION` | 40 | 42 |
+| Reactions executable | 37 | **38** |
+| Reactions non-executable (`expression=None`) | 1 | 0 |
+
+The two new parameters are exactly the `kf`/`kr` fallback pair for the
+one real, previously-permanently-blocked reaction (the ACC1/malonyl-CoA:
+[acp] S-malonyltransferase reaction, uncurated/assumed reversible) --
+every one of the real network's 38 reactions is now `EXECUTABLE`.
+
+### 25.3 Versioning
+
+`PARAMETER_DECLARATION_POLICY_VERSION` bumped
+`"parameter-declaration-v2"` -> `"parameter-declaration-v3"` (a real
+behavioral rule-set change: a genuinely multi-substrate `MICHAELIS_MENTEN`
+assignment now declares extra parameters it previously never did).
+`AGENT2_CONTRACT_VERSION` unchanged -- no `app.agent2.types` dataclass
+shape changed. Full reasoning in `app/agent2/version.py`.
+
+### 25.4 Explicit non-goals (this increment specifically)
+
+Never applies to `CUSTOM` (§7's own CUSTOM bullet, unmodified -- an
+opaque, unparsed law has no molecularity/dimension this package can
+safely infer a fallback from); never invents an equilibrium constant;
+never reinterprets kcat/Km as mass-action parameters; never removes or
+overwrites a real curated/AI-predicted parameter already declared for
+the same law; never runs Agent 4 calibration or a full pilot.

@@ -33,10 +33,13 @@ names actually changes.
   deterministic parameter declaration/initialization rule set
   (``app.agent2.parameters``) a ``ParameterDeclarationSet`` was produced
   under (e.g. which curated measurement types map to which kinetic-law
-  parameter slot, the multiple-measurement agreement policy, and, since
-  the Heuristic Simulation Parameter Initialization increment, the
-  AI-predicted/heuristic-default fallback precedence). Also a *behavioral
-  rule set* version, not a data shape.
+  parameter slot, the multiple-measurement agreement policy, since the
+  Heuristic Simulation Parameter Initialization increment the AI-predicted/
+  heuristic-default fallback precedence, and, since the Executable
+  Rate-Law Fallback increment, the minimal extra mass-action-style rate-
+  constant parameter(s) declared for a genuinely multi-substrate
+  Michaelis-Menten assignment). Also a *behavioral rule set* version, not
+  a data shape.
 * ``HEURISTIC_INITIALIZATION_POLICY_VERSION`` -- the version of the
   centralized heuristic-default policy
   (``app.agent2.parameters.heuristic_defaults``) a
@@ -62,9 +65,12 @@ names actually changes.
   ``KineticLawSpecification`` materialization rule, the
   ``KineticLawAssignmentSource`` -> ``ParameterSource`` bridge, the
   expression-template policy, which categories of incompleteness become
-  ``ModelAssumption`` records). Also a *behavioral rule set* version, not
-  a data shape -- distinct from ``AGENT2_CONTRACT_VERSION``, which
-  versions ``ModelSpecification``'s own shape.
+  ``ModelAssumption`` records, and, since the Executable Rate-Law
+  Fallback increment, the generic mass-action-style simulation expression
+  substituted for a genuinely multi-substrate Michaelis-Menten law that
+  would otherwise stay unexpressed). Also a *behavioral rule set*
+  version, not a data shape -- distinct from ``AGENT2_CONTRACT_VERSION``,
+  which versions ``ModelSpecification``'s own shape.
 * ``ANTIMONY_GENERATION_POLICY_VERSION`` -- the version of the
   deterministic Antimony-serialization policy (``app.agent2.antimony``) a
   ``FullAntimonyArtifact``/``ModuleAntimonyArtifact`` was produced under
@@ -847,6 +853,39 @@ value addition is not a data-shape change, exactly as Agent 1's own
 ``SourceType.GOTENZYMES`` addition did not bump ``AGENT1_CONTRACT_VERSION``
 either). ``AGENT1_HANDOFF_VERSION`` is unchanged -- Agent 1 was not
 modified by this Agent 2 increment.
+
+``PARAMETER_DECLARATION_POLICY_VERSION`` was bumped from
+``"parameter-declaration-v2"`` to ``"parameter-declaration-v3"``, and
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` from
+``"model-specification-v5"`` to ``"model-specification-v6"``, for the
+Executable Rate-Law Fallback increment: a genuinely multi-substrate
+``MICHAELIS_MENTEN`` assignment's kcat/Km parameters (unchanged) are now
+joined by one or two additional, minimal mass-action-style rate-constant
+parameter(s) (``app.agent2.parameters.builder
+._declare_multi_substrate_mm_fallback`` -- one ``k`` if the reaction's
+own effective reversibility is irreversible, or independently-
+molecularity-derived ``kf``/``kr`` if reversible), and
+``build_expression_and_species``'s own previously-``None``-returning
+multi-substrate branch now substitutes a generic, explicitly-disclosed,
+non-mechanistic mass-action-style simulation expression instead (never a
+claim about the true enzyme mechanism), with a new
+``EXECUTABLE_RATE_LAW_FALLBACK``/``MULTI_SUBSTRATE_MM_SIMULATION_FALLBACK``
+disclosure replacing the previous permanently-unresolved
+``MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED`` one for this case. Real
+curated/literature/AI-predicted evidence already declared for that law
+(e.g. a real, uniquely-attributed Km) is never overwritten, reinterpreted,
+or removed -- it simply goes unreferenced by the fallback expression,
+exactly as disclosed. ``ANTIMONY_GENERATION_POLICY_VERSION`` is
+deliberately **unchanged**: no line of ``app.agent2.antimony`` itself was
+modified -- ``render_kinetic_law_expression``'s existing, fully generic
+species/parameter-id token substitution already handles the new fallback
+expression exactly like any other built-in template, and a reaction
+becoming executable is a consequence of richer upstream input, not a
+change to this package's own serialization policy (the same "narrower
+reading" already applied to every enum-value-only ``ParameterSource``
+addition above). ``AGENT2_CONTRACT_VERSION``/``AGENT1_HANDOFF_VERSION``
+are unchanged -- no ``app.agent2.types`` dataclass gained or lost a
+field, and Agent 1 was not modified.
 """
 
 from __future__ import annotations
@@ -856,10 +895,10 @@ AGENT1_HANDOFF_VERSION = "1.3"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v2"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v3"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v5"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v6"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"

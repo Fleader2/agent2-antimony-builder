@@ -158,26 +158,26 @@ never a numerical literal, never Antimony syntax
   `SpeciesSpecification` (species come only from curated compounds), so
   there is no `E` species or parameter to reference -- inventing one
   would misrepresent what is actually modeled.
-* **`MICHAELIS_MENTEN`, multiple substrates -- corrected twice,
-  pre-commit**: **`expression = None`.** `law_type` remains
-  `MICHAELIS_MENTEN` (the law *family* is known -- curated evidence
-  explicitly identified Michaelis-Menten kinetics) and
-  `parameter_ids`/`species_ids` still list every declared
-  `kcat`/`Km`/substrate; only the *concrete algebraic representation* is
-  left unresolved, and `expression=None` is the honest, direct way to
-  say so.
+* **`MICHAELIS_MENTEN`, multiple substrates -- corrected three times,
+  pre-commit, and superseded once more by the Executable Rate-Law
+  Fallback increment**: `law_type` remains `MICHAELIS_MENTEN` (the law
+  *family* is known -- curated evidence explicitly identified
+  Michaelis-Menten kinetics) and `parameter_ids`/`species_ids` still list
+  every declared `kcat`/`Km`/substrate; only the *concrete algebraic
+  representation involving them* is left unresolved -- no single
+  combining algebra involving independently-declared `kcat`/`Km` values
+  is scientifically justified for an arbitrary multi-substrate mechanism
+  (ordered-sequential, ping-pong, and random-order kinetics all combine
+  substrates differently, and `app.agent2.parameters.builder` itself only
+  ever declares one `Km` per substrate *independently*).
 
   Two earlier drafts of this section (and of the implementation) got
-  this wrong in different ways, both corrected before commit:
+  this wrong in different ways, both corrected before Increment 8's own
+  commit:
 
   1. The first draft produced a simplified product-of-independent-terms
      expression (`"kcat * S1 * S2 / ((Km1+S1) * (Km2+S2))"`). **Removed**:
-     it is not a scientifically justified rate law for an arbitrary
-     multi-substrate mechanism -- ordered-sequential, ping-pong, and
-     random-order kinetics all combine two substrates differently, and
-     `app.agent2.parameters.builder` itself only ever declares one `Km`
-     per substrate *independently*, with no mechanism-specific combining
-     policy to draw from.
+     not a scientifically justified rate law, for the reasons above.
   2. The second draft, having correctly decided not to assert an
      unjustified equation, placed a string status marker
      (`"UNRESOLVED_MULTI_SUBSTRATE_MECHANISM"`) directly in `expression`
@@ -185,16 +185,52 @@ never a numerical literal, never Antimony syntax
      concrete algebraic representation" must never hold a non-expression
      status value, however clearly named. `KineticLawSpecification
      .__post_init__` no longer requires a non-blank expression for any
-     non-`UNASSIGNED` `law_type` (§8a) specifically so this case can be
-     represented honestly as `None` instead.
+     non-`UNASSIGNED` `law_type` (§8a) specifically so this case could be
+     represented honestly as `None`.
 
-  The unresolved state is disclosed exclusively through `assumptions`
-  and a dedicated `ModelAssumption` (§16) -- never through `expression`
-  itself. This case can only arise from a curated reported-law text
-  explicitly naming "Michaelis-Menten" on a reaction with more than one
-  reactant -- the non-curated heuristic path (Increment 4) is itself
-  restricted to exactly one reactant and one product, so it can never
-  produce this case on its own.
+  **Increment 8 itself then shipped with `expression = None`** for this
+  case, disclosed exclusively through `assumptions` and a dedicated
+  `ModelAssumption` (§16) -- correct and honest, but left the reaction
+  permanently non-executable in Antimony no matter how completely its
+  parameters were later initialized (Heuristic Simulation Parameter
+  Initialization increment).
+
+  **The Executable Rate-Law Fallback increment supersedes this**: rather
+  than withholding `expression` forever, a generic,
+  explicitly-disclosed, non-mechanistic mass-action-style **simulation
+  fallback** is substituted --
+  `app.agent2.parameters.builder._declare_multi_substrate_mm_fallback`
+  appends one minimal extra rate-constant parameter (`k`, if the
+  reaction's effective reversibility -- `app.agent2.reversibility
+  .effective_reversible` -- is irreversible) or two, independently-
+  molecularity-derived (`kf`/`kr`, if reversible), *after* the existing
+  kcat/Km parameters (never replacing, reordering, or reinterpreting
+  them), and `build_expression_and_species` renders
+  `"{k} * {reactants...}"` (irreversible) or `"{kf} * {reactants...} -
+  {kr} * {products...}"` (reversible) using only those new parameters --
+  the same minimal mass-action form `MASS_ACTION`/`REVERSIBLE_MASS_ACTION`
+  already use above, never ordered/random bi-bi, ping-pong, Hill, or any
+  other mechanism-specific algebra, and never an invented equilibrium
+  relating the two directions. The original kcat/Km remain declared and
+  preserved on the law (`parameter_ids` grows; nothing is removed) but
+  are not referenced by the fallback expression -- a real, uniquely-
+  attributed Km (e.g. the real malonyl-CoA case) is never overwritten,
+  reinterpreted as a mass-action rate constant, or hidden. Disclosed via
+  a new `EXECUTABLE_RATE_LAW_FALLBACK`/`MULTI_SUBSTRATE_MM_SIMULATION_
+  FALLBACK` `ModelAssumption` (§16) replacing the previous permanently-
+  unresolved one for this specific case -- never a claim that the
+  fallback is the true enzyme mechanism, and it requires the same later
+  calibration/refinement as any other heuristically-initialized value.
+
+  This case can only arise from a curated reported-law text explicitly
+  naming "Michaelis-Menten" on a reaction with more than one reactant --
+  the non-curated heuristic path (Increment 4) is itself restricted to
+  exactly one reactant and one product, so it can never produce this case
+  on its own. **Deliberately not extended to `CUSTOM`**: an opaque,
+  unparsed reported law has no known molecularity or dimension this
+  package can safely infer a fallback from -- `_declare_custom`/`CUSTOM`'s
+  own expression handling (below) is completely untouched by this
+  increment.
 * **`HILL`**: `"{Vmax} * {S}^{n} / ({Km}^{n} + {S}^{n})"`.
 * **`CUSTOM`**: the curated `reported_rate_law_text`, preserved
   **verbatim**, never rewritten into any symbolic or Antimony form --
@@ -706,11 +742,14 @@ are exactly the objects supplied as input.
 * `boundaries.characterization_policy_version` is preserved but not
   actively cross-checked (§18) -- `NetworkCharacterization` is not an
   Increment 8 input.
-* A multi-substrate `MICHAELIS_MENTEN` law's *mechanism* (ordered-
-  sequential vs. ping-pong vs. random) is never determined -- only
-  disclosed as unresolved (§8). A future increment could resolve this if
-  Agent 1 ever curates a mechanism-specific classification; nothing here
-  guesses one from structure alone.
+* A multi-substrate `MICHAELIS_MENTEN` law's *true mechanism* (ordered-
+  sequential vs. ping-pong vs. random) is still never determined -- the
+  Executable Rate-Law Fallback increment (§8) makes the reaction
+  *simulatable* via a generic, explicitly-disclosed, non-mechanistic
+  mass-action-style substitute, never a claim about which real mechanism
+  applies. A future increment could resolve the true mechanism if Agent 1
+  ever curates a mechanism-specific classification; nothing here guesses
+  one from structure alone.
 * `is_tentative` remains derivable only via `reason_codes` (a
   `KineticLawReasonCode` tuple), not via a boolean field on
   `KineticLawSpecification` itself -- consistent with
