@@ -24,6 +24,7 @@ from app.agent2.types import (
     CompartmentSourceScope,
     CompartmentSpecification,
     CuratedEnzymeState,
+    EnzymeStatePool,
     FullNetwork,
     KineticLawAssignmentSource,
     KineticLawSpecification,
@@ -795,6 +796,150 @@ def test_enzyme_state_and_protein_context_mix_never_composed():
         package.full_antimony.readiness
         is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
     )
+
+
+def _pool(**overrides) -> EnzymeStatePool:
+    merged = {
+        "protein_id": "p1",
+        "state_ids": ("E", "E_P"),
+        "transition_ids": (),
+        "policy_version": "test-policy",
+    } | overrides
+    return EnzymeStatePool(**merged)
+
+
+def test_enzyme_states_in_a_modeled_pool_compose_additively():
+    """Multi-Context Catalytic Rate Composition increment, Stage 2: two enzyme-state
+    contexts of the *same* protein's dynamically-modeled, conserved pool are now
+    composable -- the exact restriction Stage 1 deliberately left in place."""
+    law_e = _kinetic_law(
+        kinetic_law_id="k-E", enzyme_state_id="E", parameter_ids=("k_e",), expression="k_e * a"
+    )
+    law_ep = _kinetic_law(
+        kinetic_law_id="k-EP", enzyme_state_id="E_P", parameter_ids=("k_ep",), expression="k_ep * a"
+    )
+    model = _model(
+        full_network=_network(
+            enzyme_states=(
+                CuratedEnzymeState(id="E", protein_id="p1", state_type="unmodified"),
+                CuratedEnzymeState(id="E_P", protein_id="p1", state_type="phosphorylated"),
+            )
+        ),
+        kinetic_laws=(law_e, law_ep),
+        parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep")),
+        module_specifications=(),
+        enzyme_state_pools=(_pool(),),
+    )
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    expression = reaction_line.split(";")[1].strip()
+    assert expression == "(p_k_e * s_a) + (p_k_ep * s_a)"
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY" in reaction_line
+
+
+def test_enzyme_states_without_a_modeled_pool_are_still_unresolved():
+    """Preserves Stage 1 behavior exactly: two enzyme-state contexts with no
+    ``EnzymeStatePool`` at all (no curated transition ever established a conservation
+    basis) are never composed."""
+    law_e = _kinetic_law(
+        kinetic_law_id="k-E", enzyme_state_id="E", parameter_ids=("k_e",), expression="k_e * a"
+    )
+    law_ep = _kinetic_law(
+        kinetic_law_id="k-EP", enzyme_state_id="E_P", parameter_ids=("k_ep",), expression="k_ep * a"
+    )
+    model = _model(
+        full_network=_network(
+            enzyme_states=(
+                CuratedEnzymeState(id="E", protein_id="p1", state_type="unmodified"),
+                CuratedEnzymeState(id="E_P", protein_id="p1", state_type="phosphorylated"),
+            )
+        ),
+        kinetic_laws=(law_e, law_ep),
+        parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep")),
+        module_specifications=(),
+    )
+    package = generate_antimony(model)
+    assert (
+        package.full_antimony.readiness
+        is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    )
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED" in reaction_line
+
+
+def test_enzyme_states_from_two_different_pools_are_never_composed():
+    """Distinct parent proteins never share a conservation pool -- even if, by
+    construction error, two states from two different pools ended up on the same
+    reaction, they must never be composed."""
+    law_e = _kinetic_law(
+        kinetic_law_id="k-E", enzyme_state_id="E", parameter_ids=("k_e",), expression="k_e * a"
+    )
+    law_f = _kinetic_law(
+        kinetic_law_id="k-F", enzyme_state_id="F", parameter_ids=("k_f",), expression="k_f * a"
+    )
+    model = _model(
+        full_network=_network(
+            enzyme_states=(
+                CuratedEnzymeState(id="E", protein_id="p1", state_type="unmodified"),
+                CuratedEnzymeState(id="E_P", protein_id="p1", state_type="phosphorylated"),
+                CuratedEnzymeState(id="F", protein_id="p2", state_type="unmodified"),
+                CuratedEnzymeState(id="F_P", protein_id="p2", state_type="phosphorylated"),
+            )
+        ),
+        kinetic_laws=(law_e, law_f),
+        parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_f")),
+        module_specifications=(),
+        enzyme_state_pools=(
+            _pool(protein_id="p1", state_ids=("E", "E_P")),
+            _pool(protein_id="p2", state_ids=("F", "F_P")),
+        ),
+    )
+    package = generate_antimony(model)
+    assert (
+        package.full_antimony.readiness
+        is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    )
+
+
+def test_enzyme_state_composition_is_deterministically_ordered():
+    law_ep = _kinetic_law(
+        kinetic_law_id="k-EP", enzyme_state_id="E_P", parameter_ids=("k_ep",), expression="k_ep * a"
+    )
+    law_e = _kinetic_law(
+        kinetic_law_id="k-E", enzyme_state_id="E", parameter_ids=("k_e",), expression="k_e * a"
+    )
+    network = _network(
+        enzyme_states=(
+            CuratedEnzymeState(id="E", protein_id="p1", state_type="unmodified"),
+            CuratedEnzymeState(id="E_P", protein_id="p1", state_type="phosphorylated"),
+        )
+    )
+    params = (_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep"))
+    pools = (_pool(),)
+    model_forward = _model(
+        full_network=network,
+        kinetic_laws=(law_e, law_ep),
+        parameters=params,
+        module_specifications=(),
+        enzyme_state_pools=pools,
+    )
+    model_reversed = _model(
+        full_network=network,
+        kinetic_laws=(law_ep, law_e),
+        parameters=params,
+        module_specifications=(),
+        enzyme_state_pools=pools,
+    )
+    text_forward = generate_antimony(model_forward).full_antimony.antimony_text
+    text_reversed = generate_antimony(model_reversed).full_antimony.antimony_text
+    assert text_forward == text_reversed
 
 
 def test_three_isozymes_compose_in_deterministic_order_regardless_of_input_order():

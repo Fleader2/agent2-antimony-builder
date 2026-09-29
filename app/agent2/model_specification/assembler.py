@@ -33,6 +33,8 @@ from app.agent2.modules.types import ModuleDecompositionSet
 from app.agent2.parameters.types import ParameterDeclarationSet
 from app.agent2.quantitative_context.types import QuantitativeContextResolutionSet
 from app.agent2.types import (
+    EnzymeConcentration,
+    EnzymeStatePool,
     FullNetwork,
     KineticLawSpecification,
     ModelSpecification,
@@ -48,6 +50,8 @@ def assemble_model_specification(
     boundaries: BoundaryAssessmentSet,
     modules: ModuleDecompositionSet,
     enzyme_concentrations: QuantitativeContextResolutionSet | None = None,
+    enzyme_state_pools: tuple[EnzymeStatePool, ...] = (),
+    enzyme_state_concentrations: tuple[EnzymeConcentration, ...] = (),
 ) -> ModelSpecification:
     """Deterministically assemble one authoritative ``ModelSpecification`` from every prior
     increment's validated output.
@@ -67,6 +71,16 @@ def assemble_model_specification(
     attached verbatim, and one additional ``ModelAssumption`` category is generated
     for every protein whose concentration used the 0.1 pL reference assumption (see
     ``build_model_assumptions``'s own docstring).
+
+    ``enzyme_state_pools``/``enzyme_state_concentrations`` (Multi-Context Catalytic Rate
+    Composition increment, Stage 2) are optional and default to ``()`` -- every existing
+    call site continues to construct an identical ``ModelSpecification``. When supplied
+    (``app.agent2.enzyme_state_dynamics``'s own output), they are attached verbatim to
+    ``ModelSpecification.enzyme_state_pools``/``.enzyme_state_concentrations``, and one
+    additional ``ModelAssumption`` is generated per pool (see ``build_model_assumptions``).
+    ``network`` must already be the *augmented* network (``EnzymeStateDynamicsResult
+    .network``) whenever ``enzyme_state_pools`` is non-empty -- this function performs no
+    augmentation of its own.
     """
     require_full_network(network)
     require_kinetic_law_assignment_set(kinetic_laws)
@@ -125,6 +139,7 @@ def assemble_model_specification(
         reactions=network.reactions,
         enzyme_concentrations=resolved_enzyme_concentrations,
         microscopic_constraints=parameters.microscopic_constraints,
+        enzyme_state_pools=enzyme_state_pools,
     )
 
     model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"
@@ -153,6 +168,8 @@ def assemble_model_specification(
         assumptions=assumptions,
         model_assumptions=model_assumptions,
         enzyme_concentrations=resolved_enzyme_concentrations,
+        enzyme_state_pools=enzyme_state_pools,
+        enzyme_state_concentrations=enzyme_state_concentrations,
         provenance_refs=provenance_refs,
     )
 

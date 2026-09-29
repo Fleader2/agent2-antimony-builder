@@ -155,7 +155,19 @@ def _enzyme_concentration_for_assignment(
     network: FullNetwork,
     enzyme_concentrations_by_protein_id: dict[str, EnzymeConcentration],
     ambiguous_state_parent_keys: frozenset[tuple[str, str]],
+    enzyme_concentrations_by_state_id: dict[str, EnzymeConcentration],
 ) -> EnzymeConcentration | None:
+    if assignment.enzyme_state_id is not None:
+        # Multi-Context Catalytic Rate Composition increment, Stage 2: a real, resolved
+        # state-level concentration (app.agent2.enzyme_state_dynamics) takes precedence
+        # over Stage 1's own blanket ambiguous-sibling withholding below -- it is exactly
+        # this state's own share of the parent pool, never the full undifferentiated total,
+        # so handing it to this one context never double-counts a sibling's identical
+        # share (each sibling gets its own, distinct entry in this same dict, if resolved
+        # at all).
+        state_concentration = enzyme_concentrations_by_state_id.get(assignment.enzyme_state_id)
+        if state_concentration is not None:
+            return state_concentration
     protein_id = _protein_id_for_assignment(assignment, network)
     if protein_id is None:
         return None
@@ -729,6 +741,7 @@ def _declare_for_assignment(
     species_by_id: dict[str, SpeciesSpecification],
     enzyme_concentrations_by_protein_id: dict[str, EnzymeConcentration],
     ambiguous_state_parent_keys: frozenset[tuple[str, str]],
+    enzyme_concentrations_by_state_id: dict[str, EnzymeConcentration],
     *,
     sibling_count: int,
 ) -> tuple[tuple[ParameterSpecification, ...], tuple[MicroscopicConstraint, ...]]:
@@ -737,7 +750,11 @@ def _declare_for_assignment(
 
     evidence = _evidence_for(assignment, reaction_measurements, sibling_count=sibling_count)
     enzyme_concentration = _enzyme_concentration_for_assignment(
-        assignment, network, enzyme_concentrations_by_protein_id, ambiguous_state_parent_keys
+        assignment,
+        network,
+        enzyme_concentrations_by_protein_id,
+        ambiguous_state_parent_keys,
+        enzyme_concentrations_by_state_id,
     )
 
     if assignment.kinetic_law_type is KineticLawType.MASS_ACTION:
@@ -782,6 +799,7 @@ def declare_parameters(
     assignments: KineticLawAssignmentSet,
     network: FullNetwork,
     enzyme_concentrations: QuantitativeContextResolutionSet | None = None,
+    enzyme_state_concentrations: tuple[EnzymeConcentration, ...] = (),
 ) -> ParameterDeclarationSet:
     """Declare every parameter Increment 4's kinetic-law assignments require.
 
@@ -797,6 +815,13 @@ def declare_parameters(
     identical check immediately below), and its resolved ``EnzymeConcentration`` records
     are made available, by protein id, to Derivations B/C wherever a declaration function's
     own catalytic context names a matching protein.
+
+    ``enzyme_state_concentrations`` (Multi-Context Catalytic Rate Composition increment,
+    Stage 2) is optional and defaults to ``()`` -- every existing call site continues to
+    declare identical parameters. When supplied (``app.agent2.enzyme_state_dynamics``'s own
+    output), each entry's own ``enzyme_state_id`` takes precedence, for that exact state's
+    own catalytic context, over Stage 1's blanket ambiguous-sibling-state withholding -- see
+    ``_enzyme_concentration_for_assignment``.
     """
     require_kinetic_law_assignment_set(assignments)
     require_full_network(network)
@@ -822,6 +847,16 @@ def declare_parameters(
         if enzyme_concentrations is not None
         else {}
     )
+    if any(ec.enzyme_state_id is None for ec in enzyme_state_concentrations):
+        raise ParameterReferenceError(
+            "declare_parameters requires every enzyme_state_concentrations entry to have "
+            f"enzyme_state_id set, got {enzyme_state_concentrations!r}"
+        )
+    enzyme_concentrations_by_state_id: dict[str, EnzymeConcentration] = {
+        ec.enzyme_state_id: ec
+        for ec in enzyme_state_concentrations
+        if ec.enzyme_state_id is not None
+    }
 
     measurements_by_reaction: dict[str, list[CuratedKineticMeasurement]] = {}
     for measurement in network.kinetic_measurements:
@@ -844,6 +879,7 @@ def declare_parameters(
             species_by_id,
             enzyme_concentrations_by_protein_id,
             ambiguous_state_parent_keys,
+            enzyme_concentrations_by_state_id,
             sibling_count=sibling_counts[assignment.reaction_id],
         )
         specs.extend(assignment_specs)

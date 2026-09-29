@@ -236,33 +236,39 @@ references it, it returns one of:
 
 * `RESOLVED_SINGLE` -- exactly one law, itself resolved (§15).
 * `RESOLVED_COMPOSED` -- **implemented as of the "Multi-Context Catalytic
-  Rate Composition, Stage 1" increment.** `_context_group_composability`
-  (`app.agent2.antimony.generator`) treats a *homogeneous* group of two
-  or more distinct, independently-resolved catalytic contexts -- all
-  protein-general, or all complex-general, never a group containing any
-  `enzyme_state_id` context and never a mixed protein/complex group -- as
-  simultaneously applicable by the standard isozyme-summation convention:
-  nothing in the current data model curates explicit mutual-exclusivity
-  or co-expression signals between distinct isozymes/complexes, so real,
+  Rate Composition, Stage 1" increment, extended in Stage 2.**
+  `_context_group_composability` (`app.agent2.antimony.generator`) treats
+  a *homogeneous* group of two or more distinct, independently-resolved
+  catalytic contexts -- all protein-general, all complex-general, or (Stage
+  2, `docs/18_enzyme_state_population_dynamics.md`) all
+  `enzyme_state_id` contexts belonging to the identical parent protein's
+  dynamically-modeled, conserved pool (`ModelSpecification
+  .enzyme_state_pools`) -- as simultaneously applicable. Never a group
+  mixing two different kinds. Isozyme/complex composition rests on the
+  standard isozyme-summation convention: nothing in the data model curates
+  explicit mutual-exclusivity between distinct isozymes/complexes, so real,
   distinct catalyst identity with no curated basis for exclusivity is the
-  only defensible, non-fabricated default. Enzyme-state groups are
-  deliberately excluded -- state populations are mutually exclusive
-  fractions of one total enzyme pool and no population-fraction data
-  exists yet to justify summing them; that remains Stage 2's job. A
-  composable group in which at least one individual contribution is
-  itself unresolved does **not** produce `RESOLVED_COMPOSED` -- it
+  only defensible, non-fabricated default. Enzyme-state composition rests
+  on a different, narrower basis: it is permitted only once Stage 2's own
+  pool-conservation machinery establishes that no sibling state was handed
+  the same protein's full concentration (see that doc's own §5) -- an
+  enzyme-state group with no modeled pool, or spanning two different
+  proteins, still resolves to `UNRESOLVED_MULTIPLE_CONTEXTS` exactly as in
+  Stage 1. A composable group in which at least one individual contribution
+  is itself unresolved does **not** produce `RESOLVED_COMPOSED` -- it
   produces `UNRESOLVED_MULTIPLE_CONTEXTS` with reason
   `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED`, never silently
   dropping the unresolved contribution and composing only the resolved
   remainder (see "Composition" below for the rendered expression shape).
 * `UNRESOLVED_MULTIPLE_CONTEXTS` -- two or more laws share this
   `reaction_id`, and either (a) the group is not composable at all
-  (reason `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED` -- a mixed
-  protein/complex group, any group containing an enzyme-state context, or
-  any other case with no established simultaneous-applicability basis),
-  or (b) the group is composable but at least one contribution is itself
-  unresolved (reason `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_
-  UNRESOLVED`, see above). Distinct enzyme states (§11), or any other
+  (reason `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED` -- a mixed-
+  kind group, an enzyme-state group outside a modeled pool or spanning two
+  parent proteins, or any other case with no established simultaneous-
+  applicability basis), or (b) the group is composable but at least one
+  contribution is itself unresolved (reason `MULTIPLE_CATALYTIC_CONTEXTS_
+  COMPOSABLE_BUT_UNRESOLVED`, see above). Distinct enzyme states (§11), or
+  any other
   catalytic-context plurality that fails composability, land in case (a)
   exactly as before this increment. Never summed across incompatible
   contexts, never arbitrarily chosen among, never duplicated into
@@ -767,17 +773,23 @@ fitting, calibration, critique, ...) remains enforced unchanged.
   in reaction comments but never materialized as independently dynamic
   Antimony species -- consistent with every upstream increment's own
   "enzyme states are supporting data, not structural graph elements"
-  stance (`docs/04` §3).
+  stance (`docs/04` §3), **except** for the narrow set of enzyme states
+  Stage 2 (`docs/18_enzyme_state_population_dynamics.md`) actually
+  dynamically models (a curated transition connects them) -- those do
+  become real Antimony species, deliberately outside this stance's scope.
 * A reaction whose multiple catalytic-context kinetic laws are **not** a
-  homogeneous, distinct-identity protein-general or complex-general group
-  (§11a) -- a mixed protein/complex group, or any group containing an
-  `enzyme_state_id` context -- can never reach `EXECUTABLE` status under
-  this version's policy, however well-resolved each individual context's
-  own expression/parameters/reversibility is: there is no current
-  upstream signal this package can trust to justify summing enzyme-state
-  populations or heterogeneous catalyst kinds, so it always withholds the
-  rate instead. Enzyme-state composition, state-population fractions, and
-  total-enzyme conservation remain Stage 2's job.
+  homogeneous, distinct-identity protein-general group, complex-general
+  group, or (Stage 2) enzyme-state group sharing one modeled pool (§11a)
+  -- a mixed-kind group, or an enzyme-state group with no modeled pool or
+  spanning two parent proteins -- can never reach `EXECUTABLE` status
+  under this version's policy, however well-resolved each individual
+  context's own expression/parameters/reversibility is: there is no
+  current upstream signal this package can trust to justify summing
+  heterogeneous catalyst kinds or unrelated enzyme-state populations, so
+  it always withholds the rate instead. Phosphorylation/dephosphorylation
+  *biochemistry*, invented state-population fractions, and a separate,
+  explicit total-enzyme conservation *equation* remain out of scope (Stage
+  2's own disclosed scope exclusions).
 
 None of these block correctness: each is a disclosed, deliberate scope
 boundary, never a silent wrong answer.

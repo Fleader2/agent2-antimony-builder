@@ -1164,25 +1164,85 @@ pure protein-general isozyme case). Enzyme-state composition, phosphorylation/
 dephosphorylation kinetics, state-population dynamics, and total-enzyme conservation
 remain deliberately unimplemented, deferred to Stage 2. ``AGENT2_CONTRACT_VERSION`` is
 unchanged: no field of any ``app.agent2.types`` shape changed.
+
+``ENZYME_STATE_DYNAMICS_POLICY_VERSION`` ("enzyme-state-dynamics-v1") is a new policy
+version for the new ``app.agent2.enzyme_state_dynamics`` package (Stage 2's own
+implementation), and ``ANTIMONY_GENERATION_POLICY_VERSION``/
+``PARAMETER_DECLARATION_POLICY_VERSION``/``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION``
+were bumped again -- ``"antimony-generation-v3"`` -> ``"antimony-generation-v4"``,
+``"parameter-declaration-v6"`` -> ``"parameter-declaration-v7"``,
+``"model-specification-v9"`` -> ``"model-specification-v10"`` -- for the "Multi-Context
+Catalytic Rate Composition, Stage 2: Enzyme-State Population Dynamics and Conservation"
+increment, which lifts Stage 1's own deliberate exclusion of enzyme-state contexts from
+composition, but only once a real conservation/interconversion basis for doing so exists.
+
+Previously, a protein's two or more curated enzyme states with no state-population data
+were, correctly, never composed and never individually concentration-resolved (Stage 1's
+own ``_ambiguous_state_parent_keys`` withholding). This increment adds
+``app.agent2.enzyme_state_dynamics.build_enzyme_state_dynamics``: for a protein whose
+curated states are connected by at least one curated ``CuratedEnzymeStateTransition``
+(never merely because two states share a parent protein), it materializes one dynamic
+``SpeciesSpecification`` per state (``source_enzyme_state_id`` -- a new, optional,
+mutually-exclusive-with-``source_compound_id`` field) and one first-order mass-action
+``ReactionSpecification``/``KineticLawAssignment`` per transition (new
+``KineticLawReasonCode.ENZYME_STATE_TRANSITION_STRUCTURAL_MASS_ACTION``), appended to an
+augmented ``FullNetwork`` (``network_id`` unchanged) -- never touching
+``app.agent2.characterization``/``.kinetics.selector``/``.boundaries``/``.modules``, which
+continue to run against the original, pre-augmentation network unmodified. Each state's own
+initial concentration is resolved with two tiers only -- a real, unambiguous, directly-
+curated state-specific observation (new ``EnzymeConcentrationBasis
+.MEASURED_STATE_SPECIFIC_CONCENTRATION``, via a new, currently-always-``None``-in-practice
+``CuratedQuantitativeObservation.enzyme_state_id`` field -- no real Agent 1 handoff
+populates it yet), or, only when the parent's own total is resolved and exactly one
+sibling state is otherwise unknown, the deterministic remainder (new
+``EnzymeConcentrationBasis.POOL_CONSERVATION_DERIVED`` /
+``ParameterSource.DERIVED_FROM_POOL_CONSERVATION``) -- never a third, invented tier.
+``ModelSpecification`` gained two new fields for this, mirroring
+``enzyme_concentrations``'s own precedent: ``enzyme_state_pools`` (new
+``EnzymeStatePool`` type: which states/transitions one protein's conserved pool
+comprises) and ``enzyme_state_concentrations`` (state-level ``EnzymeConcentration``
+records, kept separate from the pre-existing protein-level ``enzyme_concentrations`` so
+that field's own "at most one per protein" invariant is undisturbed).
+``_enzyme_concentration_for_assignment`` (`app.agent2.parameters.builder`) now prefers a
+real, resolved state-level concentration over Stage 1's blanket withholding when one is
+available for that exact state (falling back to withholding otherwise, unchanged).
+``_context_group_composability`` (`app.agent2.antimony.generator`) now also recognizes a
+homogeneous group of two or more distinct ``enzyme_state_id`` contexts as composable when
+(and only when) every one of those states belongs to the identical parent protein's
+dynamically-modeled pool (``full_network.enzyme_states``) -- distinct parent proteins, or
+any state outside a modeled pool, are never composed. No real pathway currently curates
+any ``enzyme_states``/``enzyme_state_transitions`` at all (confirmed by inspection of the
+saved fresh-pilot handoff: 0 of each) -- this increment is validated by synthetic/
+regression tests only; the real-data evaluation this increment's own instructions require
+reports that explicitly rather than fabricating a real-data example.
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.11"`` to ``"0.12"`` for the real type-
+shape changes above (``EnzymeConcentration.enzyme_state_id``,
+``CuratedQuantitativeObservation.enzyme_state_id``,
+``SpeciesSpecification.source_enzyme_state_id``, two new ``EnzymeConcentrationBasis``
+members, one new ``ParameterSource`` member, the new ``EnzymeStatePool`` type, and
+``ModelSpecification``'s two new fields) -- every new field defaults to its type's own
+"absent" value (``None``/``()``), so every pre-existing construction of any of these types
+continues to produce an identical value.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.11"
+AGENT2_CONTRACT_VERSION = "0.12"
 AGENT1_HANDOFF_VERSION = "1.5"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v6"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v7"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v9"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v3"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v10"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v4"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
 MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
 EVIDENCE_CONSOLIDATION_POLICY_VERSION = "evidence-consolidation-v1"
+ENZYME_STATE_DYNAMICS_POLICY_VERSION = "enzyme-state-dynamics-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1190,6 +1250,7 @@ __all__ = [
     "AGENT2_CONTRACT_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
     "EVIDENCE_CONSOLIDATION_POLICY_VERSION",
     "HEURISTIC_INITIALIZATION_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",

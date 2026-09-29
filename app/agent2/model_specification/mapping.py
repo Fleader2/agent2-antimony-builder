@@ -95,6 +95,7 @@ from app.agent2.types import (
     CuratedKineticMeasurement,
     EnzymeConcentration,
     EnzymeConcentrationBasis,
+    EnzymeStatePool,
     KineticLawSpecification,
     KineticLawType,
     ModelAssumption,
@@ -413,6 +414,7 @@ def build_model_assumptions(
     reactions: tuple[ReactionSpecification, ...] = (),
     enzyme_concentrations: tuple[EnzymeConcentration, ...] = (),
     microscopic_constraints: tuple[MicroscopicConstraint, ...] = (),
+    enzyme_state_pools: tuple[EnzymeStatePool, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
     """Deterministic `ModelAssumption` records for eight disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
@@ -454,7 +456,13 @@ def build_model_assumptions(
     ``"reconstruction"``, reason code the constraint's own ``status.value``, i.e.
     ``PARTIALLY_CONSTRAINED``/``UNDERDETERMINED``) per `MicroscopicConstraint` -- Derivation
     D's own disclosure that `kf`/`kr` remain on an unresolved curve (`kf * Km = kr + kcat`)
-    even though `Km`/`kcat` are both resolved, never a fabricated point value for either."""
+    even though `Km`/`kcat` are both resolved, never a fabricated point value for either.
+
+    ``enzyme_state_pools`` (Multi-Context Catalytic Rate Composition increment, Stage 2)
+    contributes an eleventh category: one ``ModelAssumption`` (category
+    ``"enzyme_state_dynamics"``, reason code ``ENZYME_STATE_POOL_CONSERVATION_APPLIED``) per
+    ``EnzymeStatePool`` -- the conservation relationship itself (which states, which
+    transitions) disclosed machine-readably, exactly once per dynamically-modeled protein."""
     assumptions: list[ModelAssumption] = []
     measurements_by_id = {m.id: m for m in kinetic_measurements}
     reactions_by_id = {r.reaction_id: r for r in reactions}
@@ -756,6 +764,27 @@ def build_model_assumptions(
                 ),
                 source="app.agent2.parameters.reconstruction",
                 reason_code=constraint.status.value,
+            )
+        )
+
+    for pool in sorted(enzyme_state_pools, key=lambda p: p.protein_id):
+        # Multi-Context Catalytic Rate Composition increment, Stage 2 (task's own explicit
+        # requirement): the conservation relationship itself -- which states, which
+        # transitions -- is disclosed here, machine-readably, exactly once per dynamically-
+        # modeled protein, never silently embedded only in EnzymeStatePool.assumptions text.
+        assumptions.append(
+            ModelAssumption(
+                assumption_id=f"assumption::enzyme-state-pool::{pool.protein_id}",
+                category="enzyme_state_dynamics",
+                statement=(
+                    f"Protein {pool.protein_id}'s curated enzyme states "
+                    f"({', '.join(pool.state_ids)}) are modeled as one conserved pool, "
+                    f"interconverting only through curated transition(s) "
+                    f"({', '.join(pool.transition_ids)})."
+                ),
+                related_entity_ids=(pool.protein_id, *pool.state_ids, *pool.transition_ids),
+                source="app.agent2.enzyme_state_dynamics",
+                reason_code="ENZYME_STATE_POOL_CONSERVATION_APPLIED",
             )
         )
 

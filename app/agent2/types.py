@@ -820,6 +820,20 @@ class CuratedQuantitativeObservation:
     #: observation, exactly as on the Agent 1 side.
     dependencies: tuple[CuratedQuantitativeObservationDependency, ...] = ()
 
+    #: Multi-Context Catalytic Rate Composition increment, Stage 2 (Enzyme-State
+    #: Population Dynamics and Conservation). ``None`` unless this observation was
+    #: specifically reported for one defined enzyme regulatory state -- mirrors
+    #: ``CuratedKineticMeasurement.enzyme_state_id``'s own identical, pre-existing
+    #: shape and meaning exactly. **No real Agent 1 handoff currently populates this
+    #: field** (confirmed by inspection before this increment's first commit: Agent
+    #: 1's own curated data has no per-state abundance/concentration pipeline yet) --
+    #: it exists purely as the forward-compatible extension point
+    #: ``app.agent2.enzyme_state_dynamics``'s own state-concentration resolver
+    #: consults first, exactly as ``EnzymeConcentration.enzyme_state_id`` above
+    #: exists for the same reason. Always ``None`` from ``translate_agent1_view_to_
+    #: agent2`` today; never fabricated by this repository.
+    enzyme_state_id: str | None = None
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
         object.__setattr__(
@@ -877,6 +891,7 @@ class CuratedQuantitativeObservation:
             "publication_id",
             "dataset_id",
             "notes",
+            "enzyme_state_id",
         ):
             object.__setattr__(
                 self,
@@ -1051,12 +1066,30 @@ class ParameterSource(StrEnum):
     preserved explicitly in `source_reference`/`uncertainty_text`/
     `provenance_refs` -- never silently laundered into an
     indistinguishable derived value.
+
+    **`DERIVED_FROM_POOL_CONSERVATION`** (Multi-Context Catalytic Rate
+    Composition increment, Stage 2): one more rung, inserted between
+    `DERIVED_FROM_MACRO_KINETICS` and `HEURISTIC_INITIALIZATION` --
+    ``LITERATURE_DERIVED``/``CURATED`` > ``AI_PREDICTED`` >
+    ``DERIVED_FROM_MACRO_KINETICS`` > ``DERIVED_FROM_POOL_CONSERVATION`` >
+    ``HEURISTIC_INITIALIZATION`` > ``PLACEHOLDER``. Reserved exclusively for
+    ``SpeciesSpecification.initialization_source`` on an enzyme-state
+    species: the one remaining, otherwise-unresolved sibling state's own
+    initial concentration, computed as the resolved parent-pool total minus
+    every other already-known sibling state's own value -- a real,
+    deterministic consequence of a real total and real sibling values,
+    never a fabricated or evenly-split fraction. Ranked below
+    `DERIVED_FROM_MACRO_KINETICS` for the identical reason that rung is
+    ranked below `AI_PREDICTED`: one further inferential (here, arithmetic)
+    step removed from a direct measurement. See
+    ``app.agent2.enzyme_state_dynamics`` for the resolver that produces it.
     """
 
     CURATED = "CURATED"
     LITERATURE_DERIVED = "LITERATURE_DERIVED"
     AI_PREDICTED = "AI_PREDICTED"
     DERIVED_FROM_MACRO_KINETICS = "DERIVED_FROM_MACRO_KINETICS"
+    DERIVED_FROM_POOL_CONSERVATION = "DERIVED_FROM_POOL_CONSERVATION"
     HEURISTIC_INITIALIZATION = "HEURISTIC_INITIALIZATION"
     DEFAULT = "DEFAULT"
     PLACEHOLDER = "PLACEHOLDER"
@@ -1279,12 +1312,27 @@ class SpeciesSpecification:
     ``boundary_condition`` (not consumed/produced by reactions, but may
     still be set externally) are independent SBML-style flags, never
     conflated.
+
+    **``source_enzyme_state_id``** (Multi-Context Catalytic Rate Composition
+    increment, Stage 2): mirrors ``source_compound_id`` exactly, for the one
+    other origin a species can have -- one curated ``CuratedEnzymeState``,
+    dynamically modeled as its own conserved-pool population (see
+    ``app.agent2.enzyme_state_dynamics``). At most one of
+    ``source_compound_id``/``source_enzyme_state_id`` may be set; both
+    ``None`` remains valid (a species this repository cannot otherwise
+    attribute an origin to). This is a deliberate, disclosed exception to
+    the pre-existing "species are derived from a curated compound's
+    participation in at least one reaction" stance
+    (``docs/04_core_domain_contracts.md`` §2/§4) -- narrowly scoped to
+    exactly the enzyme states this later increment's own transition-based
+    dynamics gate materializes, never to enzyme states in general.
     """
 
     species_id: str
     name: str
     compartment_id: str
     source_compound_id: str | None = None
+    source_enzyme_state_id: str | None = None
     initial_amount: Decimal | None = None
     initial_concentration: Decimal | None = None
     initialization_source: ParameterSource | None = None
@@ -1308,6 +1356,19 @@ class SpeciesSpecification:
             "source_compound_id",
             _clean_optional_str(self.source_compound_id, field_name="source_compound_id"),
         )
+        object.__setattr__(
+            self,
+            "source_enzyme_state_id",
+            _clean_optional_str(
+                self.source_enzyme_state_id, field_name="source_enzyme_state_id"
+            ),
+        )
+        if self.source_compound_id is not None and self.source_enzyme_state_id is not None:
+            raise ValueError(
+                "SpeciesSpecification allows at most one of source_compound_id/"
+                f"source_enzyme_state_id, got source_compound_id={self.source_compound_id!r}, "
+                f"source_enzyme_state_id={self.source_enzyme_state_id!r}"
+            )
         object.__setattr__(
             self,
             "initial_amount",
@@ -1824,6 +1885,14 @@ def _validate_full_network_references(network: FullNetwork) -> None:
                 f"FullNetwork species {species.species_id!r} references undefined "
                 f"compartment {species.compartment_id!r}"
             )
+        if (
+            species.source_enzyme_state_id is not None
+            and species.source_enzyme_state_id not in enzyme_state_ids
+        ):
+            raise ValueError(
+                f"FullNetwork species {species.species_id!r} references undefined enzyme "
+                f"state {species.source_enzyme_state_id!r}"
+            )
 
     for reaction in network.reactions:
         for participant in reaction.participants:
@@ -1902,6 +1971,16 @@ def _validate_full_network_references(network: FullNetwork) -> None:
             raise ValueError(
                 f"FullNetwork kinetic measurement {measurement.id!r} references undefined "
                 f"enzyme state {measurement.enzyme_state_id!r}"
+            )
+
+    for observation in network.quantitative_observations:
+        if (
+            observation.enzyme_state_id is not None
+            and observation.enzyme_state_id not in enzyme_state_ids
+        ):
+            raise ValueError(
+                f"FullNetwork quantitative observation {observation.id!r} references undefined "
+                f"enzyme state {observation.enzyme_state_id!r}"
             )
 
     for regulation in network.regulatory_interactions:
@@ -2699,6 +2778,23 @@ class EnzymeConcentrationBasis(StrEnum):
     has no member here -- see
     ``app.agent2.quantitative_context.types.QuantitativeContextResolutionOutcome``
     for how an unresolved protein is represented instead.
+
+    **`MEASURED_STATE_SPECIFIC_CONCENTRATION`/`POOL_CONSERVATION_DERIVED`**
+    (Multi-Context Catalytic Rate Composition increment, Stage 2 -- Enzyme-
+    State Population Dynamics and Conservation): two new members used
+    exclusively for a *state-level* ``EnzymeConcentration``
+    (``enzyme_state_id`` set -- see that field's own docstring), never for a
+    protein-level total. ``MEASURED_STATE_SPECIFIC_CONCENTRATION`` is a real
+    curated observation naming this exact state directly (highest
+    precedence, mirroring ``EXPERIMENT_SPECIFIC_CONCENTRATION``'s own
+    "real, directly-reported value" standing). ``POOL_CONSERVATION_DERIVED``
+    is not a measurement at all -- it is the one remaining, otherwise-unknown
+    sibling state's concentration, computed as the resolved parent total
+    minus every other sibling's own already-known value, only when that
+    arithmetic is fully determined (never a fabricated split of an unknown
+    total, never a guessed fraction). See
+    ``app.agent2.enzyme_state_dynamics`` for the resolver that produces
+    both.
     """
 
     EXPERIMENT_SPECIFIC_CONCENTRATION = "EXPERIMENT_SPECIFIC_CONCENTRATION"
@@ -2706,6 +2802,8 @@ class EnzymeConcentrationBasis(StrEnum):
     REFERENCE_CONCENTRATION = "REFERENCE_CONCENTRATION"
     REFERENCE_ABUNDANCE_AND_COMPATIBLE_VOLUME = "REFERENCE_ABUNDANCE_AND_COMPATIBLE_VOLUME"
     REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME = "REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME"
+    MEASURED_STATE_SPECIFIC_CONCENTRATION = "MEASURED_STATE_SPECIFIC_CONCENTRATION"
+    POOL_CONSERVATION_DERIVED = "POOL_CONSERVATION_DERIVED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -2769,6 +2867,17 @@ class EnzymeConcentration:
     ``EnzymeState``s, a homo-/hetero-oligomeric complex) still gets exactly one
     total-protein concentration, and any state-specific allocation remains
     unresolved, deliberately, for later work.
+
+    **``enzyme_state_id``** (Multi-Context Catalytic Rate Composition
+    increment, Stage 2): ``None`` (the default) means exactly what it always
+    has -- ``protein_id``'s own total, undifferentiated concentration across
+    every one of its states. When set, this record instead represents *one
+    state's own* share of that same protein's pool (``basis`` is then always
+    ``MEASURED_STATE_SPECIFIC_CONCENTRATION`` or ``POOL_CONSERVATION_DERIVED``
+    -- never one of the five protein-level-only tiers). Produced exclusively
+    by ``app.agent2.enzyme_state_dynamics``, never by
+    ``resolve_enzyme_concentrations`` itself (that function's own scope is
+    unchanged, protein-level only, per its docstring above).
     """
 
     protein_id: str
@@ -2780,6 +2889,7 @@ class EnzymeConcentration:
     experimental_context_id: str | None = None
     assumption_reason_codes: tuple[str, ...] = ()
     notes: str | None = None
+    enzyme_state_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -2823,10 +2933,88 @@ class EnzymeConcentration:
             ),
         )
         object.__setattr__(self, "notes", _clean_optional_str(self.notes, field_name="notes"))
+        object.__setattr__(
+            self,
+            "enzyme_state_id",
+            _clean_optional_str(self.enzyme_state_id, field_name="enzyme_state_id"),
+        )
+        if self.enzyme_state_id is not None and self.basis not in (
+            EnzymeConcentrationBasis.MEASURED_STATE_SPECIFIC_CONCENTRATION,
+            EnzymeConcentrationBasis.POOL_CONSERVATION_DERIVED,
+        ):
+            raise ValueError(
+                "EnzymeConcentration with enzyme_state_id set must use basis "
+                "MEASURED_STATE_SPECIFIC_CONCENTRATION or POOL_CONSERVATION_DERIVED, got "
+                f"{self.basis!r}"
+            )
 
 
 # =================================================================================================
-# 7. ModelSpecification -- the top-level, authoritative contract
+# 7a. EnzymeStatePool -- conserved enzyme-state population metadata (Multi-Context
+# Catalytic Rate Composition increment, Stage 2)
+# =================================================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class EnzymeStatePool:
+    """One parent protein's conserved enzyme-state population -- the disclosed record that
+    ``state_ids`` (two or more distinct ``CuratedEnzymeState``\\ s of ``protein_id``) are
+    modeled as one conserved total, interconverting only through ``transition_ids``
+    (``CuratedEnzymeStateTransition`` records).
+
+    Produced exclusively by ``app.agent2.enzyme_state_dynamics``, attached to
+    ``ModelSpecification.enzyme_state_pools``. Existence of a pool is itself a real,
+    disclosed modeling decision, never assumed merely because a protein has more than one
+    curated state -- see that package's own module docstring for the exact "at least one
+    curated transition must connect two of this protein's own states" gate. ``state_ids``
+    lists only the states this increment actually materialized as dynamic species (a
+    curated state lacking a resolvable compartment is excluded, disclosed separately, never
+    silently folded into a false conservation equation); ``transition_ids`` lists only the
+    transitions actually materialized as model reactions between two of those species.
+    """
+
+    protein_id: str
+    state_ids: tuple[str, ...]
+    transition_ids: tuple[str, ...]
+    policy_version: str
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "protein_id", _require_non_empty_str(self.protein_id, field_name="protein_id")
+        )
+        object.__setattr__(
+            self, "state_ids", _require_str_tuple(self.state_ids, field_name="state_ids")
+        )
+        if len(self.state_ids) < 2:
+            raise ValueError(
+                f"EnzymeStatePool.state_ids must name at least two states, got {self.state_ids!r}"
+            )
+        _require_unique(self.state_ids, field_name="EnzymeStatePool.state_ids")
+        object.__setattr__(
+            self,
+            "transition_ids",
+            _require_str_tuple(self.transition_ids, field_name="transition_ids"),
+        )
+        _require_unique(self.transition_ids, field_name="EnzymeStatePool.transition_ids")
+        object.__setattr__(
+            self,
+            "policy_version",
+            _require_non_empty_str(self.policy_version, field_name="policy_version"),
+        )
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+# =================================================================================================
+# 7b. ModelSpecification -- the top-level, authoritative contract
 # =================================================================================================
 
 
@@ -2862,6 +3050,22 @@ class ModelSpecification:
     #: ``_validate_full_network_references``/``_validate_model_specification_references``
     #: already document for every other ``protein_id``-typed field).
     enzyme_concentrations: tuple[EnzymeConcentration, ...] = ()
+    #: Multi-Context Catalytic Rate Composition increment, Stage 2. Zero or more
+    #: ``EnzymeStatePool`` records, at most one per protein (see ``__post_init__``'s own
+    #: uniqueness check below). ``state_ids``/``transition_ids`` are checked against
+    #: ``full_network.enzyme_states``/``.enzyme_state_transitions`` -- both real, complete
+    #: registries -- in ``_validate_model_specification_references``; ``protein_id`` itself
+    #: is never checked against anything, mirroring ``enzyme_concentrations.protein_id``'s
+    #: own identical, disclosed limitation immediately above.
+    enzyme_state_pools: tuple[EnzymeStatePool, ...] = ()
+    #: Multi-Context Catalytic Rate Composition increment, Stage 2. Zero or more
+    #: state-level ``EnzymeConcentration`` records (``enzyme_state_id`` always set -- see
+    #: that field's own docstring), at most one per state (never per protein -- a protein
+    #: with N pooled states may contribute up to N entries here). Kept in a dedicated field,
+    #: never mixed into ``enzyme_concentrations`` above, so that field's own long-standing
+    #: "at most one per protein" invariant (a protein-level total) is never disturbed by an
+    #: unrelated, state-level partial figure.
+    enzyme_state_concentrations: tuple[EnzymeConcentration, ...] = ()
     provenance_refs: tuple[str, ...] = ()
     contract_version: str = AGENT2_CONTRACT_VERSION
 
@@ -2929,6 +3133,28 @@ class ModelSpecification:
         )
         object.__setattr__(
             self,
+            "enzyme_state_pools",
+            _require_tuple_of(
+                self.enzyme_state_pools, EnzymeStatePool, field_name="enzyme_state_pools"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "enzyme_state_concentrations",
+            _require_tuple_of(
+                self.enzyme_state_concentrations,
+                EnzymeConcentration,
+                field_name="enzyme_state_concentrations",
+            ),
+        )
+        for ec in self.enzyme_state_concentrations:
+            if ec.enzyme_state_id is None:
+                raise ValueError(
+                    "ModelSpecification.enzyme_state_concentrations entries must all have "
+                    f"enzyme_state_id set, got {ec!r}"
+                )
+        object.__setattr__(
+            self,
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
@@ -2953,6 +3179,14 @@ class ModelSpecification:
         _require_unique(
             tuple(ec.protein_id for ec in self.enzyme_concentrations),
             field_name="ModelSpecification.enzyme_concentrations[].protein_id",
+        )
+        _require_unique(
+            tuple(pool.protein_id for pool in self.enzyme_state_pools),
+            field_name="ModelSpecification.enzyme_state_pools[].protein_id",
+        )
+        _require_unique(
+            tuple(ec.enzyme_state_id for ec in self.enzyme_state_concentrations),
+            field_name="ModelSpecification.enzyme_state_concentrations[].enzyme_state_id",
         )
         _require_unique(
             tuple(boundary.boundary_id for boundary in self.boundary_assessments),
@@ -3125,6 +3359,25 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
                 interface_ids,
                 field_name=f"module {module.module_id}.boundary_interface_ids",
             )
+
+    enzyme_state_transition_ids = {t.id for t in spec.full_network.enzyme_state_transitions}
+    for pool in spec.enzyme_state_pools:
+        _require_known(
+            pool.state_ids,
+            enzyme_state_ids,
+            field_name=f"enzyme_state_pool {pool.protein_id}.state_ids",
+        )
+        _require_known(
+            pool.transition_ids,
+            enzyme_state_transition_ids,
+            field_name=f"enzyme_state_pool {pool.protein_id}.transition_ids",
+        )
+    for ec in spec.enzyme_state_concentrations:
+        _require_known(
+            (ec.enzyme_state_id,),
+            enzyme_state_ids,
+            field_name=f"enzyme_state_concentration {ec.enzyme_state_id}.enzyme_state_id",
+        )
 
 
 # =================================================================================================

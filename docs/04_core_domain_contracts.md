@@ -82,6 +82,18 @@ Fields: `species_id`, `name`, `compartment_id`, `source_compound_id`,
 `initial_amount`, `initial_concentration`, `initialization_source`,
 `constant`, `boundary_condition`, `assumptions`, `provenance_refs`.
 
+**`source_enzyme_state_id`** (Multi-Context Catalytic Rate Composition
+increment, Stage 2 -- `docs/18_enzyme_state_population_dynamics.md`): a
+species may instead originate from one curated enzyme regulatory state,
+dynamically modeled as part of its parent protein's conserved population
+-- a deliberate, narrowly-scoped exception to this section's own "species
+are derived from a curated compound's participation in at least one
+reaction" stance, applying only to the enzyme states that increment's own
+transition-based gate actually materializes (never to enzyme states in
+general, which remain supporting data only -- §2 above, unchanged for
+every other case). At most one of `source_compound_id`/
+`source_enzyme_state_id` may be set.
+
 ## 5. ReactionParticipantSpecification
 
 One reactant/product/modifier of a reaction. `role` is `ParticipantRole`

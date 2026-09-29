@@ -110,6 +110,28 @@ class KineticLawReasonCode(StrEnum):
       **not** set ``KineticLawAssignment.is_tentative`` -- see that
       property's own docstring. See
       ``docs/07_kinetic_law_assignment.md`` §32 for the full policy.
+    * ``ENZYME_STATE_TRANSITION_STRUCTURAL_MASS_ACTION`` (Multi-Context
+      Catalytic Rate Composition increment, Stage 2) -- assigned, always
+      and only, by ``app.agent2.enzyme_state_dynamics`` (never by
+      ``select_reaction_assignments``/``_decide_structural`` above) to the
+      synthetic, first-order mass-action reaction it builds for one curated
+      ``CuratedEnzymeStateTransition`` between two dynamically-modeled
+      enzyme-state species. Distinct from the pre-existing
+      ``SIMPLE_ELEMENTARY_TRANSITION``/``SIMPLE_REVERSIBLE_ELEMENTARY_
+      TRANSITION`` codes above: those classify an *ordinary, already-
+      curated* reaction (real compound participants) that happens to be
+      tagged ``ReactionClass.STATE_TRANSITION`` via the normal
+      characterization pipeline; this code instead marks a reaction this
+      later increment itself synthesizes (no curated participants at all
+      -- its two "participants" are the enzyme-state species themselves),
+      used only when ``CuratedEnzymeStateTransition.reaction_id`` names no
+      such ordinary reaction. Never tentative (``assignment_source`` is
+      ``DETERMINISTIC_STRUCTURAL``): the reaction's *existence* and *law
+      family* (first-order mass action, the simplest structurally
+      supported transition law) are a certain, deterministic consequence
+      of the curated transition record itself, even though its rate
+      *constant* is almost always ``HEURISTIC_INITIALIZATION`` (no curated
+      evidence attaches to a synthetic reaction id).
     """
 
     CURATED_RATE_LAW_PRESENT = "CURATED_RATE_LAW_PRESENT"
@@ -130,6 +152,9 @@ class KineticLawReasonCode(StrEnum):
     STRUCTURAL_RULE_NOT_APPLICABLE = "STRUCTURAL_RULE_NOT_APPLICABLE"
     HEURISTIC_RULE_NOT_APPLICABLE = "HEURISTIC_RULE_NOT_APPLICABLE"
     INSUFFICIENT_CURATED_CONTEXT = "INSUFFICIENT_CURATED_CONTEXT"
+    ENZYME_STATE_TRANSITION_STRUCTURAL_MASS_ACTION = (
+        "ENZYME_STATE_TRANSITION_STRUCTURAL_MASS_ACTION"
+    )
     SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION = (
         "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
     )

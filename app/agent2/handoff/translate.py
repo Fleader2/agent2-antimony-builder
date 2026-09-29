@@ -387,6 +387,10 @@ def _translate_quantitative_observation(raw: Mapping[str, Any]) -> CuratedQuanti
         dependencies=tuple(
             _translate_quantitative_observation_dependency(d) for d in dependencies_raw
         ),
+        # Multi-Context Catalytic Rate Composition increment, Stage 2: forward-compatible
+        # only -- no real Agent 1 handoff sends this key today, so this is always None in
+        # practice; see CuratedQuantitativeObservation.enzyme_state_id's own docstring.
+        enzyme_state_id=_str_or_none(raw.get("enzyme_state_id")),
     )
 
 

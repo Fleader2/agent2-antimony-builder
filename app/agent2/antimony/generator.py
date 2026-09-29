@@ -26,19 +26,22 @@ always been reserved for now exists, scoped narrowly --
 ``_context_group_composability`` composes a homogeneous group of two or
 more distinct protein-general contexts, or a homogeneous group of two or
 more distinct complex-general contexts, additively (never a mix of the
-two, and never any group containing an enzyme-state context). Two or more
-independently-resolved isozymes acting on the same reaction now produce
-one real, disclosed, summed rate (`(v_p1) + (v_p2)`) instead of an
-unconditional `UNRESOLVED_MULTIPLE_CONTEXTS`. Enzyme-state contexts
-(`enzyme_state_id`) are deliberately **not** composed in this stage --
-each remains its own distinct, individually-inspectable
-``KineticLawSpecification`` (never collapsed, never duplicated with a
-fabricated full parent-enzyme concentration), but a reaction with two or
-more enzyme-state contexts, or any mix of enzyme-state with protein/
-complex-general contexts, still resolves to
-`UNRESOLVED_MULTIPLE_CONTEXTS` -- composing across mutually-exclusive
-modification-state populations requires real state-population/
-conservation data this increment does not add (Stage 2's own job).
+two). Two or more independently-resolved isozymes acting on the same
+reaction now produce one real, disclosed, summed rate (`(v_p1) + (v_p2)`)
+instead of an unconditional `UNRESOLVED_MULTIPLE_CONTEXTS`.
+
+**Stage 2 (Enzyme-State Population Dynamics and Conservation)**: a
+homogeneous group of two or more distinct enzyme-state contexts is now
+*also* composable, but only when every one of those states belongs to the
+identical parent protein's dynamically-modeled, conserved pool
+(``ModelSpecification.enzyme_state_pools`` -- produced by
+``app.agent2.enzyme_state_dynamics``, never inferred merely from two
+states sharing a parent protein). Two or more enzyme-state contexts with
+no such pool, states spanning two different parent proteins, or any mix
+of enzyme-state with protein/complex-general contexts, still resolve to
+`UNRESOLVED_MULTIPLE_CONTEXTS` exactly as in Stage 1 -- composing across a
+pool-conservation basis this increment does not itself establish would
+still be fabricated biology.
 """
 
 from __future__ import annotations
@@ -93,12 +96,14 @@ class _ReactionRateStatus(StrEnum):
     """The reaction-level (not law-level) verdict ``resolve_reaction_rate_expression``
     returns -- see that function's own docstring.
 
-    **Multi-Context Catalytic Rate Composition increment (Stage 1)**: ``RESOLVED_COMPOSED``
-    is now genuinely produced -- see ``_context_group_composability`` for the exact
-    simultaneous-applicability gate. It fires only for a homogeneous group of
-    protein-general-only or complex-general-only contexts (never a group containing any
-    ``enzyme_state_id`` context, and never a group mixing protein-general with
-    complex-general contexts) where every individual law is itself independently resolved."""
+    **Multi-Context Catalytic Rate Composition increment (Stage 1, extended in Stage 2)**:
+    ``RESOLVED_COMPOSED`` is now genuinely produced -- see ``_context_group_composability``
+    for the exact simultaneous-applicability gate. It fires only for a homogeneous group of
+    protein-general-only contexts, complex-general-only contexts, or (Stage 2)
+    enzyme-state-only contexts whose states all belong to one common parent protein's
+    dynamically-modeled, conserved pool -- never a group mixing two different kinds, and
+    never an enzyme-state group outside a modeled pool -- where every individual law is
+    itself independently resolved."""
 
     RESOLVED_SINGLE = "RESOLVED_SINGLE"
     RESOLVED_COMPOSED = "RESOLVED_COMPOSED"
@@ -135,46 +140,65 @@ def _context_kind(law: KineticLawSpecification) -> str:
     return "general"
 
 
-def _context_group_composability(laws: tuple[KineticLawSpecification, ...]) -> bool:
-    """Multi-Context Catalytic Rate Composition increment (Stage 1) -- the simultaneous-
-    applicability gate ``docs/12_antimony_generation.md`` §11a's own ``RESOLVED_COMPOSED``
-    always required but never had a signal for, until now.
+def _context_group_composability(
+    laws: tuple[KineticLawSpecification, ...],
+    pooled_state_protein_by_id: dict[str, str],
+) -> bool:
+    """Multi-Context Catalytic Rate Composition increment (Stage 1, extended in Stage 2)
+    -- the simultaneous-applicability gate ``docs/12_antimony_generation.md`` §11a's own
+    ``RESOLVED_COMPOSED`` always required but never had a signal for, until Stage 1.
 
-    True only for a **homogeneous** group of two or more distinct protein-general contexts,
-    or a homogeneous group of two or more distinct complex-general contexts -- never a mix
-    of the two (a whole enzyme complex and one of its own subunit proteins are never
-    established as independently, additively active; nothing curated confirms that
-    combination is not double-counting), and never a group containing even one enzyme-state
-    context. ``enzyme_state_id`` distinguishes a *modification state* of the *same*
-    underlying protein/complex, whose own population is mutually exclusive across states at
-    any instant -- summing state-specific rates as though every state were simultaneously,
-    fully present would be fabricated biology (a real total-enzyme-conservation constraint
-    this increment does not add; see the module docstring's own "prepare, do not implement"
-    scope for Stage 2). A "general" (no catalyst identity at all) context is also never
-    composed with anything -- there is no basis to confirm it is biologically distinct from
-    a sibling law rather than an artifact of ambiguous/collapsed evidence.
+    True for a **homogeneous** group of two or more distinct protein-general contexts, a
+    homogeneous group of two or more distinct complex-general contexts, or (Stage 2) a
+    homogeneous group of two or more distinct enzyme-state contexts whose states all
+    belong to the identical parent protein's **dynamically-modeled, conserved pool**
+    (``pooled_state_protein_by_id`` -- built from ``ModelSpecification.enzyme_state_pools``,
+    never from ``FullNetwork.enzyme_states`` directly, so a state merely sharing a parent
+    protein with no curated transition/conservation basis is never composed). Never a mix
+    of two different kinds (a whole enzyme complex and one of its own subunit proteins are
+    never established as independently, additively active; nothing curated confirms that
+    combination is not double-counting), and never a group containing an enzyme-state
+    context outside a modeled pool, or spanning two different parent proteins' pools.
 
-    This is the only signal this increment adds: real, distinct protein (or complex)
-    identity, with no curated basis for mutual exclusivity, is treated as physically
-    co-present, independently-acting catalysis by default -- the standard systems-biology
-    convention for isozymes, applicable here for the first time now that isozyme contexts
-    are no longer collapsed upstream (the isozyme-context-resolution increment). Distinct
-    identity within the homogeneous group is re-confirmed defensively (never trusted blindly)
-    even though upstream construction already guarantees it.
+    **Why enzyme-state composition is safe now, when Stage 1 explicitly forbade it**: Stage
+    1's own concern was that a modification state's population is a mutually exclusive
+    *fraction* of one total pool, and summing state-specific rates as though every state
+    were simultaneously, fully present would fabricate biology no curated data supported.
+    That concern is about the *catalyst concentration* each contribution's own parameters
+    were initialized from, not about whether two states' *reactions* can coexist -- and
+    Stage 2's own ``app.agent2.enzyme_state_dynamics`` never hands the full parent
+    concentration to more than one sibling state (each gets, at most, its own distinct,
+    conservation-consistent share, or nothing at all). Composing their independently-
+    resolved rates additively is therefore exactly as safe as composing two isozymes: each
+    contribution's own parameters already account for (or honestly withhold) its own
+    catalyst's real population, so summing the resulting rates never double-counts.
+
+    A "general" (no catalyst identity at all) context is also never composed with anything
+    -- there is no basis to confirm it is biologically distinct from a sibling law rather
+    than an artifact of ambiguous/collapsed evidence.
     """
     if len(laws) < 2:
         return False
     kinds = {_context_kind(law) for law in laws}
-    if kinds not in ({"protein"}, {"complex"}):
-        return False
-    identities = {law.protein_id or law.complex_id for law in laws}
-    return len(identities) == len(laws)
+    if kinds == {"protein"} or kinds == {"complex"}:
+        identities = {law.protein_id or law.complex_id for law in laws}
+        return len(identities) == len(laws)
+    if kinds == {"enzyme_state"}:
+        state_ids = tuple(law.enzyme_state_id for law in laws)
+        if len(set(state_ids)) != len(state_ids):
+            return False
+        parent_protein_ids = {pooled_state_protein_by_id.get(state_id) for state_id in state_ids}
+        if None in parent_protein_ids:
+            return False
+        return len(parent_protein_ids) == 1
+    return False
 
 
 def resolve_reaction_rate_expression(
     reaction: ReactionSpecification,
     laws: tuple[KineticLawSpecification, ...],
     law_resolutions: dict[str, _LawResolution],
+    pooled_state_protein_by_id: dict[str, str],
 ) -> _ReactionRateResolution:
     """Resolve one reaction's total rate from every ``KineticLawSpecification`` that
     references it.
@@ -204,7 +228,7 @@ def resolve_reaction_rate_expression(
 
     if len(ordered_laws) > 1:
         law_ids = tuple(law.kinetic_law_id for law in ordered_laws)
-        if not _context_group_composability(ordered_laws):
+        if not _context_group_composability(ordered_laws, pooled_state_protein_by_id):
             return _ReactionRateResolution(
                 status=_ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS,
                 expression=None,
@@ -290,9 +314,22 @@ def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
     for law in model.kinetic_laws:
         laws_by_reaction.setdefault(law.reaction_id, []).append(law)
 
+    # Multi-Context Catalytic Rate Composition increment, Stage 2: every enzyme-state id
+    # that is part of some dynamically-modeled, conserved pool, mapped to that pool's own
+    # parent protein id -- never built from FullNetwork.enzyme_states directly, so a state
+    # with no curated transition/conservation basis is never treated as composable.
+    pooled_state_protein_by_id = {
+        state_id: pool.protein_id
+        for pool in model.enzyme_state_pools
+        for state_id in pool.state_ids
+    }
+
     reaction_resolutions = {
         reaction_id: resolve_reaction_rate_expression(
-            reaction, tuple(laws_by_reaction.get(reaction_id, ())), law_resolutions
+            reaction,
+            tuple(laws_by_reaction.get(reaction_id, ())),
+            law_resolutions,
+            pooled_state_protein_by_id,
         )
         for reaction_id, reaction in reactions_by_id.items()
     }
@@ -495,10 +532,11 @@ def _reaction_line(
         )
         reasons = ",".join(resolution.reasons)
         # Two distinct real reasons share this status: composition was never eligible at
-        # all (mixed/enzyme-state contexts), or it was eligible but at least one
-        # contribution is not itself resolved yet -- ``reasons`` (always present) already
-        # discloses which, machine-readably; the prose below stays generically accurate for
-        # both rather than guessing.
+        # all (a mixed-kind group, or an enzyme-state group outside a modeled pool/spanning
+        # two parent proteins), or it was eligible but at least one contribution is not
+        # itself resolved yet -- ``reasons`` (always present) already discloses which,
+        # machine-readably; the prose below stays generically accurate for both rather than
+        # guessing.
         outcome = (
             "eligible for composition but at least one contribution is unresolved"
             if "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED" in resolution.reasons
