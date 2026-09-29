@@ -1082,12 +1082,31 @@ call site in ``app.agent2.parameters.builder`` now passes its own already-in-sco
 a parameter slot's real curated evidence disagrees but is not otherwise excluded.
 ``AGENT2_CONTRACT_VERSION`` is unchanged for both bumps: no field of any
 ``app.agent2.types`` shape changed by this increment.
+
+``AGENT1_HANDOFF_VERSION`` was bumped from ``"1.4"`` to ``"1.5"`` for the "Publication
+Date Handoff" increment: Agent 1's own ``Agent1CuratedKnowledgeView`` gained
+``publications`` (``AGENT1_CONTRACT_VERSION`` "1.4" -> "1.5" on Agent 1's side, mirrored
+here as the new ``CuratedPublication`` type and a new ``publications`` field on
+``Agent1CuratedKnowledgeViewContract``, both defaulted to ``()``/copied losslessly by
+``translate_agent1_view_to_agent2``). ``AGENT2_CONTRACT_VERSION`` was bumped from
+``"0.10"`` to ``"0.11"`` for the same increment, for the identical reason
+``FullNetwork`` gaining ``experimental_contexts``/``quantitative_observations`` bumped
+it before: ``FullNetwork`` gained ``publications`` too, attached verbatim from the
+handoff exactly like every other supporting-data field before it. This closes the
+disclosed data-availability gap ``app.agent2.kinetics.evidence_consolidation``'s own
+publication-recency priority previously had -- ``publication_years_for_network`` now
+builds a real ``{publication_id: year}`` mapping from ``network.publications``, wired
+into every real call site (``assign_kinetic_laws``, and
+``app.agent2.parameters.initializer``'s own already-existing ``network`` parameter) --
+without changing that priority's own ranking order, ``KINETIC_LAW_ASSIGNMENT_POLICY
+_VERSION``, or ``PARAMETER_DECLARATION_POLICY_VERSION``: the policy itself is
+unchanged, only the real data now available to its lowest-precedence tier.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.10"
-AGENT1_HANDOFF_VERSION = "1.4"
+AGENT2_CONTRACT_VERSION = "0.11"
+AGENT1_HANDOFF_VERSION = "1.5"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"

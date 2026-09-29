@@ -27,6 +27,7 @@ from decimal import Decimal
 from app.agent2.kinetics.evidence_consolidation import (
     ConsolidationClassification,
     consolidate_by_substrate,
+    publication_years_for_network,
     reference_experimental_context_for_network,
 )
 from app.agent2.parameters.heuristic_defaults import ParameterKind, heuristic_default_for_kind
@@ -127,10 +128,12 @@ def initialize_from_evidence(
     reference_context = (
         reference_experimental_context_for_network(network) if network is not None else None
     )
+    publication_years = publication_years_for_network(network) if network is not None else {}
     concepts = consolidate_by_substrate(
         evidence_of_kind,
         target_organism_id=target_organism_id,
         reference_context=reference_context,
+        publication_years=publication_years,
     )
 
     all_candidate_ids = tuple(sorted(m.id for m in evidence_of_kind))
@@ -225,10 +228,12 @@ def initialize_from_ai_predicted_evidence(
     reference_context = (
         reference_experimental_context_for_network(network) if network is not None else None
     )
+    publication_years = publication_years_for_network(network) if network is not None else {}
     concepts = consolidate_by_substrate(
         candidates,
         target_organism_id=target_organism_id,
         reference_context=reference_context,
+        publication_years=publication_years,
         value_of=_normalized_value_unit,
     )
 

@@ -92,6 +92,7 @@ from app.agent2.types import (
     CuratedEvidence,
     CuratedExperimentalContext,
     CuratedKineticMeasurement,
+    CuratedPublication,
     CuratedQuantitativeObservation,
     CuratedQuantitativeObservationDependency,
     CuratedReaction,
@@ -136,6 +137,17 @@ def _require_decimal(value: Any, *, entity: str) -> Decimal:
 
 def _str_or_none(value: Any) -> str | None:
     return None if value is None else str(value)
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise MalformedHandoffPayloadError(
+            f"expected an integer-parseable value, got {value!r}"
+        ) from exc
 
 
 def _translate_compartment(raw: Mapping[str, Any]) -> CuratedCompartment:
@@ -291,6 +303,13 @@ def _translate_enzyme_state_transition(raw: Mapping[str, Any]) -> CuratedEnzymeS
         source=_str_or_none(raw.get("source")),
         source_id=_str_or_none(raw.get("source_id")),
         notes=_str_or_none(raw.get("notes")),
+    )
+
+
+def _translate_publication(raw: Mapping[str, Any]) -> CuratedPublication:
+    return CuratedPublication(
+        id=str(_require(raw, "id", entity="publication")),
+        year=_int_or_none(raw.get("year")),
     )
 
 
@@ -471,6 +490,9 @@ def translate_agent1_view_to_agent2(
         quantitative_observations=tuple(
             _translate_quantitative_observation(o)
             for o in _require_list(view, "quantitative_observations")
+        ),
+        publications=tuple(
+            _translate_publication(p) for p in _require_list(view, "publications")
         ),
         claims=tuple(_translate_claim(c) for c in _require_list(view, "claims")),
         evidence=tuple(_translate_evidence(e) for e in _require_list(view, "evidence")),

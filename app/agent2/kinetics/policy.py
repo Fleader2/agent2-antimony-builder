@@ -203,6 +203,7 @@ def find_substrate_anchored_km(
     reactant_compound_ids: frozenset[str],
     target_organism_id: str | None = None,
     reference_context: CuratedExperimentalContext | None = None,
+    publication_years: dict[str, int] | None = None,
 ) -> AnchoredKmResolution | None:
     """The consolidated, prioritized ``Km`` concept anchored to exactly one of this
     reaction's own reactant compounds -- or ``None`` when no such measurement exists, the
@@ -221,9 +222,9 @@ def find_substrate_anchored_km(
     multi-substrate mechanism this function does not attempt to characterize, and is
     unrelated to (never resolved by) evidence consolidation.
 
-    ``target_organism_id``/``reference_context`` are optional (defaulted to ``None`` for
-    full backward compatibility) and passed straight through to consolidation's own
-    Priority 1/2 -- see ``consolidate_by_substrate``.
+    ``target_organism_id``/``reference_context``/``publication_years`` are optional
+    (defaulted to ``None`` for full backward compatibility) and passed straight through
+    to consolidation's own Priority 1/2/5 -- see ``consolidate_by_substrate``.
     """
     anchored = tuple(
         m
@@ -238,7 +239,10 @@ def find_substrate_anchored_km(
         return None
 
     (concept,) = consolidate_by_substrate(
-        anchored, target_organism_id=target_organism_id, reference_context=reference_context
+        anchored,
+        target_organism_id=target_organism_id,
+        reference_context=reference_context,
+        publication_years=publication_years,
     )
     if concept.classification not in _ELIGIBLE_ANCHORED_CLASSIFICATIONS:
         return None

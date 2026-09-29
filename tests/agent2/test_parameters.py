@@ -29,6 +29,7 @@ from app.agent2.types import (
     CuratedEnzymeState,
     CuratedEnzymeStateTransition,
     CuratedKineticMeasurement,
+    CuratedPublication,
     CuratedReaction,
     CuratedReactionEnzymeAssociation,
     CuratedReactionParticipant,
@@ -412,6 +413,36 @@ def test_disagreeing_values_consolidate_select_and_preserve_all_provenance():
     assert spec.value == Decimal("3")
     assert spec.provenance_refs == ("km1", "km2")
     assert "differing values" in spec.uncertainty_text.lower()
+
+
+def test_real_publication_years_select_the_newer_measurement_in_declared_parameter():
+    """Publication Date Handoff increment, full real wiring through parameter
+    declaration: with condition/completeness/identity otherwise tied, a handoff's own
+    real ``publications`` selects the newer measurement's value for the declared
+    parameter -- via ``declare_parameters`` -> ``initialize_with_fallback`` ->
+    ``publication_years_for_network``."""
+    handoff = dataclasses.replace(
+        _bare_state_transition_handoff(),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-old", parameter_type="K", value=Decimal("3"), unit="1/s",
+                publication_id="pub-old",
+            ),
+            _kinetic_measurement(
+                id="km-new", parameter_type="K", value=Decimal("7"), unit="1/s",
+                publication_id="pub-new",
+            ),
+        ),
+        publications=(
+            CuratedPublication(id="pub-old", year=2005),
+            CuratedPublication(id="pub-new", year=2023),
+        ),
+    )
+    declaration = _declare(handoff)
+    spec = _by_id(declaration, "k_r1")
+    assert spec.source is ParameterSource.LITERATURE_DERIVED
+    assert spec.value == Decimal("7")
+    assert spec.provenance_refs == ("km-new", "km-old")
 
 
 def test_disagreeing_units_also_consolidate_never_converted():

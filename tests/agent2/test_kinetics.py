@@ -30,6 +30,7 @@ from app.agent2.types import (
     CuratedEnzymeState,
     CuratedEnzymeStateTransition,
     CuratedKineticMeasurement,
+    CuratedPublication,
     CuratedReaction,
     CuratedReactionEnzymeAssociation,
     CuratedReactionParticipant,
@@ -1193,6 +1194,37 @@ def test_disagreeing_measurements_for_the_same_reactant_still_consolidate_and_se
     assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
     assert not assignment.is_tentative
     assert assignment.source_measurement_ids == ("km-a", "km-b")
+
+
+def test_real_publication_years_select_the_newer_measurement_end_to_end():
+    """Publication Date Handoff increment, full real wiring: a handoff carrying real
+    ``publications`` (not just a directly-supplied ``publication_years`` dict) changes
+    which of two otherwise-equivalent, disagreeing measurements
+    ``assign_kinetic_laws`` selects -- through ``assemble_full_network`` ->
+    ``publication_years_for_network`` -> ``consolidate_by_substrate``, with no
+    intermediate test-only shortcut."""
+    handoff = dataclasses.replace(
+        _malonyl_coa_like_handoff(
+            anchored_measurements=(
+                _anchored_km(
+                    id="km-old", compound_id="malonyl-coa", value=Decimal("18.0"),
+                    publication_id="pub-old",
+                ),
+                _anchored_km(
+                    id="km-new", compound_id="malonyl-coa", value=Decimal("500.0"),
+                    publication_id="pub-new",
+                ),
+            )
+        ),
+        publications=(
+            CuratedPublication(id="pub-old", year=2005),
+            CuratedPublication(id="pub-new", year=2023),
+        ),
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert assignment.explanation.count("km-new") >= 1
+    assert "km-new was selected" in assignment.explanation
 
 
 def test_two_identical_measurements_for_the_same_reactant_are_eligible():

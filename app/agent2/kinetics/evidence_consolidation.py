@@ -29,19 +29,21 @@ reuses unchanged for condition-matching rather than reimplementing a second, div
 copy (the isozyme-context-resolution increment's own real lesson: two independent
 reimplementations of the same comparison silently drift out of sync).
 
-**Publication recency -- a disclosed, real data-availability gap.** The task asks this
-priority to use the primary publication's own date/year, never a database-update or
-connector-ingestion timestamp. Agent 1's real database has exactly that
-(``Publication.year``), but Agent 1's own curated knowledge view handed to Agent 2 --
-and therefore ``CuratedKineticMeasurement`` on this side of the handoff -- exposes only
-an opaque ``publication_id`` string, never a year. This module never fabricates one.
-``publication_years`` is accordingly an explicit, optional, caller-supplied
-``{publication_id: year}`` mapping (default ``{}``, meaning "no information") -- every
-real call site in this repository passes nothing today, so this tier always ties and
-every real selection falls through to the final deterministic tie-break; the parameter
-exists so the ranking is already correct and ready the day a future Agent 1 handoff
-increment mirrors ``Publication.year`` across the boundary, without this module's own
-logic needing to change at all.
+**Publication recency.** The task asks this priority to use the primary publication's
+own date/year, never a database-update or connector-ingestion timestamp. Agent 1's real
+database has exactly that (``Publication.year``); as of the Publication Date Handoff
+increment, Agent 1's own curated knowledge view -- and therefore
+``FullNetwork.publications`` (``CuratedPublication.year``) on this side of the handoff
+-- carries it verbatim (``None`` whenever Agent 1 itself never resolved one; never
+inferred from a PMID/DOI/timestamp by either side). ``publication_years`` remains an
+explicit, optional, caller-supplied ``{publication_id: year}`` mapping (default ``{}``)
+-- ``publication_years_for_network`` builds the real one from a ``FullNetwork``'s own
+``publications``, exactly mirroring ``reference_experimental_context_for_network``'s
+own "compute once from the network" pattern; every real call site now passes it. A
+publication this mapping has no entry for (never resolved a year, or simply absent from
+this handoff) still degrades gracefully to "no information," so this tier still ties
+and falls through to the deterministic tie-break for exactly those measurements --
+never fabricated, never guessed.
 """
 
 from __future__ import annotations
@@ -169,6 +171,17 @@ def reference_experimental_context_for_network(
     if len(candidates) != 1:
         return None
     return candidates[0]
+
+
+def publication_years_for_network(network: FullNetwork) -> dict[str, int]:
+    """The real ``{publication_id: year}`` mapping Priority 5 (recency) uses, built from
+    ``network.publications`` (Publication Date Handoff increment). Only publications
+    with a resolved year contribute an entry -- a publication present in the handoff but
+    with ``year=None`` is simply absent from the mapping, which is exactly equivalent to
+    "no information" for ``_publication_year``'s own lookup (never a fabricated ``0`` or
+    other placeholder year).
+    """
+    return {pub.id: pub.year for pub in network.publications if pub.year is not None}
 
 
 def condition_match_for_measurement(
@@ -424,5 +437,6 @@ __all__ = [
     "condition_match_for_measurement",
     "consolidate_by_substrate",
     "consolidate_concept",
+    "publication_years_for_network",
     "reference_experimental_context_for_network",
 ]

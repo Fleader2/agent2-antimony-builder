@@ -607,6 +607,29 @@ class CuratedEnzymeStateTransition:
 
 
 @dataclass(frozen=True, slots=True)
+class CuratedPublication:
+    """One publication's own primary date, for kinetic-evidence recency prioritization
+    only (Publication Date Handoff increment).
+
+    Mirrors ``app.agent1.types.CuratedPublication`` field-for-field -- deliberately the
+    smallest useful subset of Agent 1's own ``Publication`` row: ``id`` (matching
+    ``CuratedKineticMeasurement.publication_id`` exactly, so a caller can key a
+    ``publication_id -> year`` mapping directly) and ``year`` alone, never title/journal/
+    authors/PMID/DOI/abstract or any other bibliographic metadata this repository has no
+    use for. ``year`` is the primary publication's own year, verbatim -- never a database
+    update/connector-ingestion timestamp, and never inferred from a PMID/DOI by this
+    repository -- ``None`` whenever Agent 1 itself never resolved one (never fabricated
+    here either).
+    """
+
+    id: str
+    year: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+
+
+@dataclass(frozen=True, slots=True)
 class CuratedExperimentalContext:
     """One curated experimental/reference context, exactly as curated by Agent 1
     (Agent 1.x "Experimental Context and Quantitative Observation Framework",
@@ -914,6 +937,12 @@ class Agent1CuratedKnowledgeViewContract:
     ``perturbations``/``Perturbation`` field is deliberately **not** mirrored here
     yet (see ``CuratedQuantitativeObservation``'s own docstring) -- a disclosed,
     narrower reading of this bump, not an oversight.
+
+    **Publication dates** (Publication Date Handoff increment, ``AGENT1_HANDOFF_VERSION``
+    "1.4" -> "1.5"): ``publications`` is now available as curated input -- see
+    ``CuratedPublication``. Consumed by ``app.agent2.kinetics.evidence_consolidation``'s
+    own publication-recency ranking tier (previously always inert on real data for lack
+    of any such field on this side of the handoff).
     """
 
     contract_version: str
@@ -931,6 +960,11 @@ class Agent1CuratedKnowledgeViewContract:
     enzyme_state_transitions: tuple[CuratedEnzymeStateTransition, ...] = ()
     experimental_contexts: tuple[CuratedExperimentalContext, ...] = ()
     quantitative_observations: tuple[CuratedQuantitativeObservation, ...] = ()
+    #: Publication Date Handoff increment, ``AGENT1_HANDOFF_VERSION`` "1.4" -> "1.5".
+    #: Every publication Agent 1 itself already scoped to this run's own referenced
+    #: records, reshaped to the minimal ``id``/``year`` subset -- see
+    #: ``CuratedPublication``'s own docstring.
+    publications: tuple[CuratedPublication, ...] = ()
     claims: tuple[CuratedClaim, ...] = ()
     evidence: tuple[CuratedEvidence, ...] = ()
     confidence_summaries: tuple[CuratedConfidenceSummary, ...] = ()
@@ -1537,6 +1571,13 @@ class FullNetwork:
     ``app.agent2.network``; deriving an ``EnzymeConcentration`` from them is
     ``app.agent2.quantitative_context``'s job (see
     ``docs/16_quantitative_context_resolution.md``).
+
+    **Publication Date Handoff increment** added ``publications`` -- every curated
+    publication in the source handoff, attached here as supporting data only, exactly
+    like ``kinetic_measurements``/``experimental_contexts`` before it. Never turned into
+    a structural graph element; consumed only by
+    ``app.agent2.kinetics.evidence_consolidation.publication_years_for_network`` to
+    build the ``publication_id -> year`` mapping its own recency-ranking tier uses.
     """
 
     network_id: str
@@ -1560,6 +1601,7 @@ class FullNetwork:
     #: ``app.agent2.quantitative_context``'s job).
     experimental_contexts: tuple[CuratedExperimentalContext, ...] = ()
     quantitative_observations: tuple[CuratedQuantitativeObservation, ...] = ()
+    publications: tuple[CuratedPublication, ...] = ()
     organism_id: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()

@@ -12,9 +12,15 @@ from app.agent2.kinetics.evidence_consolidation import (
     condition_match_for_measurement,
     consolidate_by_substrate,
     consolidate_concept,
+    publication_years_for_network,
     reference_experimental_context_for_network,
 )
-from app.agent2.types import CuratedExperimentalContext, CuratedKineticMeasurement, FullNetwork
+from app.agent2.types import (
+    CuratedExperimentalContext,
+    CuratedKineticMeasurement,
+    CuratedPublication,
+    FullNetwork,
+)
 
 # --- Fixtures --------------------------------------------------------------------------------
 
@@ -335,3 +341,47 @@ def test_reference_experimental_context_for_network_ignores_other_organisms():
     ctx = _ctx(id="ctx1", organism_id="org2", classification="REFERENCE")
     network = _network(organism_id="org1", experimental_contexts=(ctx,))
     assert reference_experimental_context_for_network(network) is None
+
+
+# --- Publication-years wiring (Publication Date Handoff increment) -----------------------------
+
+
+def test_publication_years_for_network_builds_real_mapping():
+    network = _network(
+        publications=(
+            CuratedPublication(id="pub-1", year=2005),
+            CuratedPublication(id="pub-2", year=2020),
+        )
+    )
+    assert publication_years_for_network(network) == {"pub-1": 2005, "pub-2": 2020}
+
+
+def test_publication_years_for_network_omits_missing_years():
+    network = _network(
+        publications=(
+            CuratedPublication(id="pub-1", year=2005),
+            CuratedPublication(id="pub-2", year=None),
+        )
+    )
+    assert publication_years_for_network(network) == {"pub-1": 2005}
+
+
+def test_publication_years_for_network_empty_when_no_publications():
+    assert publication_years_for_network(_network()) == {}
+
+
+def test_real_publication_years_change_selection_end_to_end():
+    """The real wiring, not just consolidate_concept's own direct publication_years
+    parameter: a network with real CuratedPublication records changes which measurement
+    consolidate_by_substrate selects, via publication_years_for_network."""
+    older = _m(id="km-old", value=Decimal("100"), publication_id="pub-old")
+    newer = _m(id="km-new", value=Decimal("500"), publication_id="pub-new")
+    network = _network(
+        publications=(
+            CuratedPublication(id="pub-old", year=2005),
+            CuratedPublication(id="pub-new", year=2023),
+        )
+    )
+    years = publication_years_for_network(network)
+    concept = consolidate_concept((older, newer), publication_years=years)
+    assert concept.selected_measurement_id == "km-new"

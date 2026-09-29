@@ -426,6 +426,65 @@ def test_experimental_context_and_quantitative_observation_translated():
     assert observation.source == "SGD"
 
 
+# --- Publications (Publication Date Handoff increment) --------------------------------------
+
+
+def test_publications_default_empty_when_absent():
+    """Older saved handoff payloads (captured before this increment) have no
+    ``publications`` key at all -- must degrade gracefully to empty, exactly like
+    experimental_contexts/quantitative_observations already do."""
+    handoff = translate_agent1_view_to_agent2(_view())
+    assert handoff.publications == ()
+
+
+def test_publication_year_translated():
+    view = _view(publications=[{"id": "pub-1", "year": 1995}])
+    handoff = translate_agent1_view_to_agent2(view)
+    (pub,) = handoff.publications
+    assert pub.id == "pub-1"
+    assert pub.year == 1995
+
+
+def test_publication_missing_year_stays_none():
+    view = _view(publications=[{"id": "pub-1", "year": None}])
+    handoff = translate_agent1_view_to_agent2(view)
+    (pub,) = handoff.publications
+    assert pub.year is None
+
+
+def test_publications_assemble_into_a_full_network():
+    view = _view(publications=[{"id": "pub-1", "year": 1995}, {"id": "pub-2", "year": None}])
+    handoff = translate_agent1_view_to_agent2(view)
+    network = assemble_full_network(handoff)
+    assert {p.id: p.year for p in network.publications} == {"pub-1": 1995, "pub-2": None}
+
+
+def test_kinetic_measurement_publication_id_still_resolves_a_real_publication():
+    """The kinetic-measurement <-> publication linkage (``publication_id``) is unchanged
+    by this increment -- confirms a real measurement's own ``publication_id`` names a
+    publication that is *also* present, with its year, in the same handoff's own
+    ``publications``."""
+    view = _view(
+        kinetic_measurements=[
+            {
+                "kinetic_measurement_id": "km1",
+                "parameter_type": "KM",
+                "value": "0.5",
+                "unit": "mM",
+                "reaction_id": "r1",
+                "publication_id": "pub-1",
+            }
+        ],
+        publications=[{"id": "pub-1", "year": 2003}],
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+    (measurement,) = handoff.kinetic_measurements
+    assert measurement.publication_id == "pub-1"
+    (pub,) = handoff.publications
+    assert pub.id == measurement.publication_id
+    assert pub.year == 2003
+
+
 def test_quantitative_observation_dependencies_translated():
     """Agent 1's own ``CuratedQuantitativeObservationDependency`` always names a real input
     observation id (never a pure, observation-less assumption -- that is exclusively an

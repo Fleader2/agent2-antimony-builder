@@ -30,7 +30,10 @@ from app.agent2.characterization.types import (
 )
 from app.agent2.kinetics import policy
 from app.agent2.kinetics.errors import KineticLawReferenceError
-from app.agent2.kinetics.evidence_consolidation import reference_experimental_context_for_network
+from app.agent2.kinetics.evidence_consolidation import (
+    publication_years_for_network,
+    reference_experimental_context_for_network,
+)
 from app.agent2.kinetics.types import (
     KineticLawAssignment,
     KineticLawAssignmentSet,
@@ -320,6 +323,7 @@ def _decide_heuristic(
     reactant_compound_ids: frozenset[str],
     target_organism_id: str | None = None,
     reference_context: CuratedExperimentalContext | None = None,
+    publication_years: dict[str, int] | None = None,
 ) -> KineticLawAssignment | None:
     if policy.michaelis_menten_eligible(
         rc, catalyst_known=catalyst_known, allostery_present=allostery_present
@@ -345,6 +349,7 @@ def _decide_heuristic(
             reactant_compound_ids=reactant_compound_ids,
             target_organism_id=target_organism_id,
             reference_context=reference_context,
+            publication_years=publication_years,
         )
         if resolution is not None:
             return _decide_substrate_anchored_mm(
@@ -599,6 +604,7 @@ def select_reaction_assignments(
     reactant_compound_ids: frozenset[str] = frozenset(),
     target_organism_id: str | None = None,
     reference_context: CuratedExperimentalContext | None = None,
+    publication_years: dict[str, int] | None = None,
 ) -> tuple[KineticLawAssignment, ...]:
     """Decide every catalytic context's kinetic-law assignment for one reaction.
 
@@ -639,6 +645,7 @@ def select_reaction_assignments(
             reactant_compound_ids=reactant_compound_ids,
             target_organism_id=target_organism_id,
             reference_context=reference_context,
+            publication_years=publication_years,
         )
         if heuristic is not None:
             assignments.append(heuristic)
@@ -700,6 +707,10 @@ def assign_kinetic_laws(
     # deliberately, ambiguity-conservative (``None`` whenever no single answer exists;
     # see ``reference_experimental_context_for_network``'s own docstring).
     reference_context = reference_experimental_context_for_network(network)
+    # Publication Date Handoff increment: the real publication_id -> year mapping,
+    # computed once per network from ``network.publications`` -- see
+    # ``publication_years_for_network``'s own docstring.
+    publication_years = publication_years_for_network(network)
 
     assignments: list[KineticLawAssignment] = []
     for rc in characterization.reaction_characterizations:
@@ -712,6 +723,7 @@ def assign_kinetic_laws(
                 reactant_compound_ids=reactant_compound_ids_by_reaction[rc.reaction_id],
                 target_organism_id=network.organism_id,
                 reference_context=reference_context,
+                publication_years=publication_years,
             )
         )
 
