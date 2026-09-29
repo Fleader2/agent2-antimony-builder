@@ -56,14 +56,16 @@ def test_boundary_likelihood_has_exactly_five_values():
     }
 
 
-def test_parameter_source_has_exactly_seven_values():
+def test_parameter_source_has_exactly_eight_values():
     """AI_PREDICTED/HEURISTIC_INITIALIZATION added by the Heuristic Simulation Parameter
-    Initialization increment -- two new, distinct rungs, never confused with the five
-    original values."""
+    Initialization increment; DERIVED_FROM_MACRO_KINETICS added by the Identifiability-Aware
+    Macroscopic-to-Microscopic Kinetic Reconstruction increment -- three new, distinct
+    rungs, never confused with the five original values."""
     assert {member.value for member in ParameterSource} == {
         "CURATED",
         "LITERATURE_DERIVED",
         "AI_PREDICTED",
+        "DERIVED_FROM_MACRO_KINETICS",
         "HEURISTIC_INITIALIZATION",
         "DEFAULT",
         "PLACEHOLDER",

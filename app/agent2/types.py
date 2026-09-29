@@ -988,11 +988,41 @@ class ParameterSource(StrEnum):
     no experimental or AI-predicted evidence exists at all -- never a
     biochemical claim of any kind, purely a numerically well-behaved
     starting point for later Agent 4 calibration.
+
+    **`DERIVED_FROM_MACRO_KINETICS`** (Identifiability-Aware Macroscopic-
+    to-Microscopic Kinetic Reconstruction increment): one more rung,
+    inserted between `AI_PREDICTED` and `HEURISTIC_INITIALIZATION` --
+    ``LITERATURE_DERIVED``/``CURATED`` > ``AI_PREDICTED`` >
+    ``DERIVED_FROM_MACRO_KINETICS`` > ``HEURISTIC_INITIALIZATION`` >
+    ``PLACEHOLDER`` (the task's own explicit ordering). A value this
+    codebase itself *computed* (never merely copied) from other, already-
+    resolved macroscopic evidence -- e.g. `kcat = Vmax / [E]_total`, or an
+    effective second-order rate `kcat/Km` -- only when the combination is
+    actually identifiable (`app.agent2.parameters.reconstruction
+    .IdentifiabilityStatus.IDENTIFIABLE`), never a fabricated point value
+    for a genuinely underdetermined slot (that case is preserved instead
+    as a disclosed `MicroscopicConstraint`, never assigned this or any
+    other numeric `ParameterSource`). Ranked below `AI_PREDICTED`
+    deliberately: even when the inputs it derives from are themselves
+    real (curated or AI-predicted) evidence, the derivation itself is one
+    further inferential step removed from a direct measurement or
+    prediction, exactly mirroring `FLUX_ABUNDANCE_CONSTRAINED_
+    RECONSTRUCTION`'s identical placement in
+    ``docs/15_macroscopic_to_microscopic_kinetic_reconstruction_design.md``
+    §7 (this codebase's own simpler, single-tier implementation of that
+    design's two-way experimental/AI-predicted split -- see
+    ``docs/17_macroscopic_to_microscopic_kinetic_reconstruction.md`` §1
+    for why one tier, not two, was implemented). When the derivation's own
+    inputs include an AI-predicted macro-kinetic value, that dependency is
+    preserved explicitly in `source_reference`/`uncertainty_text`/
+    `provenance_refs` -- never silently laundered into an
+    indistinguishable derived value.
     """
 
     CURATED = "CURATED"
     LITERATURE_DERIVED = "LITERATURE_DERIVED"
     AI_PREDICTED = "AI_PREDICTED"
+    DERIVED_FROM_MACRO_KINETICS = "DERIVED_FROM_MACRO_KINETICS"
     HEURISTIC_INITIALIZATION = "HEURISTIC_INITIALIZATION"
     DEFAULT = "DEFAULT"
     PLACEHOLDER = "PLACEHOLDER"

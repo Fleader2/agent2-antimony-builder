@@ -201,10 +201,14 @@ def initialize_with_fallback(
     *,
     kind: ParameterKind,
     molecularity: int | None = None,
+    macro_reconstruction: Initialization | None = None,
 ) -> Initialization:
-    """The full precedence a parameter slot resolves through (Heuristic Simulation
-    Parameter Initialization increment): ``LITERATURE_DERIVED``/``CURATED`` >
-    ``AI_PREDICTED`` > ``HEURISTIC_INITIALIZATION`` > ``PLACEHOLDER``.
+    """The full precedence a parameter slot resolves through: ``LITERATURE_DERIVED``/
+    ``CURATED`` > ``AI_PREDICTED`` > ``DERIVED_FROM_MACRO_KINETICS`` >
+    ``HEURISTIC_INITIALIZATION`` > ``PLACEHOLDER`` (Heuristic Simulation Parameter
+    Initialization increment for the first two rungs below the top; Identifiability-Aware
+    Macroscopic-to-Microscopic Kinetic Reconstruction increment for
+    ``DERIVED_FROM_MACRO_KINETICS``).
 
     **A tier is only ever consulted when the previous tier found a genuine, complete
     absence of matching evidence** -- never when real evidence exists but disagrees.
@@ -213,8 +217,19 @@ def initialize_with_fallback(
     guess: its own disclosed ``PLACEHOLDER`` (with every conflicting candidate's id in
     ``provenance_refs``) is the final word for that slot, exactly as
     ``initialize_from_evidence``'s own original Increment 5 policy already established for
-    experimental evidence -- this increment extends the identical principle to the
-    AI-predicted tier.
+    experimental evidence -- every lower tier extends the identical principle.
+
+    ``macro_reconstruction`` is an already-computed ``Initialization`` (typically from
+    ``app.agent2.parameters.reconstruction``, e.g.
+    ``reconstruct_kcat_from_vmax_and_concentration``) the *caller* is responsible for
+    building -- this function never computes a reconstruction itself, mirroring how it
+    never computes a heuristic default itself beyond calling
+    ``heuristic_default_for_kind``. Consulted only when both evidence tiers above it found
+    a genuine, complete absence of matching evidence (identical "genuine absence only"
+    rule) -- never when real curated/AI-predicted evidence exists but disagrees.
+    Defaulted to ``None`` for full backward compatibility: every existing call site that
+    does not pass it continues to resolve through exactly the same three tiers as before
+    this increment.
 
     ``kind``/``molecularity`` select the centralized heuristic default
     (``app.agent2.parameters.heuristic_defaults.heuristic_default_for_kind``) -- when that
@@ -230,6 +245,9 @@ def initialize_with_fallback(
     ai_predicted = initialize_from_ai_predicted_evidence(evidence_of_kind)
     if ai_predicted.source is not ParameterSource.PLACEHOLDER or ai_predicted.provenance_refs:
         return ai_predicted
+
+    if macro_reconstruction is not None:
+        return macro_reconstruction
 
     default = heuristic_default_for_kind(kind, molecularity=molecularity)
     if default is None:

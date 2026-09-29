@@ -961,6 +961,55 @@ abundance observations each produce one such assumption) -- omitted entirely
 (``()``, no behavior change at all) for any caller that does not pass this new
 parameter, exactly as every other optional-parameter addition in this file's own
 history has been.
+
+``PARAMETER_DECLARATION_POLICY_VERSION`` was bumped from ``"parameter-declaration-v3"``
+to ``"parameter-declaration-v4"`` for the "Identifiability-Aware Macroscopic-to-
+Microscopic Kinetic Reconstruction" increment: `app.agent2.parameters.builder` now
+attempts three new, identifiability-gated derivations before falling through to
+`HEURISTIC_INITIALIZATION` exactly as before -- Derivation B
+(`kcat = Vmax / [E]_total`, `app.agent2.parameters.reconstruction
+.reconstruct_kcat_from_vmax_and_concentration`), Derivation C (an effective second-order
+rate `k_eff = kcat/Km`, dimensionally valid only for a genuine two-reactant elementary
+encounter -- `reconstruct_k_eff_from_kcat_and_km`), and Derivation D (a disclosed,
+never-a-point-value `kf*Km=kr+kcat` constraint for the single-substrate mechanism --
+`classify_km_kcat_constraint`). A materially different, observable result for the same
+real input whenever a `MICHAELIS_MENTEN`/`MASS_ACTION`/`REVERSIBLE_MASS_ACTION`
+assignment's own catalytic context has real, condition-matched `Vmax`+enzyme-
+concentration or `Km`+`kcat` evidence that previously reached only
+`HEURISTIC_INITIALIZATION` (or, for Derivation D, no disclosure at all).
+``ParameterDeclarationSet`` gained one new field, `microscopic_constraints: tuple[
+MicroscopicConstraint, ...] = ()` (defaulted, so every existing keyword-based
+construction continues to construct unchanged) -- this lives in `app.agent2.parameters
+.types`, outside `app.agent2.types`, consistent with this file's own established
+narrower reading (mirrors `KineticLawAssignmentSet`/`BoundaryAssessmentSet` never
+bumping `AGENT2_CONTRACT_VERSION` either). `AGENT2_CONTRACT_VERSION` is unchanged for the
+same reason, plus one new `ParameterSource` enum *value*
+(`DERIVED_FROM_MACRO_KINETICS`) -- an enum-value addition is not a data-shape change,
+consistent with `AI_PREDICTED`/`HEURISTIC_INITIALIZATION`'s own identical precedent.
+`AGENT1_HANDOFF_VERSION` is unchanged -- Agent 1 was not modified.
+
+``MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION`` is introduced at ``"macro-to-micro-v1"``
+for the first real reconstruction rule set (`app.agent2.parameters.reconstruction`) --
+kept as its own, separately-versioned constant rather than folded into
+``PARAMETER_DECLARATION_POLICY_VERSION`` alone, mirroring
+``HEURISTIC_INITIALIZATION_POLICY_VERSION``'s own identical precedent: this rule set can,
+in principle, evolve independently of the broader parameter-declaration policy (e.g. a
+future increment adding the transient-trajectory-based `kf` reconstruction named in
+``docs/15_macroscopic_to_microscopic_kinetic_reconstruction_design.md`` §10 would bump
+this constant without necessarily changing anything else `declare_parameters` does).
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v7"`` to ``"model-specification-v8"`` for the same increment:
+``build_model_assumptions`` gained a tenth disclosure category, one ``ModelAssumption``
+(category ``"reconstruction"``, reason code the constraint's own
+``IdentifiabilityStatus`` value) per ``MicroscopicConstraint`` a supplied
+``ParameterDeclarationSet`` carries. A materially different, observable result for the
+same real input whenever a single-substrate `MICHAELIS_MENTEN` assignment has both `Km`
+and `kcat` resolved to real values (real sce00061 evaluation: every such context now
+carries one additional disclosure it previously did not). Omitted entirely (`()`, no
+behavior change) for any caller that does not pass the new
+``microscopic_constraints`` parameter, exactly as every other optional-parameter
+addition in this file's own history has been.
 """
 
 from __future__ import annotations
@@ -970,14 +1019,15 @@ AGENT1_HANDOFF_VERSION = "1.4"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v3"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v4"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v7"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v8"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
+MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -987,6 +1037,7 @@ __all__ = [
     "BOUNDARY_POLICY_VERSION",
     "HEURISTIC_INITIALIZATION_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
+    "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",

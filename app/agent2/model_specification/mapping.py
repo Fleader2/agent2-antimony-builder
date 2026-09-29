@@ -84,6 +84,7 @@ from __future__ import annotations
 
 from app.agent2.kinetics.types import KineticLawAssignment, KineticLawReasonCode
 from app.agent2.model_specification.errors import ModelSpecificationReferenceError
+from app.agent2.parameters.types import MicroscopicConstraint
 from app.agent2.quantitative_context.types import QuantitativeContextReasonCode
 from app.agent2.reversibility import (
     REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
@@ -411,6 +412,7 @@ def build_model_assumptions(
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = (),
     reactions: tuple[ReactionSpecification, ...] = (),
     enzyme_concentrations: tuple[EnzymeConcentration, ...] = (),
+    microscopic_constraints: tuple[MicroscopicConstraint, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
     """Deterministic `ModelAssumption` records for eight disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
@@ -432,17 +434,24 @@ def build_model_assumptions(
     this increment has no clean, already-computed signal for (see docs/11 §16 for what was
     deliberately not attempted, e.g. "known incompleteness of regulation context").
 
-    ``kinetic_measurements``/``reactions``/``enzyme_concentrations`` all default to ``()`` for
-    backward compatibility with any existing caller that does not (yet) pass them -- an empty
-    tuple simply produces no assumptions of the corresponding new category, exactly as if that
-    parameter did not exist. ``enzyme_concentrations`` (Quantitative Context Resolution and
-    Derived Enzyme Concentration increment) contributes a ninth category: one ``ModelAssumption``
-    (category ``"quantitative_context"``, reason code ``REFERENCE_CELL_VOLUME_ASSUMED``) per
-    ``EnzymeConcentration`` whose own ``basis`` is
+    ``kinetic_measurements``/``reactions``/``enzyme_concentrations``/``microscopic_constraints``
+    all default to ``()`` for backward compatibility with any existing caller that does not
+    (yet) pass them -- an empty tuple simply produces no assumptions of the corresponding new
+    category, exactly as if that parameter did not exist. ``enzyme_concentrations``
+    (Quantitative Context Resolution and Derived Enzyme Concentration increment) contributes a
+    ninth category: one ``ModelAssumption`` (category ``"quantitative_context"``, reason code
+    ``REFERENCE_CELL_VOLUME_ASSUMED``) per ``EnzymeConcentration`` whose own ``basis`` is
     ``EnzymeConcentrationBasis.REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME`` -- task's own explicit
     "add a machine-readable assumption... when 0.1 pL is used" requirement. Every other basis
     (a real concentration or a real compatible cell-volume observation) produces no assumption
-    of this kind, since no cell-volume figure was invented for it."""
+    of this kind, since no cell-volume figure was invented for it.
+
+    ``microscopic_constraints`` (Identifiability-Aware Macroscopic-to-Microscopic Kinetic
+    Reconstruction increment) contributes a tenth category: one ``ModelAssumption`` (category
+    ``"reconstruction"``, reason code the constraint's own ``status.value``, i.e.
+    ``PARTIALLY_CONSTRAINED``/``UNDERDETERMINED``) per `MicroscopicConstraint` -- Derivation
+    D's own disclosure that `kf`/`kr` remain on an unresolved curve (`kf * Km = kr + kcat`)
+    even though `Km`/`kcat` are both resolved, never a fabricated point value for either."""
     assumptions: list[ModelAssumption] = []
     measurements_by_id = {m.id: m for m in kinetic_measurements}
     reactions_by_id = {r.reaction_id: r for r in reactions}
@@ -690,6 +699,32 @@ def build_model_assumptions(
                 related_entity_ids=(concentration.protein_id, *dependency_ids),
                 source="app.agent2.quantitative_context",
                 reason_code=QuantitativeContextReasonCode.REFERENCE_CELL_VOLUME_ASSUMED.value,
+            )
+        )
+
+    for constraint in sorted(
+        microscopic_constraints, key=lambda c: c.kinetic_law_assignment_id
+    ):
+        # Identifiability-Aware Macroscopic-to-Microscopic Kinetic Reconstruction increment,
+        # Derivation D (task's own explicit requirement): kf/kr remain on an unresolved
+        # curve even though Km/kcat are both resolved -- disclosed here, machine-readably,
+        # never silently dropped and never resolved to a fabricated point value.
+        assumptions.append(
+            ModelAssumption(
+                assumption_id=(
+                    f"assumption::microscopic-constraint::{constraint.kinetic_law_assignment_id}"
+                ),
+                category="reconstruction",
+                statement=(
+                    f"Reaction {constraint.reaction_id}: {constraint.explanation}"
+                ),
+                related_entity_ids=(
+                    constraint.reaction_id,
+                    constraint.kinetic_law_assignment_id,
+                    *constraint.known_parameter_ids,
+                ),
+                source="app.agent2.parameters.reconstruction",
+                reason_code=constraint.status.value,
             )
         )
 

@@ -124,6 +124,7 @@ def assemble_model_specification(
         kinetic_measurements=network.kinetic_measurements,
         reactions=network.reactions,
         enzyme_concentrations=resolved_enzyme_concentrations,
+        microscopic_constraints=parameters.microscopic_constraints,
     )
 
     model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"
