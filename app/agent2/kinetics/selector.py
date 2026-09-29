@@ -121,11 +121,23 @@ def _build_contexts_with_evidence(
 
     Never collapses distinct ``catalytic_enzyme_state_ids`` (Increment 4
     instructions, Step 12's closing line) -- one context per state,
-    always. Multiple protein/complex-general catalysts (isozymes,
-    Step 26) collapse into one shared context only when their own
-    evidence is identical after trivial normalization; otherwise each
-    keeps its own context, and a global assignment is never forced over
-    genuinely differing evidence.
+    always. Multiple protein/complex-general catalysts (isozymes) are
+    likewise **never** collapsed into one shared context -- not even when
+    every catalyst's own evidence is identical (including the common case
+    of every catalyst having no evidence at all) ("Isozyme-Aware Catalytic
+    Context Resolution" increment; real Pilot 2 regression: 33/33
+    multi-catalyst reactions in a fresh real run collapsed into one
+    shared, ``protein_id=None`` context this way, silently discarding
+    per-isozyme Km/kcat disagreement on 3 of them). Distinct catalyst
+    identity is a biological fact independent of what evidence happens to
+    be curated for it; matching (or absent) ``reported_rate_law`` text is
+    never treated as evidence that two catalysts are interchangeable. A
+    measurement legitimately shared across catalysts (plural
+    ``protein_ids`` naming more than one of this reaction's own catalysts)
+    is still copied into each matching context's own evidence via
+    ``_matches_context``'s membership test below -- that is the *only*
+    form of cross-context sharing this function performs, and it never
+    merges the contexts themselves.
 
     An untagged measurement (``reaction_id`` only, no catalyst identity)
     is folded into the reaction's **sole** catalytic context as fallback
@@ -154,37 +166,20 @@ def _build_contexts_with_evidence(
     ] + [("complex_id", complex_id) for complex_id in rc.catalytic_complex_ids]
 
     if len(general_catalysts) >= 2:
-        per_catalyst: dict[tuple[str, str], tuple[CuratedKineticMeasurement, ...]] = {}
+        # Always one context per distinct catalyst -- never merged, regardless of whether
+        # their evidence (or absence of it) happens to match after normalization ("Isozyme-
+        # Aware Catalytic Context Resolution" increment). A measurement naming more than one
+        # of these catalysts via its own plural ``protein_ids`` still matches -- and is
+        # copied into -- each of those catalysts' own contexts through ``_matches_context``;
+        # that is real, explicit shared applicability, not a merge of the contexts. Untagged,
+        # reaction-only evidence is deliberately not folded into any one of these several
+        # distinct contexts (see this function's own docstring above).
+        contexts: list[tuple[_CatalyticContext, tuple[CuratedKineticMeasurement, ...]]] = []
         for field_name, catalyst_id in general_catalysts:
             context = _CatalyticContext(**{field_name: catalyst_id})
-            per_catalyst[(field_name, catalyst_id)] = tuple(
-                m for m in reaction_measurements if _matches_context(m, context)
-            )
-        text_sets = [
-            frozenset(
-                policy.normalize_rate_law_text(m.reported_rate_law)
-                for m in evidence
-                if m.reported_rate_law is not None
-            )
-            for evidence in per_catalyst.values()
-        ]
-        if all(text_set == text_sets[0] for text_set in text_sets):
-            # Deduplicate by measurement id, first-occurrence order: with plural protein_ids
-            # membership matching (see _matches_context's own docstring), a single measurement
-            # naming two or more of this reaction's own catalysts now legitimately matches more
-            # than one per_catalyst bucket -- collapsing those buckets together must still
-            # produce exactly one evidence record per measurement, never a duplicate.
-            combined_by_id: dict[str, CuratedKineticMeasurement] = {}
-            for evidence in per_catalyst.values():
-                for m in evidence:
-                    combined_by_id[m.id] = m
-            combined = tuple(combined_by_id.values())
-            untagged = tuple(m for m in reaction_measurements if _is_untagged(m))
-            return [(_CatalyticContext(), combined + untagged)]
-        return [
-            (_CatalyticContext(**{field_name: catalyst_id}), evidence)
-            for (field_name, catalyst_id), evidence in per_catalyst.items()
-        ]
+            evidence = tuple(m for m in reaction_measurements if _matches_context(m, context))
+            contexts.append((context, evidence))
+        return contexts
 
     if len(general_catalysts) == 1:
         field_name, catalyst_id = general_catalysts[0]

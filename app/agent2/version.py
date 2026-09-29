@@ -1010,6 +1010,31 @@ carries one additional disclosure it previously did not). Omitted entirely (`()`
 behavior change) for any caller that does not pass the new
 ``microscopic_constraints`` parameter, exactly as every other optional-parameter
 addition in this file's own history has been.
+
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` was bumped from ``"kinetic-law-v4"`` to
+``"kinetic-law-v5"`` for the "Isozyme-Aware Catalytic Context Resolution" increment:
+``_build_contexts_with_evidence`` (`app.agent2.kinetics.selector`) no longer collapses
+two or more distinct protein/complex-general catalysts into one shared,
+``protein_id=None`` context when their evidence (including the common case of no
+evidence at all) happens to match after normalization. Every distinct catalyst now
+always keeps its own catalytic context; a measurement is only ever shared across
+contexts when its own authoritative plural ``protein_ids`` explicitly names more than
+one of the reaction's catalysts (unchanged, membership-based ``_matches_context``
+behavior). A materially different, observable result for the same real input whenever
+a reaction has two or more general catalysts (real fresh ``sce00061`` pilot: 33/33 such
+reactions previously collapsed into one shared context; the same run's own MCT1/FAS1
+malonyl-CoA:[acp] S-malonyltransferase reaction is the concrete real regression this
+increment fixes -- MCT1's own real, curated Km now reaches substrate-anchored
+Michaelis-Menten eligibility and downstream macro-to-micro reconstruction once FAS1 is
+no longer merged into the same context). No other kinetic-law selection rule changed:
+curated-reported/structural/Michaelis-Menten/tentative-default precedence,
+substrate-anchored MM eligibility (`policy.find_substrate_anchored_km`'s own
+unconditional single-measurement rule), macro-to-micro reconstruction, parameter
+precedence, and heuristic initialization are all unchanged and untouched by this
+increment. ``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` shape changed; `KineticLawAssignment`/`KineticLawAssignmentSet`
+themselves are unchanged in shape, only in which contexts get built for a given
+reaction.
 """
 
 from __future__ import annotations
@@ -1018,7 +1043,7 @@ AGENT2_CONTRACT_VERSION = "0.10"
 AGENT1_HANDOFF_VERSION = "1.4"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
-KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
+KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v5"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v4"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"

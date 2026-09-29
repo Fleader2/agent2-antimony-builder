@@ -223,9 +223,10 @@ def _enzyme_state_specific_handoff() -> Agent1CuratedKnowledgeViewContract:
     )
 
 
-def _collapsed_isozymes_handoff() -> Agent1CuratedKnowledgeViewContract:
-    """One reaction, two isozymes (p1/p2) with identical (empty) evidence -- confirmed
-    collapsed by Increment 4 into one shared, context-free assignment."""
+def _distinct_isozymes_handoff() -> Agent1CuratedKnowledgeViewContract:
+    """One reaction, two isozymes (p1/p2) with identical (empty) evidence -- Isozyme-Aware
+    Catalytic Context Resolution: never collapsed, each keeps its own independent context and
+    kinetic-law assignment even though neither has any evidence of its own."""
     return _handoff(
         compartments=(_compartment(),),
         compounds=(_compound(id="a"), _compound(id="b")),
@@ -556,12 +557,13 @@ def test_enzyme_states_have_separate_parameters_never_collapsed():
 # --- Multiple catalysts (Step 38) -----------------------------------------------------------
 
 
-def test_collapsed_isozymes_stay_collapsed_as_upstream_decided():
+def test_distinct_isozymes_stay_distinct_as_upstream_decided():
     network, assignments, parameters, boundaries, modules, model = _assemble_full(
-        _collapsed_isozymes_handoff()
+        _distinct_isozymes_handoff()
     )
-    assert len(assignments.assignments) == 1
-    assert len(model.kinetic_laws) == 1
+    assert len(assignments.assignments) == 2
+    assert len(model.kinetic_laws) == 2
+    assert {law.protein_id for law in model.kinetic_laws} == {"p1", "p2"}
 
 
 def test_divergent_catalytic_contexts_remain_separate():

@@ -71,11 +71,23 @@ def _is_tentative(assignment: KineticLawAssignment) -> bool:
 def _matches_context(
     measurement: CuratedKineticMeasurement, assignment: KineticLawAssignment
 ) -> bool:
+    """Mirrors ``app.agent2.kinetics.selector._matches_context`` exactly (a private
+    implementation detail of that module, not exported -- see ``_evidence_for``'s own
+    docstring), including its plural-``protein_ids``-membership matching for a
+    protein-general assignment ("Isozyme-Aware Catalytic Context Resolution" increment;
+    real regression: with isozyme contexts no longer collapsed into one, this function's
+    own now-frequently-exercised legacy singular-``protein_id``-equality check was
+    silently dropping real evidence -- e.g. a measurement whose legacy ``protein_id``
+    names a different protein than the one its own authoritative ``protein_ids`` also,
+    correctly, names as this reaction's actual catalyst -- from reaching parameter
+    declaration, even though the very same measurement had already, correctly, reached
+    that catalyst's own kinetic-law assignment).
+    """
     if assignment.enzyme_state_id is not None:
         return measurement.enzyme_state_id == assignment.enzyme_state_id
     if assignment.protein_id is not None:
         return (
-            measurement.protein_id == assignment.protein_id
+            assignment.protein_id in measurement.protein_ids
             and measurement.enzyme_state_id is None
         )
     if assignment.complex_id is not None:
@@ -85,7 +97,7 @@ def _matches_context(
         )
     return (
         measurement.enzyme_state_id is None
-        and measurement.protein_id is None
+        and not measurement.protein_ids
         and measurement.complex_id is None
     )
 
@@ -192,18 +204,18 @@ def _evidence_for(
 
     Deliberately in the same spirit as (though not a byte-for-byte
     reproduction of -- that logic is a private implementation detail of
-    ``app.agent2.kinetics.selector``, not exported) Increment 4's own
+    ``app.agent2.kinetics.selector``, not exported) that module's own
     evidence-gathering rule: when this assignment is the **sole**
     catalytic context for its reaction (``sibling_count == 1`` -- true
-    for a no-catalyst reaction, a single specific catalyst, or several
-    isozymes Increment 4 already collapsed into one shared assignment),
-    every measurement for the reaction is fair game, tagged or not --
-    there is no sibling context it could rightfully belong to instead.
-    When more than one distinct context exists for the reaction (multiple
-    catalytic enzyme states, or isozymes Increment 4 kept separate
-    because their evidence differed), each context only ever sees
-    measurements tagged with its own exact identity -- a measurement
-    tagged for one state/protein/complex is never visible to a sibling
+    for a no-catalyst reaction or a single specific catalyst), every
+    measurement for the reaction is fair game, tagged or not -- there is
+    no sibling context it could rightfully belong to instead. When more
+    than one distinct context exists for the reaction (multiple catalytic
+    enzyme states, or two or more isozymes -- always kept separate as of
+    the "Isozyme-Aware Catalytic Context Resolution" increment,
+    regardless of whether their evidence happens to agree), each context
+    only ever sees measurements tagged with its own exact identity -- a
+    measurement tagged for one state/protein/complex is never visible to a sibling
     context's parameter declaration, exactly as it was never visible to
     that sibling's kinetic-law decision. See
     ``docs/08_parameter_declaration_initialization.md`` §4.

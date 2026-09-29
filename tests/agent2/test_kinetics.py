@@ -638,11 +638,14 @@ def _two_isozyme_handoff(**overrides) -> Agent1CuratedKnowledgeViewContract:
     return _handoff(**merged)
 
 
-def test_two_isozymes_same_law_context_collapse_to_one_assignment():
+def test_two_isozymes_with_no_evidence_remain_distinct_not_collapsed():
+    """Isozyme-Aware Catalytic Context Resolution: p1 and p2 both have no evidence at all,
+    but that shared (empty) evidence is never grounds for collapsing them into one context --
+    each keeps its own independent assignment."""
     handoff = _two_isozyme_handoff()
     assignments = _assign(handoff)
-    assert len(assignments.assignments) == 1
-    assert assignments.assignments[0].protein_id is None
+    assert len(assignments.assignments) == 2
+    assert {a.protein_id for a in assignments.assignments} == {"p1", "p2"}
 
 
 def test_two_isozymes_different_reported_laws_stay_separate():
@@ -692,6 +695,141 @@ def test_no_forced_global_collapse_when_isozyme_evidence_differs():
     assert p2_assignment.assignment_source is not KineticLawAssignmentSource.CURATED_REPORTED
 
 
+def test_two_isozymes_with_identical_reported_law_text_still_remain_distinct():
+    """Matching -- not just absent -- reported_rate_law text is also never grounds for
+    collapsing two catalysts: identical text is not evidence that they are the same
+    catalytic entity."""
+    handoff = _two_isozyme_handoff(
+        kinetic_measurements=(
+            _kinetic_measurement(id="km1", protein_id="p1", reported_rate_law="k1 * glc"),
+            _kinetic_measurement(id="km2", protein_id="p2", reported_rate_law="k1 * glc"),
+        )
+    )
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+    p1_assignment = _by_context(assignments, protein_id="p1")
+    p2_assignment = _by_context(assignments, protein_id="p2")
+    assert p1_assignment.source_measurement_ids == ("km1",)
+    assert p2_assignment.source_measurement_ids == ("km2",)
+    assert p1_assignment.assignment_id != p2_assignment.assignment_id
+
+
+def test_isozyme_km_disagreement_each_km_stays_attached_to_its_own_protein():
+    """Real MCT1/FAS1-shaped regression (fresh sce00061 pilot): two isozymes with
+    numerically disagreeing Km evidence for the same substrate must never have that
+    evidence merged, averaged, or attributed to the wrong catalyst -- each context sees
+    only its own protein's own Km measurements."""
+    handoff = _two_isozyme_handoff(
+        compounds=(_compound(), _compound(id="acp")),
+        reaction_participants=(
+            _participant(role="REACTANT"),
+            _participant(role="REACTANT", compound_id="acp"),
+            _participant(role="PRODUCT"),
+        ),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-mct1", parameter_type="KM", value=Decimal("76300"), unit="nM",
+                compound_id="glc", protein_id="p1",
+            ),
+            _kinetic_measurement(
+                id="km-fas1-a", parameter_type="KM", value=Decimal("18000"), unit="nM",
+                compound_id="glc", protein_id="p2",
+            ),
+            _kinetic_measurement(
+                id="km-fas1-b", parameter_type="KM", value=Decimal("61300"), unit="nM",
+                compound_id="glc", protein_id="p2",
+            ),
+        ),
+    )
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+
+    p1_assignment = _by_context(assignments, protein_id="p1")
+    p2_assignment = _by_context(assignments, protein_id="p2")
+
+    # MCT1 (p1) has exactly one anchored Km -> reaches substrate-anchored MM eligibility.
+    assert p1_assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert p1_assignment.source_measurement_ids == ("km-mct1",)
+
+    # FAS1 (p2) has two disagreeing Km values for the same substrate -- the separately
+    # tracked, unfixed "multi-measurement collapse" limitation (substrate-anchored MM
+    # eligibility's own unconditional single-measurement rule) leaves it on the tentative
+    # default, but critically its own real evidence was never merged into p1's context,
+    # never averaged, and never silently discarded from view.
+    assert p2_assignment.kinetic_law_type is KineticLawType.MASS_ACTION
+    assert p2_assignment.is_tentative
+    assert p2_assignment.source_measurement_ids == ()
+
+
+def test_two_complexes_remain_distinct_not_collapsed():
+    handoff = dataclasses.replace(
+        _handoff(
+            compartments=(_compartment(),), compounds=(_compound(),), reactions=(_reaction(),)
+        ),
+        reaction_participants=(_participant(),),
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id=None, complex_id="c1"),
+            _enzyme_association(protein_id=None, complex_id="c2"),
+        ),
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km1", protein_id=None, complex_id="c1", reported_rate_law="k1 * glc"
+            ),
+        ),
+    )
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+    c1_assignment = _by_context(assignments, complex_id="c1")
+    c2_assignment = _by_context(assignments, complex_id="c2")
+    assert c1_assignment.source_measurement_ids == ("km1",)
+    assert c2_assignment.source_measurement_ids == ()
+
+
+def test_shared_plural_measurement_not_duplicated_within_either_context():
+    """No-duplication guarantee extended to the full ``select_reaction_assignments`` path:
+    a measurement legitimately shared across two isozymes via plural ``protein_ids``
+    appears exactly once in each context's own ``source_measurement_ids`` -- never twice
+    in one, never merged across the two."""
+    handoff = _two_isozyme_handoff(
+        kinetic_measurements=(
+            _kinetic_measurement(
+                id="km-shared", protein_id=None, protein_ids=("p1", "p2"),
+                reported_rate_law="k1 * glc",
+            ),
+        )
+    )
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+    for assignment in assignments.assignments:
+        assert assignment.source_measurement_ids == ("km-shared",)
+
+
+def test_isozyme_context_building_is_deterministic_regardless_of_order():
+    handoff_a = _two_isozyme_handoff(
+        kinetic_measurements=(
+            _kinetic_measurement(id="km1", protein_id="p1", reported_rate_law="k1 * glc"),
+            _kinetic_measurement(id="km2", protein_id="p2", reported_rate_law="k2 * glc * glc"),
+        )
+    )
+    handoff_b = dataclasses.replace(
+        handoff_a,
+        reaction_enzyme_associations=(
+            _enzyme_association(protein_id="p2"),
+            _enzyme_association(protein_id="p1"),
+        ),
+        kinetic_measurements=(
+            _kinetic_measurement(id="km2", protein_id="p2", reported_rate_law="k2 * glc * glc"),
+            _kinetic_measurement(id="km1", protein_id="p1", reported_rate_law="k1 * glc"),
+        ),
+    )
+    first = _assign(handoff_a)
+    second = _assign(handoff_a)
+    assert first == second
+    assert {(a.protein_id, a.kinetic_law_type) for a in first.assignments} == {
+        (a.protein_id, a.kinetic_law_type) for a in _assign(handoff_b).assignments
+    }
+
+
 # --- Determinism (Step 46) ---------------------------------------------------------------------
 
 
@@ -716,7 +854,7 @@ def test_reordered_isozyme_associations_produce_equivalent_assignments():
     laws_a = _assign(handoff_a)
     laws_b = _assign(handoff_b)
     assert {a.protein_id for a in laws_a.assignments} == {a.protein_id for a in laws_b.assignments}
-    assert len(laws_a.assignments) == len(laws_b.assignments) == 1
+    assert len(laws_a.assignments) == len(laws_b.assignments) == 2
 
 
 # --- Network-id mismatch defensive check --------------------------------------------------------
@@ -824,12 +962,15 @@ def test_modified_enzyme_states_each_get_independent_tentative_defaults():
 
 def test_multiple_isozymes_no_specific_law_each_get_tentative_default_not_global_unassigned():
     """Step 20: multiple catalyst contexts with no specific laws do not become globally
-    UNASSIGNED -- here they still collapse (identical, empty evidence, existing policy), but
-    remain a runnable tentative default rather than UNASSIGNED."""
+    UNASSIGNED -- each isozyme's own distinct context (never collapsed, Isozyme-Aware
+    Catalytic Context Resolution) still gets a runnable tentative default rather than
+    UNASSIGNED."""
     handoff = _two_isozyme_handoff()
-    assignment = _only(_assign(handoff))
-    assert assignment.kinetic_law_type is KineticLawType.MASS_ACTION
-    assert assignment.is_tentative
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+    for assignment in assignments.assignments:
+        assert assignment.kinetic_law_type is KineticLawType.MASS_ACTION
+        assert assignment.is_tentative
 
 
 def test_is_tentative_derived_marker_across_all_sources():
@@ -1192,10 +1333,10 @@ def test_f_singular_none_plural_populated_is_not_untagged():
     assert not _is_untagged(measurement)
 
 
-# --- G. Multiple intersections: one evidence record, no duplication ----------------------------
+# --- G. Explicit shared applicability: copied into both contexts, never duplicated within one --
 
 
-def test_g_multiple_intersections_collapse_without_duplication():
+def test_g_shared_measurement_copied_to_both_contexts_without_duplication():
     from app.agent2.characterization.types import ReactionCharacterization, ReactionClass
 
     measurement = _plural_measurement(id="km-shared", protein_ids=("p1", "p2"))
@@ -1223,9 +1364,10 @@ def test_g_multiple_intersections_collapse_without_duplication():
         unresolved_features=(),
     )
     contexts = _build_contexts_with_evidence(rc, (measurement,))
-    assert len(contexts) == 1
-    _context, evidence = contexts[0]
-    assert evidence == (measurement,)
+    assert len(contexts) == 2
+    assert {ctx.protein_id for ctx, _ in contexts} == {"p1", "p2"}
+    for _context, evidence in contexts:
+        assert evidence == (measurement,)
 
 
 # --- H. Complex/enzyme-state behavior unchanged -------------------------------------------------
@@ -1300,9 +1442,12 @@ def test_j_run4_shaped_regression_reaches_substrate_anchored_mm():
     FAS1 (p_fas1) and a DIFFERENT protein (p_other) -- not FAS1+FAS2 -- while the measurement's
     legacy protein_id names FAS2 (p_fas2, not one of the reaction's own catalysts at all), and
     its authoritative protein_ids correctly names FAS1 (one of the reaction's own catalysts)
-    alongside FAS2. Before this fix, the measurement was silently dropped from evidence
-    entirely; after it, the measurement is visible and reaches substrate-anchored MM
-    eligibility."""
+    alongside FAS2. Before the plural-protein_ids fix, the measurement was silently dropped
+    from evidence entirely. After the later Isozyme-Aware Catalytic Context Resolution
+    increment, p_fas1 and p_other are never collapsed into one shared context either -- the
+    measurement is now visible on, and only on, p_fas1's own distinct context, which reaches
+    substrate-anchored MM eligibility; p_other's own, separate, evidence-free context gets its
+    own independent tentative default."""
     handoff = dataclasses.replace(
         _handoff(
             compartments=(_compartment(),),
@@ -1336,13 +1481,20 @@ def test_j_run4_shaped_regression_reaches_substrate_anchored_mm():
             ),
         ),
     )
-    assignment = _only(_assign(handoff))
+    assignments = _assign(handoff)
+    assert len(assignments.assignments) == 2
+    assignment = _by_context(assignments, protein_id="p_fas1")
     assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
     assert (
         KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
         in assignment.reason_codes
     )
     assert assignment.source_measurement_ids == ("km-malonyl-run4",)
+
+    other = _by_context(assignments, protein_id="p_other")
+    assert other.kinetic_law_type is KineticLawType.MASS_ACTION
+    assert other.is_tentative
+    assert other.source_measurement_ids == ()
 
 
 def test_j_downstream_parameter_declaration_receives_the_real_value():

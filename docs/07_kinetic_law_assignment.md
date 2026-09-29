@@ -402,18 +402,34 @@ structurally inappropriate or internally contradictory.
 
 ## 21. Multiple catalysts / isozymes
 
-Handled within evidence-gathering (§12): identical evidence across all
-general catalysts collapses to one shared, reaction-level assignment;
-any divergence keeps every catalyst's own, independent assignment. No
-global kinetic law is ever forced over evidence that actually differs by
-catalyst context -- including when neither catalyst has a curated law at
-all: each (or the shared, collapsed context, when their empty evidence
-is identical) still receives its own tentative mass-action default
-rather than a forced global `UNASSIGNED` (§17), and each such assignment
-records `MULTIPLE_CATALYTIC_STATES` in `unresolved_reasons` when the
-distinction is by enzyme state. Distinct catalyst/state identity
+Handled within evidence-gathering (§12): as of the "Isozyme-Aware
+Catalytic Context Resolution" increment, two or more distinct
+protein/complex-general catalysts on the same reaction are **never**
+collapsed into one shared context -- not even when every catalyst's
+evidence is identical, including the common case where neither catalyst
+has any evidence at all. Distinct catalyst identity is a biological
+fact independent of what happens to be curated for it; matching (or
+absent) `reported_rate_law` text is never treated as grounds for
+treating two catalysts as interchangeable. Each catalyst always
+receives its own, independent kinetic-law assignment -- including its
+own tentative mass-action default when it has no stronger evidence,
+rather than a forced global `UNASSIGNED` (§17). The only form of
+cross-catalyst evidence sharing is explicit: a measurement whose own
+authoritative plural `protein_ids` names more than one of the
+reaction's catalysts is copied into each of those catalysts' own
+contexts (never merging the contexts themselves, never invented when
+not explicitly present). Distinct catalyst/state identity
 (`enzyme_state_id`/`protein_id`/`complex_id`) is always preserved on each
 assignment, tentative or not.
+
+This does not, by itself, change the separately-documented
+substrate-anchored Michaelis-Menten eligibility rule (§15/`policy
+.find_substrate_anchored_km`), which still requires exactly one anchored
+Km measurement per context -- a catalyst whose own, now-correctly-
+isolated evidence still contains more than one Km measurement (even if
+they agree) remains ineligible and falls through to the tentative
+mass-action default. That is a distinct, known limitation, tracked
+separately.
 
 ## 22. Regulation/allostery policy
 

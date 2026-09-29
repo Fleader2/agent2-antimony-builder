@@ -547,10 +547,13 @@ def test_isozymes_different_evidence_get_independent_parameters():
     assert _by_id(declaration, "k_r1_p2").value == Decimal("9")
 
 
-def test_isozymes_collapsed_share_one_parameter_using_tagged_evidence():
-    """When Increment 4 collapses isozymes with identical (empty) reported-law evidence, the
-    resulting single shared assignment can still be initialized from a specific isozyme's own
-    tagged measurement (no sibling context exists to withhold it from -- Step 15/Step 4)."""
+def test_isozymes_never_collapsed_each_gets_its_own_parameters():
+    """Isozyme-Aware Catalytic Context Resolution: p1 and p2 are never collapsed, even though
+    p2 has no evidence of its own at all -- each keeps its own independent context, so p1's
+    real, tagged kcat measurement is never shared with or withheld from p2's own parameters
+    (Step 15/Step 4). p1 gets a real CURATED kcat; p2, with no evidence of its own, falls
+    through to HEURISTIC_INITIALIZATION for both of its parameters -- never inheriting p1's
+    value, never left undeclared."""
     handoff = dataclasses.replace(
         _two_isozyme_handoff(),
         compounds=(_compound(), _compound(id="g6p")),
@@ -566,9 +569,12 @@ def test_isozymes_collapsed_share_one_parameter_using_tagged_evidence():
     )
     declaration = _declare(handoff)
     ids = {s.parameter_id for s in declaration.parameter_specifications}
-    assert ids == {"kcat_r1", "Km_r1_glc"}
-    assert _by_id(declaration, "kcat_r1").value == Decimal("3")
-    assert _by_id(declaration, "kcat_r1").source is ParameterSource.CURATED
+    assert ids == {"kcat_r1_p1", "Km_r1_p1_glc", "kcat_r1_p2", "Km_r1_p2_glc"}
+    assert _by_id(declaration, "kcat_r1_p1").value == Decimal("3")
+    assert _by_id(declaration, "kcat_r1_p1").source is ParameterSource.CURATED
+    assert _by_id(declaration, "kcat_r1_p1").provenance_refs == ("km1",)
+    assert _by_id(declaration, "kcat_r1_p2").source is ParameterSource.HEURISTIC_INITIALIZATION
+    assert _by_id(declaration, "kcat_r1_p2").provenance_refs == ()
 
 
 # --- Provenance --------------------------------------------------------------------------------
