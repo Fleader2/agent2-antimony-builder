@@ -1101,6 +1101,27 @@ into every real call site (``assign_kinetic_laws``, and
 without changing that priority's own ranking order, ``KINETIC_LAW_ASSIGNMENT_POLICY
 _VERSION``, or ``PARAMETER_DECLARATION_POLICY_VERSION``: the policy itself is
 unchanged, only the real data now available to its lowest-precedence tier.
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v8"`` to ``"model-specification-v9"`` for the "Plural
+Source-Measurement Provenance Regression Fix" increment: ``build_model_assumptions``
+(`app.agent2.model_specification.mapping`) no longer destructures a
+``SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION`` assignment's
+``source_measurement_ids`` as if it always names exactly one measurement -- a real
+assumption the Multi-Measurement Kinetic Evidence Consolidation and Prioritization
+increment silently invalidated (that field can now name 0, 1, or N measurements), and
+which crashed ``ModelSpecification`` assembly with a real ``ValueError`` for the real
+fresh-pilot FAS1 concept (3 consolidated measurements). The fix supports all three
+cardinalities, discloses every supporting measurement id in the assumption's own
+``related_entity_ids``/``statement`` (never only one, never averaged), and reads
+``anchored_compound`` from any one of them (a real structural invariant -- every
+measurement in one substrate-anchored concept already shares the identical
+``compound_id`` by construction, never an arbitrary choice among differing answers). A
+materially different, observable result for the same real input whenever a
+substrate-anchored concept consolidates more than one measurement: previously an
+unhandled exception, now a real ``ModelAssumption`` naming every contributing
+measurement. ``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
+``app.agent2.types`` shape changed.
 """
 
 from __future__ import annotations
@@ -1113,7 +1134,7 @@ KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v5"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v8"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v9"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"

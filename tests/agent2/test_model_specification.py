@@ -1000,6 +1000,212 @@ def test_substrate_anchored_mm_produces_dedicated_disclosure_assumption():
     assert "malonyl-coa" in assumption.statement
 
 
+def _malonyl_coa_isozyme_handoff(
+    *, second_catalyst_measurements: tuple[CuratedKineticMeasurement, ...]
+) -> Agent1CuratedKnowledgeViewContract:
+    """Real MCT1/FAS1-shaped fixture (Plural Source-Measurement Provenance Regression Fix
+    increment): two isozymes on the same multi-reactant reaction -- p1 keeps its own
+    single-measurement substrate-anchored context (mirrors ``_malonyl_coa_like_handoff``
+    exactly), p2's own evidence is supplied by the caller so both the 0/1/N cases can be
+    exercised against a real isozyme-context shape, not just a single-catalyst one."""
+    return _handoff(
+        compartments=(_compartment(),),
+        compounds=(
+            _compound(id="malonyl-coa", name="Malonyl-CoA"),
+            _compound(id="acp", name="Acyl-carrier protein"),
+            _compound(id="coa", name="CoA"),
+            _compound(id="malonyl-acp", name="Malonyl-[acp]"),
+        ),
+        reactions=(_reaction(id="r1"),),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="malonyl-coa", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="acp", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="coa", role="PRODUCT"),
+            _participant(reaction_id="r1", compound_id="malonyl-acp", role="PRODUCT"),
+        ),
+        reaction_enzyme_associations=(
+            _enzyme_association(reaction_id="r1", protein_id="p1"),
+            _enzyme_association(reaction_id="r1", protein_id="p2"),
+        ),
+        kinetic_measurements=(
+            _measurement(
+                id="km-p1", parameter_type="KM", value=Decimal("18.0"), unit="uM",
+                reaction_id="r1", compound_id="malonyl-coa", protein_id="p1",
+            ),
+            *second_catalyst_measurements,
+        ),
+    )
+
+
+def test_substrate_anchored_mm_assumption_supports_zero_source_measurements():
+    """Defensive only -- this reason code is never actually produced with zero supporting
+    measurements by the current selector, but `build_model_assumptions` must never crash
+    if it ever were; `anchored_compound` degrades to `None`, never a guess."""
+    from app.agent2.kinetics.types import (
+        KineticLawAssignment,
+        KineticLawAssignmentSource,
+        KineticLawReasonCode,
+    )
+    from app.agent2.model_specification.mapping import build_model_assumptions
+    from app.agent2.types import (
+        KineticLawSpecification,
+        KineticLawType,
+        ParticipantRole,
+        ReactionParticipantSpecification,
+        ReactionSpecification,
+    )
+
+    reaction = ReactionSpecification(
+        reaction_id="r1",
+        name="r1",
+        participants=(
+            ReactionParticipantSpecification(
+                species_id="a", role=ParticipantRole.REACTANT, stoichiometry=Decimal("1")
+            ),
+        ),
+    )
+    assignment = KineticLawAssignment(
+        assignment_id="r1::kinetic-law::p2",
+        reaction_id="r1",
+        kinetic_law_type=KineticLawType.MICHAELIS_MENTEN,
+        assignment_source=KineticLawAssignmentSource.HEURISTIC,
+        policy_version="test",
+        protein_id="p2",
+        source_measurement_ids=(),
+        reason_codes=(KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION,),
+        explanation="test fixture: defensive zero-measurement case",
+    )
+    law = KineticLawSpecification(
+        kinetic_law_id=f"kinetic-law::{assignment.assignment_id}",
+        reaction_id="r1",
+        law_type=KineticLawType.MICHAELIS_MENTEN,
+        assignment_source=KineticLawAssignmentSource.HEURISTIC,
+        expression="k1 * a",
+        parameter_ids=(),
+        species_ids=(),
+        protein_id="p2",
+    )
+    assumptions = build_model_assumptions(
+        kinetic_laws=(law,),
+        kinetic_law_assignments_by_kinetic_law_id={law.kinetic_law_id: assignment},
+        parameters=(),
+        candidate_boundary_ids=(),
+        kinetic_measurements=(),
+        reactions=(reaction,),
+    )
+    (assumption,) = [
+        a for a in assumptions
+        if a.reason_code == "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+    ]
+    assert assumption.related_entity_ids == ("r1", law.kinetic_law_id)
+    assert "no specific curated measurement reports" in assumption.statement
+
+
+def test_substrate_anchored_mm_assumption_single_measurement_unchanged():
+    """Single-measurement behavior (p1's own context) is unchanged by this fix."""
+    model = _assemble(
+        _malonyl_coa_isozyme_handoff(
+            second_catalyst_measurements=(
+                _measurement(
+                    id="km-p2", parameter_type="KM", value=Decimal("18.0"), unit="uM",
+                    reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+                ),
+            )
+        )
+    )
+    p1_assumption = next(
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+        and "p1" in a.assumption_id
+    )
+    assert "km-p1" in p1_assumption.related_entity_ids
+    assert "malonyl-coa" in p1_assumption.related_entity_ids
+    assert "curated measurement km-p1 reports" in p1_assumption.statement
+    assert "consolidated" not in p1_assumption.statement
+
+
+def test_substrate_anchored_mm_assumption_plural_measurements_never_crash_and_preserve_all_ids():
+    """The real FAS1-shaped regression: 3 consolidated, disagreeing Km measurements for the
+    same isozyme must never crash ModelSpecification assembly, and every one of the 3 ids
+    must survive into the assumption's own `related_entity_ids` and `statement` -- never
+    silently dropped, never averaged, never reduced to a single arbitrarily-chosen id."""
+    fas1_measurements = (
+        _measurement(
+            id="km-fas1-a", parameter_type="KM", value=Decimal("18000"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+        _measurement(
+            id="km-fas1-b", parameter_type="KM", value=Decimal("61300"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+        _measurement(
+            id="km-fas1-c", parameter_type="KM", value=Decimal("61300"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+    )
+    handoff = _malonyl_coa_isozyme_handoff(second_catalyst_measurements=fas1_measurements)
+
+    # Must not raise.
+    model = _assemble(handoff)
+
+    p2_assumption = next(
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+        and "p2" in a.assumption_id
+    )
+    for measurement_id in ("km-fas1-a", "km-fas1-b", "km-fas1-c"):
+        assert measurement_id in p2_assumption.related_entity_ids
+        assert measurement_id in p2_assumption.statement
+    assert "malonyl-coa" in p2_assumption.related_entity_ids
+    assert "3 consolidated curated measurements" in p2_assumption.statement
+
+    # p1's own single-measurement context is untouched by p2's own consolidation.
+    p1_assumption = next(
+        a
+        for a in model.model_assumptions
+        if a.reason_code == "SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION"
+        and "p1" in a.assumption_id
+    )
+    assert p1_assumption.related_entity_ids == (
+        "r1", p1_assumption.related_entity_ids[1], "km-p1", "malonyl-coa",
+    )
+
+    # Selected numeric source remains singular: exactly one of the 3 measurements' own
+    # value is what the declared Km parameter actually carries (never an average).
+    km_specs = [
+        p for p in model.parameters
+        if p.kinetic_law_assignment_id == "r1::kinetic-law::p2"
+        and p.parameter_id.startswith("Km_")
+        and p.parameter_id.endswith("_malonyl-coa")
+    ]
+    (km_spec,) = km_specs
+    assert km_spec.value in (Decimal("18000"), Decimal("61300"))
+    assert set(km_spec.provenance_refs) == {"km-fas1-a", "km-fas1-b", "km-fas1-c"}
+
+
+def test_substrate_anchored_mm_assumption_plural_measurements_antimony_generation_succeeds():
+    """Antimony generation (downstream of ModelSpecification) must also succeed for the
+    same real FAS1-shaped plural-measurement concept."""
+    fas1_measurements = (
+        _measurement(
+            id="km-fas1-a", parameter_type="KM", value=Decimal("18000"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+        _measurement(
+            id="km-fas1-b", parameter_type="KM", value=Decimal("61300"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+    )
+    handoff = _malonyl_coa_isozyme_handoff(second_catalyst_measurements=fas1_measurements)
+    model = _assemble(handoff)
+
+    # Must not raise.
+    package = generate_antimony(model)
+    assert package.full_antimony.antimony_text
+
+
 def test_substrate_anchored_mm_law_type_and_disclosed_fallback_expression():
     """Executable Rate-Law Fallback increment: this genuinely 2-reactant reaction no longer
     stays unexpressed -- a generic, disclosed, non-mechanistic mass-action-style simulation

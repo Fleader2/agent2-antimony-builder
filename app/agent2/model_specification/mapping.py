@@ -420,12 +420,15 @@ def build_model_assumptions(
     boundaries), one added in a later pre-commit revision (unresolved multi-substrate
     Michaelis-Menten mechanisms, §8), one added by the "Unresolved Kinetic Evidence
     Disclosure" increment (a kinetic measurement whose reaction applicability is unresolved,
-    below), and one added by the "Substrate-Anchored Michaelis-Menten Eligibility Refinement"
-    increment (a `MICHAELIS_MENTEN` law anchored to one real, uniquely-attributed Km for a
-    multi-reactant reaction -- distinct from the plain multi-substrate-expression disclosure
-    above: this one names the specific anchored substrate and source measurement, and fires
-    even in the rare case a future `build_expression_and_species` extension might resolve an
-    expression for it), and one added by the "Conservative Reversibility Default for
+    below), one added by the "Substrate-Anchored Michaelis-Menten Eligibility Refinement"
+    increment (a `MICHAELIS_MENTEN` law anchored to one real, uniquely-attributed anchored
+    substrate for a multi-reactant reaction -- distinct from the plain multi-substrate-
+    expression disclosure above: this one names the specific anchored substrate and every
+    supporting source measurement -- one or, since the Multi-Measurement Kinetic Evidence
+    Consolidation and Prioritization increment, several consolidated measurements that agree
+    or disagree on the same anchored substrate -- and fires even in the rare case a future
+    `build_expression_and_species` extension might resolve an expression for it), and one
+    added by the "Conservative Reversibility Default for
     Unresolved Reactions" increment (a reaction whose curated `reversible` is `None` is
     modeled as tentatively reversible for model-construction purposes -- see
     `app.agent2.reversibility` -- and that assumption is disclosed here explicitly, never
@@ -462,11 +465,40 @@ def build_model_assumptions(
             KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION
             in assignment.reason_codes
         ):
-            (anchor_measurement_id,) = assignment.source_measurement_ids
-            anchor_measurement = measurements_by_id.get(anchor_measurement_id)
-            anchored_compound = (
-                anchor_measurement.compound_id if anchor_measurement is not None else None
+            # Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment:
+            # this reason code no longer implies exactly one supporting measurement --
+            # `source_measurement_ids` may now name 0 (defensive only; never actually
+            # produced alongside this reason code), 1, or N consolidated measurements (task's
+            # own "Plural Source-Measurement Provenance Regression Fix" central rule: plural
+            # supporting provenance stays plural here, never destructured down to one).
+            # `anchored_compound` is read from any one of them -- never an arbitrary pick
+            # among *differing* answers, since `consolidate_by_substrate`'s own grouping
+            # already guarantees every measurement in this concept reports the identical
+            # anchored `compound_id` by construction. This assumption discloses *that* a
+            # substrate-anchored approximation was used and *which* substrate/measurements
+            # back it -- it does not (and need not) separately re-identify which one specific
+            # measurement supplied the numeric parameter value: that selected-vs-supporting
+            # distinction is already fully disclosed on the declared parameter itself
+            # (`ParameterSpecification.uncertainty_text`/`.provenance_refs`, populated by
+            # `app.agent2.parameters.initializer`), never re-derived or guessed at here.
+            anchor_measurement_ids = assignment.source_measurement_ids
+            anchor_measurements = tuple(
+                measurements_by_id[mid]
+                for mid in anchor_measurement_ids
+                if mid in measurements_by_id
             )
+            anchored_compound = (
+                anchor_measurements[0].compound_id if anchor_measurements else None
+            )
+            if not anchor_measurement_ids:
+                measurement_clause = "no specific curated measurement reports"
+            elif len(anchor_measurement_ids) == 1:
+                measurement_clause = f"curated measurement {anchor_measurement_ids[0]} reports"
+            else:
+                measurement_clause = (
+                    f"{len(anchor_measurement_ids)} consolidated curated measurements "
+                    f"({', '.join(anchor_measurement_ids)}) together report"
+                )
             assumptions.append(
                 ModelAssumption(
                     assumption_id=(
@@ -475,12 +507,11 @@ def build_model_assumptions(
                     category="kinetics",
                     statement=(
                         f"Reaction {law.reaction_id} uses a substrate-anchored "
-                        "Michaelis-Menten approximation: curated measurement "
-                        f"{anchor_measurement_id} reports a Km uniquely and explicitly for "
-                        f"reactant compound {anchored_compound!r}, but this reaction has more "
-                        "than one reactant/co-substrate. This is a partial, lumped "
-                        "approximation anchored to that one substrate only -- it is not a "
-                        "claim that the reaction's full multi-substrate mechanism (ordered, "
+                        f"Michaelis-Menten approximation: {measurement_clause} a Km "
+                        f"explicitly for reactant compound {anchored_compound!r}, but this "
+                        "reaction has more than one reactant/co-substrate. This is a partial, "
+                        "lumped approximation anchored to that one substrate only -- it is not "
+                        "a claim that the reaction's full multi-substrate mechanism (ordered, "
                         "random, ping-pong, ...) has been established, no value is invented "
                         "for any other reactant, and no combining algebraic expression is "
                         "asserted (see MULTI_SUBSTRATE_MM_EXPRESSION_UNRESOLVED when this "
@@ -491,7 +522,7 @@ def build_model_assumptions(
                         for eid in (
                             law.reaction_id,
                             law.kinetic_law_id,
-                            anchor_measurement_id,
+                            *anchor_measurement_ids,
                             anchored_compound,
                         )
                         if eid is not None
