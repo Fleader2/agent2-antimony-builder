@@ -133,7 +133,9 @@ def _enzyme_concentration_for_assignment(
 
 
 def _anchored_km_initialization(
-    km_evidence: tuple[CuratedKineticMeasurement, ...], reactant_compound_ids: tuple[str, ...]
+    km_evidence: tuple[CuratedKineticMeasurement, ...],
+    reactant_compound_ids: tuple[str, ...],
+    network: FullNetwork,
 ) -> Initialization:
     """A single-substrate-anchored ``Km`` ``Initialization``, for use only as an internal
     input to Derivations C/D (never itself declared as a ``ParameterSpecification`` outside
@@ -160,13 +162,14 @@ def _anchored_km_initialization(
         anchored = tuple(m for m in km_evidence if m.compound_id in reactant_compound_ids)
         anchored_compound_ids = {m.compound_id for m in anchored}
         matches = anchored if len(anchored_compound_ids) == 1 else ()
-    return initialize_with_fallback(matches, kind=ParameterKind.CONCENTRATION)
+    return initialize_with_fallback(matches, kind=ParameterKind.CONCENTRATION, network=network)
 
 
 def _reconstruct_k_eff_for_context(
     evidence: tuple[CuratedKineticMeasurement, ...],
     reactant_compound_ids: tuple[str, ...],
     enzyme_concentration: EnzymeConcentration | None,
+    network: FullNetwork,
     *,
     molecularity: int,
 ) -> Initialization | None:
@@ -184,10 +187,13 @@ def _reconstruct_k_eff_for_context(
         kcat_matches, vmax_matches, enzyme_concentration
     )
     kcat_initialization = initialize_with_fallback(
-        kcat_matches, kind=ParameterKind.RATE_FIRST_ORDER, macro_reconstruction=macro_kcat
+        kcat_matches,
+        kind=ParameterKind.RATE_FIRST_ORDER,
+        macro_reconstruction=macro_kcat,
+        network=network,
     )
     km_initialization = _anchored_km_initialization(
-        policy.measurements_of_kind(evidence, policy.KM_TYPES), reactant_compound_ids
+        policy.measurements_of_kind(evidence, policy.KM_TYPES), reactant_compound_ids, network
     )
     return reconstruction.reconstruct_k_eff_from_kcat_and_km(
         kcat_initialization, km_initialization, molecularity=molecularity
@@ -327,7 +333,7 @@ def _declare_mass_action(
         # so it is excluded here for the identical reason -- never attempted for a tentative,
         # unconfirmed mechanism.
         tentative_initialization = initialize_with_fallback(
-            (), kind=ParameterKind.MASS_ACTION_RATE, molecularity=molecularity
+            (), kind=ParameterKind.MASS_ACTION_RATE, molecularity=molecularity, network=network
         )
         tentative_initialization = dataclasses.replace(
             tentative_initialization,
@@ -349,7 +355,7 @@ def _declare_mass_action(
     # valid only when this reaction's own reactant molecularity is exactly 2 -- see
     # `_reconstruct_k_eff_for_context`'s own docstring.
     macro_reconstruction = _reconstruct_k_eff_for_context(
-        evidence, reactant_compound_ids, enzyme_concentration, molecularity=molecularity
+        evidence, reactant_compound_ids, enzyme_concentration, network, molecularity=molecularity
     )
     return (
         _spec_from_initialization(
@@ -360,6 +366,7 @@ def _declare_mass_action(
                 kind=ParameterKind.MASS_ACTION_RATE,
                 molecularity=molecularity,
                 macro_reconstruction=macro_reconstruction,
+                network=network,
             ),
         ),
     )
@@ -390,7 +397,11 @@ def _declare_reversible_mass_action(
     # kcat/Km says nothing about the reverse rate kr (design doc §2.1/§3), so `reverse`
     # never receives a macro_reconstruction here.
     forward_macro_reconstruction = _reconstruct_k_eff_for_context(
-        evidence, reactant_compound_ids, enzyme_concentration, molecularity=forward_molecularity
+        evidence,
+        reactant_compound_ids,
+        enzyme_concentration,
+        network,
+        molecularity=forward_molecularity,
     )
     return (
         _spec_from_initialization(
@@ -401,13 +412,17 @@ def _declare_reversible_mass_action(
                 kind=ParameterKind.MASS_ACTION_RATE,
                 molecularity=forward_molecularity,
                 macro_reconstruction=forward_macro_reconstruction,
+                network=network,
             ),
         ),
         _spec_from_initialization(
             "kr",
             assignment=assignment,
             initialization=initialize_with_fallback(
-                reverse, kind=ParameterKind.MASS_ACTION_RATE, molecularity=reverse_molecularity
+                reverse,
+                kind=ParameterKind.MASS_ACTION_RATE,
+                molecularity=reverse_molecularity,
+                network=network,
             ),
         ),
     )
@@ -449,6 +464,7 @@ def _declare_michaelis_menten(
         # is.
         kind=ParameterKind.RATE_FIRST_ORDER,
         macro_reconstruction=macro_kcat,
+        network=network,
     )
     kcat_spec = _spec_from_initialization(
         "kcat", assignment=assignment, initialization=kcat_initialization
@@ -466,7 +482,7 @@ def _declare_michaelis_menten(
             if m.compound_id == compound_id or (m.compound_id is None and single_substrate)
         )
         km_initialization = initialize_with_fallback(
-            substrate_matches, kind=ParameterKind.CONCENTRATION
+            substrate_matches, kind=ParameterKind.CONCENTRATION, network=network
         )
         km_spec = _spec_from_initialization(
             "Km", assignment=assignment, initialization=km_initialization, substrate_id=compound_id
@@ -544,7 +560,11 @@ def _declare_multi_substrate_mm_fallback(
     # arbitrary multi-reactant reactions") -- `_reconstruct_k_eff_for_context` itself
     # already enforces this, this call site does not need its own separate check.
     forward_macro_reconstruction = _reconstruct_k_eff_for_context(
-        evidence, reactant_compound_ids, enzyme_concentration, molecularity=forward_molecularity
+        evidence,
+        reactant_compound_ids,
+        enzyme_concentration,
+        network,
+        molecularity=forward_molecularity,
     )
     if not effective_reversible(_reaction_reversible(network, assignment.reaction_id)):
         matches = policy.measurements_of_kind(evidence, policy.RATE_CONSTANT_TYPES)
@@ -557,6 +577,7 @@ def _declare_multi_substrate_mm_fallback(
                     kind=ParameterKind.MASS_ACTION_RATE,
                     molecularity=forward_molecularity,
                     macro_reconstruction=forward_macro_reconstruction,
+                    network=network,
                 ),
             ),
         )
@@ -574,13 +595,17 @@ def _declare_multi_substrate_mm_fallback(
                 kind=ParameterKind.MASS_ACTION_RATE,
                 molecularity=forward_molecularity,
                 macro_reconstruction=forward_macro_reconstruction,
+                network=network,
             ),
         ),
         _spec_from_initialization(
             "kr",
             assignment=assignment,
             initialization=initialize_with_fallback(
-                reverse, kind=ParameterKind.MASS_ACTION_RATE, molecularity=reverse_molecularity
+                reverse,
+                kind=ParameterKind.MASS_ACTION_RATE,
+                molecularity=reverse_molecularity,
+                network=network,
             ),
         ),
     )
@@ -592,14 +617,18 @@ def _reaction_reversible(network: FullNetwork, reaction_id: str) -> bool | None:
 
 
 def _declare_hill(
-    assignment: KineticLawAssignment, evidence: tuple[CuratedKineticMeasurement, ...]
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    network: FullNetwork,
 ) -> tuple[ParameterSpecification, ...]:
     return (
         _spec_from_initialization(
             "Vmax",
             assignment=assignment,
             initialization=initialize_with_fallback(
-                policy.measurements_of_kind(evidence, policy.VMAX_TYPES), kind=ParameterKind.FLUX
+                policy.measurements_of_kind(evidence, policy.VMAX_TYPES),
+                kind=ParameterKind.FLUX,
+                network=network,
             ),
         ),
         _spec_from_initialization(
@@ -608,6 +637,7 @@ def _declare_hill(
             initialization=initialize_with_fallback(
                 policy.measurements_of_kind(evidence, policy.KM_TYPES),
                 kind=ParameterKind.CONCENTRATION,
+                network=network,
             ),
         ),
         _spec_from_initialization(
@@ -620,13 +650,16 @@ def _declare_hill(
             initialization=initialize_with_fallback(
                 policy.measurements_of_kind(evidence, policy.HILL_COEFFICIENT_TYPES),
                 kind=ParameterKind.UNSUPPORTED,
+                network=network,
             ),
         ),
     )
 
 
 def _declare_custom(
-    assignment: KineticLawAssignment, evidence: tuple[CuratedKineticMeasurement, ...]
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    network: FullNetwork,
 ) -> tuple[ParameterSpecification, ...]:
     specs = []
     for prefix, family in _CUSTOM_FAMILIES:
@@ -634,7 +667,9 @@ def _declare_custom(
         if matches:
             specs.append(
                 _spec_from_initialization(
-                    prefix, assignment=assignment, initialization=initialize_from_evidence(matches)
+                    prefix,
+                    assignment=assignment,
+                    initialization=initialize_from_evidence(matches, network=network),
                 )
             )
     if specs:
@@ -697,9 +732,9 @@ def _declare_for_assignment(
             assignment, evidence, reactant_compound_ids, enzyme_concentration, network
         )
     if assignment.kinetic_law_type is KineticLawType.HILL:
-        return _declare_hill(assignment, evidence), ()
+        return _declare_hill(assignment, evidence, network), ()
     if assignment.kinetic_law_type is KineticLawType.CUSTOM:
-        return _declare_custom(assignment, evidence), ()
+        return _declare_custom(assignment, evidence, network), ()
 
     raise ParameterReferenceError(
         f"declare_parameters has no declaration policy for kinetic_law_type="

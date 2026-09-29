@@ -1,16 +1,22 @@
 """Curated-value initialization policy for one already-decided parameter slot (Increment 5;
-extended by the Heuristic Simulation Parameter Initialization increment).
+extended by the Heuristic Simulation Parameter Initialization increment; extended again by
+the Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment).
 
-``initialize_from_evidence`` (Increment 5, unmodified in what it decides for non-GotEnzymes2
-evidence) resolves a parameter slot from real experimental measurements only. This
-increment adds ``initialize_from_ai_predicted_evidence`` (the same agreement policy, applied
-to GotEnzymes2-sourced measurements' own canonical values) and ``initialize_with_fallback``
-(this module's new public entry point: tries experimental evidence, then AI-predicted
-evidence, then a centralized heuristic default -- see
-``app.agent2.parameters.heuristic_defaults``). Never called with numeric comparison, unit
-conversion, averaging, or ranking beyond exact-agreement checks -- see module-level policy
-notes below and `docs/08_parameter_declaration_initialization.md` §6/§10-13/§14 (Heuristic
-Simulation Parameter Initialization).
+``initialize_from_evidence`` resolves a parameter slot from real experimental measurements
+only. ``initialize_from_ai_predicted_evidence`` applies the same consolidation policy to
+GotEnzymes2-sourced measurements' own canonical values, one precedence rung below.
+``initialize_with_fallback`` (this module's public entry point) tries experimental evidence,
+then AI-predicted evidence, then a centralized heuristic default -- see
+``app.agent2.parameters.heuristic_defaults``.
+
+Multiple candidate measurements for the same slot no longer collapse to a plain
+``PLACEHOLDER`` merely because they disagree numerically (Multi-Measurement Kinetic
+Evidence Consolidation and Prioritization increment): they consolidate into one concept
+(``app.agent2.kinetics.evidence_consolidation``) and, when the concept is not
+``CONTEXT_DISTINCT``/``UNRESOLVED``, the single most biologically relevant measurement is
+selected -- never averaged, never chosen nondeterministically -- while every candidate's id
+is preserved in ``provenance_refs``. See `docs/08_parameter_declaration_initialization.md`
+§6/§10-13/§14 and this module's own function docstrings below.
 """
 
 from __future__ import annotations
@@ -18,9 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.agent2.parameters import policy
+from app.agent2.kinetics.evidence_consolidation import (
+    ConsolidationClassification,
+    consolidate_by_substrate,
+    reference_experimental_context_for_network,
+)
 from app.agent2.parameters.heuristic_defaults import ParameterKind, heuristic_default_for_kind
-from app.agent2.types import CuratedKineticMeasurement, ParameterSource
+from app.agent2.types import CuratedKineticMeasurement, FullNetwork, ParameterSource
 from app.agent2.version import HEURISTIC_INITIALIZATION_POLICY_VERSION
 
 #: Agent 1's own provenance marker for a GotEnzymes2-sourced measurement
@@ -60,6 +70,8 @@ _NO_MATCH = Initialization(
 
 def initialize_from_evidence(
     evidence_of_kind: tuple[CuratedKineticMeasurement, ...],
+    *,
+    network: FullNetwork | None = None,
 ) -> Initialization:
     """Resolve one parameter slot from the *experimental* curated measurements that match
     its recognized kind -- GotEnzymes2-sourced (AI-predicted) measurements are excluded here
@@ -70,21 +82,34 @@ def initialize_from_evidence(
     assigns ``CURATED`` to any agreeing evidence with no ``publication_id`` -- true of every
     real GotEnzymes2 measurement) without this exclusion.
 
-    * **No matching (non-AI-predicted) measurement** -- ``PLACEHOLDER``, ``value=None``.
-    * **Every matching measurement agrees** (identical value *and* unit,
-      exact comparison -- `policy.measurements_agree`) -- the value/unit
-      are used verbatim (never rounded, never converted);
-      ``ParameterSource.LITERATURE_DERIVED`` if the representative
-      measurement (lowest ``id``, for determinism) names a
-      ``publication_id``, else ``ParameterSource.CURATED``;
-      ``provenance_refs`` names every agreeing measurement's id, not only
-      the representative one (Increment 5 instructions, Step 11).
-    * **Matching measurements disagree** (different value, or the same
-      value in different units -- units are never normalized, so this
-      counts as disagreement too) -- ``PLACEHOLDER``, ``value=None``,
-      ``provenance_refs`` still names every candidate id (Step 12: "never
-      average, never rank, never choose one silently... preserve all
-      provenance").
+    The remaining candidates consolidate (``app.agent2.kinetics.evidence_consolidation
+    .consolidate_by_substrate``) by substrate/compound identity, then within one resulting
+    concept:
+
+    * **No matching measurement** -- ``PLACEHOLDER``, ``value=None``.
+    * **Two or more different substrate/compound concepts** -- never merged into one slot
+      (a genuinely multi-substrate ambiguity this function does not attempt to resolve) --
+      ``PLACEHOLDER``, ``value=None``, every candidate id preserved.
+    * **The one concept is ``CONTEXT_DISTINCT``/``UNRESOLVED``** (a real, confirmed
+      biological-identity conflict, or no candidate compatible with the target model
+      context) -- ``PLACEHOLDER``, ``value=None``, every candidate id preserved,
+      ``uncertainty_text`` discloses why.
+    * **Otherwise** (``SINGLE``/``CORROBORATING``/``DISAGREEING`` -- multiple *agreeing or
+      disagreeing but biologically compatible* measurements no longer force
+      ``PLACEHOLDER`` on their own, Multi-Measurement Kinetic Evidence Consolidation and
+      Prioritization increment) -- the single most biologically relevant candidate's
+      value/unit are used verbatim (never rounded, never converted, never averaged);
+      ``ParameterSource.LITERATURE_DERIVED`` if that candidate names a ``publication_id``,
+      else ``ParameterSource.CURATED``; ``provenance_refs`` names every candidate's id,
+      not only the selected one; ``uncertainty_text`` discloses the disagreement and
+      selection reason whenever the concept is ``DISAGREEING`` (``None`` for
+      ``SINGLE``/``CORROBORATING``, exactly as before this increment).
+
+    ``network`` is optional (defaulted to ``None`` for full backward compatibility) and
+    supplies the target organism and reference experimental context consolidation's own
+    Priority 1/2 use; without it, every candidate resolves through the identical priority
+    order with no organism filtering and ``CONDITIONS_UNKNOWN`` throughout, degrading
+    gracefully to the deterministic tie-break.
 
     Never assigns ``ParameterSource.DEFAULT`` (see
     `docs/08_parameter_declaration_initialization.md` §7 for why -- no
@@ -98,42 +123,72 @@ def initialize_from_evidence(
     if not evidence_of_kind:
         return _NO_MATCH
 
-    if not policy.measurements_agree(evidence_of_kind):
-        candidate_ids = tuple(sorted(m.id for m in evidence_of_kind))
+    target_organism_id = network.organism_id if network is not None else None
+    reference_context = (
+        reference_experimental_context_for_network(network) if network is not None else None
+    )
+    concepts = consolidate_by_substrate(
+        evidence_of_kind,
+        target_organism_id=target_organism_id,
+        reference_context=reference_context,
+    )
+
+    all_candidate_ids = tuple(sorted(m.id for m in evidence_of_kind))
+    if len(concepts) != 1:
         return Initialization(
             source=ParameterSource.PLACEHOLDER,
             value=None,
             unit=None,
             source_reference=None,
-            provenance_refs=candidate_ids,
+            provenance_refs=all_candidate_ids,
             uncertainty_text=(
-                f"{len(evidence_of_kind)} curated measurements match this parameter but report "
-                "different values and/or units; no value was chosen. Requires calibration."
+                f"{len(evidence_of_kind)} curated measurements match this parameter but name "
+                f"{len(concepts)} different substrate/compound identities; no single kinetic "
+                "concept was chosen. Requires calibration."
             ),
         )
 
-    representative = sorted(evidence_of_kind, key=lambda m: m.id)[0]
-    all_ids = tuple(sorted(m.id for m in evidence_of_kind))
+    concept = concepts[0]
+    if concept.selected_measurement_id is None:
+        return Initialization(
+            source=ParameterSource.PLACEHOLDER,
+            value=None,
+            unit=None,
+            source_reference=None,
+            provenance_refs=concept.measurement_ids,
+            uncertainty_text=f"{concept.selection_reason} Requires calibration.",
+        )
+
+    selected = next(m for m in evidence_of_kind if m.id == concept.selected_measurement_id)
     source = (
         ParameterSource.LITERATURE_DERIVED
-        if representative.publication_id is not None
+        if selected.publication_id is not None
         else ParameterSource.CURATED
     )
-    source_reference = (
-        representative.publication_id or representative.source_id or representative.source
+    source_reference = selected.publication_id or selected.source_id or selected.source
+    uncertainty_text = (
+        f"{concept.selection_reason} Requires calibration."
+        if concept.classification is ConsolidationClassification.DISAGREEING
+        else None
     )
     return Initialization(
         source=source,
-        value=representative.value,
-        unit=representative.unit,
+        value=selected.value,
+        unit=selected.unit,
         source_reference=source_reference,
-        provenance_refs=all_ids,
-        uncertainty_text=None,
+        provenance_refs=concept.measurement_ids,
+        uncertainty_text=uncertainty_text,
     )
+
+
+def _normalized_value_unit(m: CuratedKineticMeasurement) -> tuple[Decimal | None, str | None]:
+    return (m.normalized_value, m.normalized_unit)
 
 
 def initialize_from_ai_predicted_evidence(
     evidence_of_kind: tuple[CuratedKineticMeasurement, ...],
+    *,
+    network: FullNetwork | None = None,
 ) -> Initialization:
     """Resolve one parameter slot from GotEnzymes2-sourced (AI-predicted) measurements only,
     at the precedence rung directly below ``initialize_from_evidence``'s own
@@ -149,10 +204,14 @@ def initialize_from_ai_predicted_evidence(
     candidate with no resolved canonical value (Agent 1 itself could not convert its unit)
     is excluded entirely -- never falls back to its own raw value.
 
-    Mirrors ``initialize_from_evidence``'s own agreement policy exactly, one level down:
-    no candidates -- ``PLACEHOLDER``, ``value=None``; every candidate's canonical value/unit
-    agrees -- ``ParameterSource.AI_PREDICTED``; candidates disagree -- ``PLACEHOLDER``,
-    ``value=None``, every candidate id preserved in ``provenance_refs``.
+    Mirrors ``initialize_from_evidence``'s own consolidation policy exactly, one level
+    down, comparing/ranking on the canonical value/unit instead of the raw one: no
+    candidates -- ``PLACEHOLDER``, ``value=None``; a single consolidated concept that is
+    not ``CONTEXT_DISTINCT``/``UNRESOLVED`` -- ``ParameterSource.AI_PREDICTED`` using the
+    selected candidate's canonical value (multiple agreeing *or* disagreeing but
+    biologically compatible candidates no longer force ``PLACEHOLDER`` on their own,
+    Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment); every
+    candidate id is always preserved in ``provenance_refs``.
     """
     candidates = tuple(
         m
@@ -162,37 +221,57 @@ def initialize_from_ai_predicted_evidence(
     if not candidates:
         return _NO_MATCH
 
-    first = candidates[0]
-    agree = all(
-        m.normalized_value == first.normalized_value and m.normalized_unit == first.normalized_unit
-        for m in candidates[1:]
+    target_organism_id = network.organism_id if network is not None else None
+    reference_context = (
+        reference_experimental_context_for_network(network) if network is not None else None
     )
-    all_ids = tuple(sorted(m.id for m in candidates))
-    if not agree:
+    concepts = consolidate_by_substrate(
+        candidates,
+        target_organism_id=target_organism_id,
+        reference_context=reference_context,
+        value_of=_normalized_value_unit,
+    )
+
+    all_candidate_ids = tuple(sorted(m.id for m in candidates))
+    base_note = "AI-predicted by GotEnzymes2 -- never a curated experimental measurement."
+    if len(concepts) != 1:
         return Initialization(
             source=ParameterSource.PLACEHOLDER,
             value=None,
             unit=None,
             source_reference=None,
-            provenance_refs=all_ids,
+            provenance_refs=all_candidate_ids,
             uncertainty_text=(
-                f"{len(candidates)} GotEnzymes2 AI-predicted measurements match this "
-                "parameter but report different canonical values; no value was chosen. "
-                "Requires calibration."
+                f"{base_note} {len(candidates)} GotEnzymes2 AI-predicted measurements match "
+                f"this parameter but name {len(concepts)} different substrate/compound "
+                "identities; no single kinetic concept was chosen. Requires calibration."
             ),
         )
 
-    representative = sorted(candidates, key=lambda m: m.id)[0]
+    concept = concepts[0]
+    if concept.selected_measurement_id is None:
+        return Initialization(
+            source=ParameterSource.PLACEHOLDER,
+            value=None,
+            unit=None,
+            source_reference=None,
+            provenance_refs=concept.measurement_ids,
+            uncertainty_text=f"{base_note} {concept.selection_reason} Requires calibration.",
+        )
+
+    selected = next(m for m in candidates if m.id == concept.selected_measurement_id)
+    uncertainty_text = (
+        f"{base_note} {concept.selection_reason} Requires calibration."
+        if concept.classification is ConsolidationClassification.DISAGREEING
+        else f"{base_note} Requires calibration."
+    )
     return Initialization(
         source=ParameterSource.AI_PREDICTED,
-        value=representative.normalized_value,
-        unit=representative.normalized_unit,
-        source_reference=representative.source_id or representative.source,
-        provenance_refs=all_ids,
-        uncertainty_text=(
-            "AI-predicted by GotEnzymes2 -- never a curated experimental measurement. "
-            "Requires calibration."
-        ),
+        value=selected.normalized_value,
+        unit=selected.normalized_unit,
+        source_reference=selected.source_id or selected.source,
+        provenance_refs=concept.measurement_ids,
+        uncertainty_text=uncertainty_text,
     )
 
 
@@ -202,6 +281,7 @@ def initialize_with_fallback(
     kind: ParameterKind,
     molecularity: int | None = None,
     macro_reconstruction: Initialization | None = None,
+    network: FullNetwork | None = None,
 ) -> Initialization:
     """The full precedence a parameter slot resolves through: ``LITERATURE_DERIVED``/
     ``CURATED`` > ``AI_PREDICTED`` > ``DERIVED_FROM_MACRO_KINETICS`` >
@@ -238,11 +318,11 @@ def initialize_with_fallback(
     ``PLACEHOLDER`` from the experimental tier is returned unchanged, never an invented
     convention for an unsupported kind.
     """
-    experimental = initialize_from_evidence(evidence_of_kind)
+    experimental = initialize_from_evidence(evidence_of_kind, network=network)
     if experimental.source is not ParameterSource.PLACEHOLDER or experimental.provenance_refs:
         return experimental
 
-    ai_predicted = initialize_from_ai_predicted_evidence(evidence_of_kind)
+    ai_predicted = initialize_from_ai_predicted_evidence(evidence_of_kind, network=network)
     if ai_predicted.source is not ParameterSource.PLACEHOLDER or ai_predicted.provenance_refs:
         return ai_predicted
 

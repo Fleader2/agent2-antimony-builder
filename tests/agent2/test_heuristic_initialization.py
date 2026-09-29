@@ -270,10 +270,46 @@ def test_ai_predicted_value_never_overwritten_by_heuristic():
     assert spec.provenance_refs == ("gm1",)
 
 
-def test_disagreeing_evidence_is_preserved_as_placeholder_never_overwritten_by_heuristic():
+def test_literature_derived_beats_ai_predicted_even_under_comparable_conditions():
+    """Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment:
+    evidence-class ranking (experimental/literature > AI-predicted) is never folded into
+    consolidation's own condition/completeness/recency priorities -- it remains enforced
+    one level up by the pre-existing two-tier initializer split, so a literature-derived
+    measurement always wins regardless of how favorably an AI-predicted candidate's own
+    conditions might otherwise compare."""
+    handoff = _unimolecular_state_transition_handoff(
+        kinetic_measurements=(
+            _measurement(
+                id="km_lit", parameter_type="K", value=Decimal("2"), unit="1/s",
+                publication_id="pub-1",
+            ),
+            CuratedKineticMeasurement(
+                id="gm1",
+                parameter_type="K",
+                value=Decimal("500"),
+                unit="mM/s",
+                reaction_id="r1",
+                source="GOTENZYMES",
+                normalized_value=Decimal("0.5"),
+                normalized_unit="per_nMs",
+            ),
+        )
+    )
+    declaration = _declare(handoff)
+    spec = _by_id(declaration, "k_r1")
+    assert spec.source is ParameterSource.LITERATURE_DERIVED
+    assert spec.value == Decimal("2")
+    assert spec.provenance_refs == ("km_lit",)
+
+
+def test_disagreeing_evidence_is_resolved_and_never_overwritten_by_heuristic():
     """Two disagreeing curated measurements are strictly more informative than no evidence
     at all -- ``initialize_with_fallback`` must never silently discard that disagreement in
-    favor of a lower-precedence heuristic guess."""
+    favor of a lower-precedence heuristic guess. Multi-Measurement Kinetic Evidence
+    Consolidation and Prioritization increment: they now consolidate and a representative
+    is selected (deterministically, never a heuristic guess) rather than falling to
+    PLACEHOLDER -- disagreement is disclosed in ``uncertainty_text``, and both ids are
+    still preserved."""
     handoff = _unimolecular_state_transition_handoff(
         kinetic_measurements=(
             _measurement(id="km_a", parameter_type="K", value=Decimal("2"), unit="1/s"),
@@ -282,9 +318,10 @@ def test_disagreeing_evidence_is_preserved_as_placeholder_never_overwritten_by_h
     )
     declaration = _declare(handoff)
     spec = _by_id(declaration, "k_r1")
-    assert spec.source is ParameterSource.PLACEHOLDER
-    assert spec.value is None
+    assert spec.source is ParameterSource.CURATED
+    assert spec.value == Decimal("2")
     assert spec.provenance_refs == ("km_a", "km_b")
+    assert "differing values" in spec.uncertainty_text.lower()
 
 
 # --- Placeholder initialization by parameter shape ----------------------------------------------

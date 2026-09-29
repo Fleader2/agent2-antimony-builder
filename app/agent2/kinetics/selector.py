@@ -30,6 +30,7 @@ from app.agent2.characterization.types import (
 )
 from app.agent2.kinetics import policy
 from app.agent2.kinetics.errors import KineticLawReferenceError
+from app.agent2.kinetics.evidence_consolidation import reference_experimental_context_for_network
 from app.agent2.kinetics.types import (
     KineticLawAssignment,
     KineticLawAssignmentSet,
@@ -37,7 +38,12 @@ from app.agent2.kinetics.types import (
     KineticLawReasonCode,
 )
 from app.agent2.kinetics.validation import require_full_network, require_network_characterization
-from app.agent2.types import CuratedKineticMeasurement, FullNetwork, KineticLawType
+from app.agent2.types import (
+    CuratedExperimentalContext,
+    CuratedKineticMeasurement,
+    FullNetwork,
+    KineticLawType,
+)
 from app.agent2.version import KINETIC_LAW_ASSIGNMENT_POLICY_VERSION
 
 _ASSIGNMENT_ID_SEPARATOR = "::kinetic-law::"
@@ -312,6 +318,8 @@ def _decide_heuristic(
     allostery_present: bool,
     evidence: tuple[CuratedKineticMeasurement, ...],
     reactant_compound_ids: frozenset[str],
+    target_organism_id: str | None = None,
+    reference_context: CuratedExperimentalContext | None = None,
 ) -> KineticLawAssignment | None:
     if policy.michaelis_menten_eligible(
         rc, catalyst_known=catalyst_known, allostery_present=allostery_present
@@ -332,13 +340,16 @@ def _decide_heuristic(
     if policy.substrate_anchored_michaelis_menten_eligible(
         rc, catalyst_known=catalyst_known, allostery_present=allostery_present
     ):
-        anchored_km = policy.find_substrate_anchored_km(
-            evidence, reactant_compound_ids=reactant_compound_ids
+        resolution = policy.find_substrate_anchored_km(
+            evidence,
+            reactant_compound_ids=reactant_compound_ids,
+            target_organism_id=target_organism_id,
+            reference_context=reference_context,
         )
-        if anchored_km is not None:
+        if resolution is not None:
             return _decide_substrate_anchored_mm(
                 context,
-                anchored_km=anchored_km,
+                resolution=resolution,
                 reaction_id=reaction_id,
                 policy_version=policy_version,
             )
@@ -356,7 +367,7 @@ def _decide_heuristic(
 def _decide_substrate_anchored_mm(
     context: _CatalyticContext,
     *,
-    anchored_km: CuratedKineticMeasurement,
+    resolution: policy.AnchoredKmResolution,
     reaction_id: str,
     policy_version: str,
 ) -> KineticLawAssignment:
@@ -364,24 +375,36 @@ def _decide_substrate_anchored_mm(
     Integration Pilot 2 Run 3 finding; see ``KineticLawReasonCode
     .SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION``'s own docstring).
 
-    ``source_measurement_ids`` names the one real measurement this decision is anchored to
-    -- unlike the plain ``michaelis_menten_eligible`` heuristic above (a purely structural
-    decision with no source measurement of its own), this assignment *is* evidence-driven,
-    so its provenance is preserved exactly like ``CURATED_REPORTED``'s own
-    ``source_measurement_ids``. Never claims the reaction's full mechanism is characterized:
-    ``app.agent2.model_specification.mapping.build_expression_and_species`` still withholds a
-    fabricated combining algebra whenever more than one reactant participates (unchanged,
-    pre-existing behavior -- see that function's own "genuinely multi-substrate" branch), and
-    ``app.agent2.parameters.builder._declare_michaelis_menten`` still declares a Km slot only
-    for a reactant an actual measurement names, never inventing one for any other.
+    ``source_measurement_ids`` names **every** measurement ``resolution`` consolidated for
+    this concept ("Multi-Measurement Kinetic Evidence Consolidation and Prioritization"
+    increment) -- never only ``resolution.selected`` -- unlike the plain
+    ``michaelis_menten_eligible`` heuristic above (a purely structural decision with no
+    source measurement of its own), this assignment *is* evidence-driven, so every
+    contributing measurement's provenance is preserved exactly like ``CURATED_REPORTED``'s
+    own ``source_measurement_ids``. Never claims the reaction's full mechanism is
+    characterized: ``app.agent2.model_specification.mapping.build_expression_and_species``
+    still withholds a fabricated combining algebra whenever more than one reactant
+    participates (unchanged, pre-existing behavior -- see that function's own "genuinely
+    multi-substrate" branch), and ``app.agent2.parameters.builder._declare_michaelis_menten``
+    still declares a Km slot only for a reactant an actual measurement names, never
+    inventing one for any other.
     """
+    anchored_km = resolution.selected
+    multiplicity_note = (
+        f" {len(resolution.measurement_ids)} curated measurements support this same "
+        f"consolidated Km concept ({resolution.classification.value}); {anchored_km.id} was "
+        "selected as the most biologically relevant to the target model context, and every "
+        "supporting measurement id is preserved."
+        if len(resolution.measurement_ids) > 1
+        else ""
+    )
     return _assignment(
         reaction_id=reaction_id,
         context=context,
         kinetic_law_type=KineticLawType.MICHAELIS_MENTEN,
         assignment_source=KineticLawAssignmentSource.HEURISTIC,
         policy_version=policy_version,
-        source_measurement_ids=(anchored_km.id,),
+        source_measurement_ids=resolution.measurement_ids,
         reason_codes=(KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION,),
         unresolved_reasons=(
             KineticLawReasonCode.SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_APPROXIMATION,
@@ -390,7 +413,8 @@ def _decide_substrate_anchored_mm(
             f"Assigned MICHAELIS_MENTEN as a conservative, substrate-anchored approximation: "
             f"curated kinetic measurement {anchored_km.id} reports a Km explicitly and "
             "uniquely for one reactant of this multi-reactant enzymatic reaction, with no "
-            "ambiguous or conflicting reactant-anchored evidence. This is a partial, lumped "
+            "ambiguous or conflicting reactant-anchored evidence." + multiplicity_note + " "
+            "This is a partial, lumped "
             "approximation, not a claim that the reaction's full multi-substrate mechanism "
             "(ordered, random, ping-pong, ...) has been established -- no value is invented "
             "for any other reactant or co-substrate, and no combining algebraic expression is "
@@ -573,6 +597,8 @@ def select_reaction_assignments(
     enzyme_state_characterizations_by_id: dict[str, EnzymeStateCharacterization],
     policy_version: str,
     reactant_compound_ids: frozenset[str] = frozenset(),
+    target_organism_id: str | None = None,
+    reference_context: CuratedExperimentalContext | None = None,
 ) -> tuple[KineticLawAssignment, ...]:
     """Decide every catalytic context's kinetic-law assignment for one reaction.
 
@@ -611,6 +637,8 @@ def select_reaction_assignments(
             allostery_present=allostery_present,
             evidence=evidence,
             reactant_compound_ids=reactant_compound_ids,
+            target_organism_id=target_organism_id,
+            reference_context=reference_context,
         )
         if heuristic is not None:
             assignments.append(heuristic)
@@ -667,6 +695,11 @@ def assign_kinetic_laws(
         rc.reaction_id: _reactant_compound_ids(rc, network)
         for rc in characterization.reaction_characterizations
     }
+    # "Multi-Measurement Kinetic Evidence Consolidation and Prioritization" increment:
+    # computed once per network, never per reaction/context -- both are already,
+    # deliberately, ambiguity-conservative (``None`` whenever no single answer exists;
+    # see ``reference_experimental_context_for_network``'s own docstring).
+    reference_context = reference_experimental_context_for_network(network)
 
     assignments: list[KineticLawAssignment] = []
     for rc in characterization.reaction_characterizations:
@@ -677,6 +710,8 @@ def assign_kinetic_laws(
                 enzyme_state_characterizations_by_id=enzyme_state_characterizations_by_id,
                 policy_version=KINETIC_LAW_ASSIGNMENT_POLICY_VERSION,
                 reactant_compound_ids=reactant_compound_ids_by_reaction[rc.reaction_id],
+                target_organism_id=network.organism_id,
+                reference_context=reference_context,
             )
         )
 

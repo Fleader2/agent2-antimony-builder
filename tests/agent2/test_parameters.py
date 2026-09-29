@@ -394,7 +394,11 @@ def test_agreeing_measurements_share_one_curated_value_with_full_provenance():
     assert spec.provenance_refs == ("km1", "km2")
 
 
-def test_disagreeing_values_produce_placeholder_with_all_provenance_preserved():
+def test_disagreeing_values_consolidate_select_and_preserve_all_provenance():
+    """Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment:
+    two disagreeing curated measurements no longer force a plain PLACEHOLDER -- they
+    consolidate into one DISAGREEING concept, a representative is selected
+    deterministically, and every candidate id is still preserved (never averaged)."""
     handoff = dataclasses.replace(
         _bare_state_transition_handoff(),
         kinetic_measurements=(
@@ -404,14 +408,16 @@ def test_disagreeing_values_produce_placeholder_with_all_provenance_preserved():
     )
     declaration = _declare(handoff)
     spec = _by_id(declaration, "k_r1")
-    assert spec.source is ParameterSource.PLACEHOLDER
-    assert spec.value is None
+    assert spec.source is ParameterSource.CURATED
+    assert spec.value == Decimal("3")
     assert spec.provenance_refs == ("km1", "km2")
-    assert "different values" in spec.uncertainty_text.lower()
+    assert "differing values" in spec.uncertainty_text.lower()
 
 
-def test_disagreeing_units_also_produce_placeholder_never_converted():
-    """Same value, different unit -- never normalized, treated as disagreement (Step 13)."""
+def test_disagreeing_units_also_consolidate_never_converted():
+    """Same value, different unit -- never normalized, still treated as a numeric
+    disagreement within one concept (Step 13); a representative is still selected and
+    both ids preserved, exactly as for a differing value."""
     handoff = dataclasses.replace(
         _bare_state_transition_handoff(),
         kinetic_measurements=(
@@ -421,8 +427,10 @@ def test_disagreeing_units_also_produce_placeholder_never_converted():
     )
     declaration = _declare(handoff)
     spec = _by_id(declaration, "k_r1")
-    assert spec.source is ParameterSource.PLACEHOLDER
-    assert spec.value is None
+    assert spec.source is ParameterSource.CURATED
+    assert spec.value == Decimal("3")
+    assert spec.unit == "1/s"
+    assert spec.provenance_refs == ("km1", "km2")
 
 
 def test_publication_attributed_measurement_is_literature_derived():

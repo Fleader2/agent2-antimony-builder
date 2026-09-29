@@ -715,10 +715,14 @@ def test_two_isozymes_with_identical_reported_law_text_still_remain_distinct():
 
 
 def test_isozyme_km_disagreement_each_km_stays_attached_to_its_own_protein():
-    """Real MCT1/FAS1-shaped regression (fresh sce00061 pilot): two isozymes with
-    numerically disagreeing Km evidence for the same substrate must never have that
-    evidence merged, averaged, or attributed to the wrong catalyst -- each context sees
-    only its own protein's own Km measurements."""
+    """Real MCT1/FAS1-shaped regression (fresh sce00061 pilot): two isozymes each with
+    their own Km evidence for the same substrate (FAS1's own two measurements disagree
+    with each other) must never have that evidence merged, averaged, or attributed to the
+    wrong catalyst -- each context sees only its own protein's own Km measurements, and
+    (Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment) each
+    independently consolidates its own evidence and reaches substrate-anchored
+    Michaelis-Menten eligibility, never blocked merely because FAS1's own two
+    measurements disagree with each other."""
     handoff = _two_isozyme_handoff(
         compounds=(_compound(), _compound(id="acp")),
         reaction_participants=(
@@ -751,14 +755,13 @@ def test_isozyme_km_disagreement_each_km_stays_attached_to_its_own_protein():
     assert p1_assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
     assert p1_assignment.source_measurement_ids == ("km-mct1",)
 
-    # FAS1 (p2) has two disagreeing Km values for the same substrate -- the separately
-    # tracked, unfixed "multi-measurement collapse" limitation (substrate-anchored MM
-    # eligibility's own unconditional single-measurement rule) leaves it on the tentative
-    # default, but critically its own real evidence was never merged into p1's context,
-    # never averaged, and never silently discarded from view.
-    assert p2_assignment.kinetic_law_type is KineticLawType.MASS_ACTION
-    assert p2_assignment.is_tentative
-    assert p2_assignment.source_measurement_ids == ()
+    # FAS1 (p2) has two disagreeing Km values for its own substrate -- both consolidate
+    # into one concept, a representative is selected deterministically, and both ids are
+    # preserved: FAS1's own evidence is never merged into p1's context, never averaged,
+    # and never silently discarded, and disagreement alone no longer blocks eligibility.
+    assert p2_assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert not p2_assignment.is_tentative
+    assert p2_assignment.source_measurement_ids == ("km-fas1-a", "km-fas1-b")
 
 
 def test_two_complexes_remain_distinct_not_collapsed():
@@ -1174,7 +1177,12 @@ def test_two_measurements_anchored_to_different_reactants_remains_ineligible():
     assert assignment.is_tentative
 
 
-def test_conflicting_measurements_for_the_same_reactant_remain_conservative():
+def test_disagreeing_measurements_for_the_same_reactant_still_consolidate_and_select():
+    """Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment:
+    two measurements anchored to the *same* single reactant that report different values
+    no longer disqualify substrate-anchored eligibility on their own -- they consolidate
+    into one DISAGREEING concept, a representative is selected deterministically, and
+    every contributing id is preserved (never averaged, never silently dropped)."""
     handoff = _malonyl_coa_like_handoff(
         anchored_measurements=(
             _anchored_km(id="km-a", compound_id="malonyl-coa", value=Decimal("18.0")),
@@ -1182,8 +1190,24 @@ def test_conflicting_measurements_for_the_same_reactant_remain_conservative():
         )
     )
     assignment = _only(_assign(handoff))
-    assert assignment.kinetic_law_type is not KineticLawType.MICHAELIS_MENTEN
-    assert assignment.is_tentative
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert not assignment.is_tentative
+    assert assignment.source_measurement_ids == ("km-a", "km-b")
+
+
+def test_two_identical_measurements_for_the_same_reactant_are_eligible():
+    """Two agreeing Km records for the same reactant -- CORROBORATING, always eligible
+    (never blocked by mere multiplicity, before or after this increment)."""
+    handoff = _malonyl_coa_like_handoff(
+        anchored_measurements=(
+            _anchored_km(id="km-a", compound_id="malonyl-coa", value=Decimal("18.0")),
+            _anchored_km(id="km-b", compound_id="malonyl-coa", value=Decimal("18.0")),
+        )
+    )
+    assignment = _only(_assign(handoff))
+    assert assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN
+    assert not assignment.is_tentative
+    assert assignment.source_measurement_ids == ("km-a", "km-b")
 
 
 def test_ambiguous_catalytic_context_remains_ineligible():

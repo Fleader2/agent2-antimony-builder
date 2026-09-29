@@ -11,9 +11,14 @@ instructions, Step 29/31). See
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from app.agent2.characterization.types import ReactionCharacterization, ReactionClass
-from app.agent2.types import CuratedKineticMeasurement, KineticLawType
+from app.agent2.kinetics.evidence_consolidation import (
+    ConsolidationClassification,
+    consolidate_by_substrate,
+)
+from app.agent2.types import CuratedExperimentalContext, CuratedKineticMeasurement, KineticLawType
 
 #: Mirrors ``app.agent2.parameters.policy.KM_TYPES`` exactly -- transcribed, never imported.
 #: ``app.agent2.kinetics`` is consulted earlier in the pipeline than ``app.agent2.parameters``
@@ -164,34 +169,86 @@ def substrate_anchored_michaelis_menten_eligible(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class AnchoredKmResolution:
+    """The consolidated, prioritized substrate-anchored ``Km`` concept for one catalytic
+    context and exactly one of its reactant compounds -- returned by
+    ``find_substrate_anchored_km`` only when eligible (see that function)."""
+
+    selected: CuratedKineticMeasurement
+    measurement_ids: tuple[str, ...]
+    classification: ConsolidationClassification
+    selection_reason: str
+
+
+#: Classifications under which a consolidated Km concept is still eligible for the
+#: substrate-anchored Michaelis-Menten approximation ("Multi-Measurement Kinetic Evidence
+#: Consolidation and Prioritization" increment) -- ``CONTEXT_DISTINCT``/``UNRESOLVED`` are
+#: deliberately excluded: real, confirmed biological-identity conflict (or no candidate
+#: compatible with the target model context at all) is never treated as a usable concept,
+#: exactly mirroring this function's own pre-existing conservative discipline for
+#: multiple *different* anchored reactants below.
+_ELIGIBLE_ANCHORED_CLASSIFICATIONS = frozenset(
+    {
+        ConsolidationClassification.SINGLE,
+        ConsolidationClassification.CORROBORATING,
+        ConsolidationClassification.DISAGREEING,
+    }
+)
+
+
 def find_substrate_anchored_km(
     evidence: tuple[CuratedKineticMeasurement, ...],
     *,
     reactant_compound_ids: frozenset[str],
-) -> CuratedKineticMeasurement | None:
-    """The single, unambiguous ``Km`` measurement anchored to exactly one of this reaction's
-    own reactant compounds -- or ``None`` when no such measurement exists, or the evidence is
-    ambiguous or conflicting.
+    target_organism_id: str | None = None,
+    reference_context: CuratedExperimentalContext | None = None,
+) -> AnchoredKmResolution | None:
+    """The consolidated, prioritized ``Km`` concept anchored to exactly one of this
+    reaction's own reactant compounds -- or ``None`` when no such measurement exists, the
+    evidence anchors to two or more *different* reactants, or the concept's own
+    consolidation classification is ``CONTEXT_DISTINCT``/``UNRESOLVED``.
 
-    Deterministic and conservative, mirroring
-    ``app.agent2.kinetics.reaction_context``'s own "never choose among several" discipline:
-    a measurement counts only when it is recognized as a ``Km`` (``is_km_measurement``), its
-    ``compound_id`` is set, and that id is one of ``reactant_compound_ids`` -- never a
-    product, never a bare name match. **More than one** such measurement -- whether two
-    reports for the same reactant (conflicting evidence) or reports anchored to two different
-    reactants (which would imply a fuller multi-substrate mechanism this function does not
-    attempt to characterize) -- makes this return ``None`` rather than pick one arbitrarily.
+    A measurement counts only when it is recognized as a ``Km`` (``is_km_measurement``),
+    its ``compound_id`` is set, and that id is one of ``reactant_compound_ids`` -- never a
+    product, never a bare name match (unchanged). **Multiple** measurements anchored to
+    the *same* single reactant no longer disqualify this on their own ("Multi-Measurement
+    Kinetic Evidence Consolidation and Prioritization" increment) -- they consolidate into
+    one concept (``app.agent2.kinetics.evidence_consolidation``) and, when eligible, the
+    single most biologically relevant one is selected while every contributing id is
+    preserved in the returned ``measurement_ids``. Measurements anchored to two or more
+    *different* reactants still make this return ``None`` -- that would imply a fuller
+    multi-substrate mechanism this function does not attempt to characterize, and is
+    unrelated to (never resolved by) evidence consolidation.
+
+    ``target_organism_id``/``reference_context`` are optional (defaulted to ``None`` for
+    full backward compatibility) and passed straight through to consolidation's own
+    Priority 1/2 -- see ``consolidate_by_substrate``.
     """
-    anchored = [
+    anchored = tuple(
         m
         for m in evidence
         if is_km_measurement(m)
         and m.compound_id is not None
         and m.compound_id in reactant_compound_ids
-    ]
-    if len(anchored) != 1:
+    )
+    if not anchored:
         return None
-    return anchored[0]
+    if len({m.compound_id for m in anchored}) != 1:
+        return None
+
+    (concept,) = consolidate_by_substrate(
+        anchored, target_organism_id=target_organism_id, reference_context=reference_context
+    )
+    if concept.classification not in _ELIGIBLE_ANCHORED_CLASSIFICATIONS:
+        return None
+    selected = next(m for m in anchored if m.id == concept.selected_measurement_id)
+    return AnchoredKmResolution(
+        selected=selected,
+        measurement_ids=concept.measurement_ids,
+        classification=concept.classification,
+        selection_reason=concept.selection_reason,
+    )
 
 
 def tentative_mass_action_default_eligible(
@@ -227,6 +284,7 @@ def tentative_mass_action_default_eligible(
 
 
 __all__ = [
+    "AnchoredKmResolution",
     "classify_reported_rate_law_text",
     "find_substrate_anchored_km",
     "is_km_measurement",

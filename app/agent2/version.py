@@ -1035,6 +1035,53 @@ increment. ``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
 ``app.agent2.types`` shape changed; `KineticLawAssignment`/`KineticLawAssignmentSet`
 themselves are unchanged in shape, only in which contexts get built for a given
 reaction.
+
+``EVIDENCE_CONSOLIDATION_POLICY_VERSION`` is introduced at ``"evidence-consolidation-v1"``
+for the "Multi-Measurement Kinetic Evidence Consolidation and Prioritization" increment:
+``app.agent2.kinetics.evidence_consolidation`` is a new, shared module deciding which
+measurements represent the same kinetic concept and, within one concept, which single
+measurement is most biologically relevant to the target model context (organism identity,
+then experimental-condition similarity against the network's own reference
+``CuratedExperimentalContext``, then measurement completeness, then publication recency --
+the last always a no-op today, a disclosed real data-availability gap: Agent 2's own
+handoff contract has no publication year/date field at all -- then a deterministic
+``source``/``source_id``/``id`` tie-break), kept as its own separately-versioned constant
+since this rule set can evolve independently of either consumer below (mirrors
+``MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION``'s own identical precedent).
+
+``KINETIC_LAW_ASSIGNMENT_POLICY_VERSION`` was bumped from ``"kinetic-law-v5"`` to
+``"kinetic-law-v6"`` for the same increment: ``policy.find_substrate_anchored_km``
+(`app.agent2.kinetics.policy`) no longer requires exactly one raw Km measurement to
+declare a catalytic context eligible for the substrate-anchored Michaelis-Menten
+approximation -- multiple measurements anchored to the *same* single reactant compound
+(whether they agree or genuinely disagree) now consolidate into one concept and remain
+eligible; only a real, confirmed organism conflict among them, or multiple *different*
+anchored reactant compounds, still disqualifies it, exactly as before. A materially
+different, observable result for the same real input whenever a catalytic context's own
+real Km evidence for one substrate has more than one measurement (real fresh
+``sce00061`` pilot: this was previously the unconditional rejection rule blocking every
+one of the three real multi-Km reactions the isozyme-context-resolution increment's own
+pilot evaluation had already isolated). ``KineticLawAssignment.source_measurement_ids``
+now names every consolidated measurement's id, never only one, whenever this rule fires
+with more than one supporting measurement.
+
+``PARAMETER_DECLARATION_POLICY_VERSION`` was bumped from ``"parameter-declaration-v4"``
+to ``"parameter-declaration-v5"`` for the same increment:
+``app.agent2.parameters.initializer.initialize_from_evidence``/
+``initialize_from_ai_predicted_evidence`` no longer resolve to a plain ``PLACEHOLDER``
+merely because two or more otherwise-compatible curated measurements disagree
+numerically -- they now consolidate (via the same new shared module) and select the
+single most biologically relevant one, disclosing every other candidate's id in
+``provenance_refs`` and the reason it was outranked in ``uncertainty_text``, never
+averaging. Both functions gained an optional ``network: FullNetwork | None = None``
+keyword (defaulted for full backward compatibility -- a caller that does not pass it
+resolves through the identical priority order with no reference context or organism
+filtering available, degrading gracefully to the deterministic tie-break); every real
+call site in ``app.agent2.parameters.builder`` now passes its own already-in-scope
+``network``. A materially different, observable result for the same real input whenever
+a parameter slot's real curated evidence disagrees but is not otherwise excluded.
+``AGENT2_CONTRACT_VERSION`` is unchanged for both bumps: no field of any
+``app.agent2.types`` shape changed by this increment.
 """
 
 from __future__ import annotations
@@ -1043,8 +1090,8 @@ AGENT2_CONTRACT_VERSION = "0.10"
 AGENT1_HANDOFF_VERSION = "1.4"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
-KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v5"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v4"
+KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v5"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v8"
@@ -1053,6 +1100,7 @@ REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
 MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
+EVIDENCE_CONSOLIDATION_POLICY_VERSION = "evidence-consolidation-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1060,6 +1108,7 @@ __all__ = [
     "AGENT2_CONTRACT_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "EVIDENCE_CONSOLIDATION_POLICY_VERSION",
     "HEURISTIC_INITIALIZATION_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",
