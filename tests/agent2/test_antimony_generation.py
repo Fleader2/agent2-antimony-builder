@@ -651,10 +651,12 @@ def test_multiple_kinetic_contexts_never_duplicate_the_biochemical_reaction():
     assert "multiple catalytic contexts" in text
 
 
-def test_isozymes_with_independent_contexts_are_not_summed_or_chosen():
-    """Step 27: two isozyme-style catalytic contexts (protein-general, no enzyme state) with
-    no simultaneous-applicability signal -- no duplicate reactions, no arbitrary law
-    selection, no automatic summation, composition unresolved."""
+def test_isozymes_with_independent_resolved_contexts_compose_additively():
+    """Multi-Context Catalytic Rate Composition increment (Stage 1): two isozyme-style
+    protein-general catalytic contexts, each independently resolved, with no curated basis
+    for mutual exclusivity -- no duplicate reactions, no arbitrary law selection, never
+    merged into one shared law, but now genuinely, additively composed (never a naive,
+    unparenthesized concatenation) rather than left unconditionally unresolved."""
     law_1 = _kinetic_law(
         kinetic_law_id="k-iso1", protein_id="p1", parameter_ids=("k1",), expression="k1 * a"
     )
@@ -670,9 +672,215 @@ def test_isozymes_with_independent_contexts_are_not_summed_or_chosen():
     text = package.full_antimony.antimony_text
     assert text.count("J_r1:") == 1
     assert "k1 * a + k2 * a" not in text
+    assert "(p_k1 * s_a) + (p_k2 * s_a)" in text
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY" in text
     readiness = package.full_antimony.readiness
-    assert readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    assert readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert package.full_antimony.unresolved_reaction_ids == ()
+
+
+def test_isozymes_with_different_law_types_compose_additively():
+    """Composition never requires the contexts to share the same kinetic-law type -- MCT1/
+    FAS1-shaped: one context MASS_ACTION, the other MICHAELIS_MENTEN, both independently
+    resolved, both real, distinct catalyst identities."""
+    law_1 = _kinetic_law(
+        kinetic_law_id="k-iso1",
+        protein_id="p1",
+        law_type=KineticLawType.MASS_ACTION,
+        parameter_ids=("k1",),
+        expression="k1 * a",
+    )
+    law_2 = _kinetic_law(
+        kinetic_law_id="k-iso2",
+        protein_id="p2",
+        law_type=KineticLawType.MICHAELIS_MENTEN,
+        parameter_ids=("kcat2", "km2"),
+        expression="kcat2 * a / (km2 + a)",
+        species_ids=("a",),
+    )
+    model = _model(
+        kinetic_laws=(law_1, law_2),
+        parameters=(
+            _parameter(parameter_id="k1"),
+            _parameter(parameter_id="kcat2", value=Decimal("1")),
+            _parameter(parameter_id="km2", value=Decimal("10")),
+        ),
+        module_specifications=(),
+    )
+    package = generate_antimony(model)
+    text = package.full_antimony.antimony_text
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    reaction_line = next(line for line in text.splitlines() if line.startswith("J_r1:"))
+    assert "law_types=(MASS_ACTION,MICHAELIS_MENTEN)" in reaction_line
+
+
+def _two_complex_model(**law_overrides) -> ModelSpecification:
+    law_c1 = _kinetic_law(
+        kinetic_law_id="k-c1", complex_id="c1", parameter_ids=("k_c1",), expression="k_c1 * a",
+        **law_overrides,
+    )
+    law_c2 = _kinetic_law(
+        kinetic_law_id="k-c2", complex_id="c2", parameter_ids=("k_c2",), expression="k_c2 * a",
+        **law_overrides,
+    )
+    return _model(
+        kinetic_laws=(law_c1, law_c2),
+        parameters=(_parameter(parameter_id="k_c1"), _parameter(parameter_id="k_c2")),
+        module_specifications=(),
+    )
+
+
+def test_two_complexes_compose_additively():
+    """Generalization beyond isozymes: two distinct, independently-resolved complex-general
+    contexts compose exactly like two protein-general ones."""
+    model = _two_complex_model()
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "(p_k_c1 * s_a) + (p_k_c2 * s_a)" in reaction_line
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY" in reaction_line
+
+
+def test_protein_and_complex_contexts_never_composed():
+    """A whole enzyme complex and an independently-catalyzing protein are never composed --
+    nothing curated confirms that pairing is not double-counting (e.g. the protein could be
+    one of the complex's own subunits)."""
+    law_protein = _kinetic_law(
+        kinetic_law_id="k-p1", protein_id="p1", parameter_ids=("k1",), expression="k1 * a"
+    )
+    law_complex = _kinetic_law(
+        kinetic_law_id="k-c1", complex_id="c1", parameter_ids=("k_c1",), expression="k_c1 * a"
+    )
+    model = _model(
+        kinetic_laws=(law_protein, law_complex),
+        parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k_c1")),
+        module_specifications=(),
+    )
+    package = generate_antimony(model)
+    assert (
+        package.full_antimony.readiness
+        is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    )
     assert package.full_antimony.unresolved_reaction_ids == ("r1",)
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED" in reaction_line
+
+
+def test_enzyme_state_and_protein_context_mix_never_composed():
+    """A protein-general context alongside a distinct enzyme-state context of some other
+    (or the same) protein is never composed -- mixing granularities is exactly as
+    unestablished as mixing protein-general with complex-general."""
+    law_protein = _kinetic_law(
+        kinetic_law_id="k-p1", protein_id="p1", parameter_ids=("k1",), expression="k1 * a"
+    )
+    law_state = _kinetic_law(
+        kinetic_law_id="k-E", enzyme_state_id="E", parameter_ids=("k_e",), expression="k_e * a"
+    )
+    model = _model(
+        full_network=_network(
+            enzyme_states=(CuratedEnzymeState(id="E", protein_id="p2", state_type="unmodified"),)
+        ),
+        kinetic_laws=(law_protein, law_state),
+        parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k_e")),
+        module_specifications=(),
+    )
+    package = generate_antimony(model)
+    assert (
+        package.full_antimony.readiness
+        is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    )
+
+
+def test_three_isozymes_compose_in_deterministic_order_regardless_of_input_order():
+    """Deterministic expression ordering: the composed expression is always sorted by
+    ``kinetic_law_id``, never by construction/input order."""
+    law_a = _kinetic_law(
+        kinetic_law_id="k-zzz", protein_id="p3", parameter_ids=("k3",), expression="k3 * a"
+    )
+    law_b = _kinetic_law(
+        kinetic_law_id="k-aaa", protein_id="p1", parameter_ids=("k1",), expression="k1 * a"
+    )
+    law_c = _kinetic_law(
+        kinetic_law_id="k-mmm", protein_id="p2", parameter_ids=("k2",), expression="k2 * a"
+    )
+    params = (
+        _parameter(parameter_id="k1"),
+        _parameter(parameter_id="k2"),
+        _parameter(parameter_id="k3"),
+    )
+    model_forward = _model(
+        kinetic_laws=(law_a, law_b, law_c), parameters=params, module_specifications=()
+    )
+    model_reversed = _model(
+        kinetic_laws=(law_c, law_b, law_a), parameters=params, module_specifications=()
+    )
+    text_forward = generate_antimony(model_forward).full_antimony.antimony_text
+    text_reversed = generate_antimony(model_reversed).full_antimony.antimony_text
+    assert text_forward == text_reversed
+    reaction_line = next(
+        line for line in text_forward.splitlines() if line.startswith("J_r1:")
+    )
+    expression = reaction_line.split(";")[1].strip()
+    assert expression == "(p_k1 * s_a) + (p_k2 * s_a) + (p_k3 * s_a)"
+
+
+def test_one_unresolved_isozyme_contribution_does_not_contaminate_the_other():
+    """One unresolved contribution (a PLACEHOLDER parameter, no numeric value) must never be
+    silently dropped from the sum, and must never corrupt its sibling's own, independently
+    computed resolution -- the reaction stays conservatively unresolved as a whole, but the
+    resolved contribution's own law/parameters are completely untouched."""
+    law_resolved = _kinetic_law(
+        kinetic_law_id="k-iso1", protein_id="p1", parameter_ids=("k1",), expression="k1 * a"
+    )
+    law_unresolved = _kinetic_law(
+        kinetic_law_id="k-iso2", protein_id="p2", parameter_ids=("k2",), expression="k2 * a"
+    )
+    model = _model(
+        kinetic_laws=(law_resolved, law_unresolved),
+        parameters=(
+            _parameter(parameter_id="k1"),
+            _parameter(parameter_id="k2", source=ParameterSource.PLACEHOLDER, value=None),
+        ),
+        module_specifications=(),
+    )
+    package = generate_antimony(model)
+    assert (
+        package.full_antimony.readiness
+        is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
+    )
+    assert package.full_antimony.unresolved_reaction_ids == ("r1",)
+    # Both law ids are still named -- the resolved one's own identity/context is preserved
+    # in the disclosure, never omitted just because a sibling is unresolved.
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "k-iso1[p1]" in reaction_line
+    assert "k-iso2[p2]" in reaction_line
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED" in reaction_line
+    # k-iso1's own unresolved_kinetic_law_ids status: neither law is individually flagged
+    # missing a value (unresolved_kinetic_law_ids exists at the reaction level here, since
+    # the reaction as a whole withholds its rate) -- but only k2 is the genuinely missing
+    # parameter, never k1.
+    assert package.full_antimony.unresolved_kinetic_law_ids == ("k-iso1", "k-iso2")
+
+
+def test_single_catalyst_behavior_unchanged_by_composition_gate():
+    """Single-context reactions are completely unaffected by this increment."""
+    model = _model()
+    package = generate_antimony(model)
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "COMPOSED" not in reaction_line
 
 
 def test_enzyme_state_specific_contexts_preserved_but_composition_unresolved():

@@ -16,9 +16,29 @@ One ``ReactionSpecification`` always serializes to exactly one Antimony
 reaction, regardless of how many distinct catalytic-context kinetic laws
 reference it. When more than one kinetic law shares a ``reaction_id``,
 this module never emits duplicate stoichiometric reactions and never
-sums the contributions unless simultaneous applicability is already
-explicitly established upstream (never inferred here from the mere
-existence of multiple contexts) -- see ``resolve_reaction_rate_expression``.
+sums the contributions unless simultaneous applicability is established
+-- never inferred from the mere existence of multiple contexts -- see
+``resolve_reaction_rate_expression``.
+
+**Multi-Context Catalytic Rate Composition increment (Stage 1)**: the
+simultaneous-applicability signal §11a's own ``RESOLVED_COMPOSED`` had
+always been reserved for now exists, scoped narrowly --
+``_context_group_composability`` composes a homogeneous group of two or
+more distinct protein-general contexts, or a homogeneous group of two or
+more distinct complex-general contexts, additively (never a mix of the
+two, and never any group containing an enzyme-state context). Two or more
+independently-resolved isozymes acting on the same reaction now produce
+one real, disclosed, summed rate (`(v_p1) + (v_p2)`) instead of an
+unconditional `UNRESOLVED_MULTIPLE_CONTEXTS`. Enzyme-state contexts
+(`enzyme_state_id`) are deliberately **not** composed in this stage --
+each remains its own distinct, individually-inspectable
+``KineticLawSpecification`` (never collapsed, never duplicated with a
+fabricated full parent-enzyme concentration), but a reaction with two or
+more enzyme-state contexts, or any mix of enzyme-state with protein/
+complex-general contexts, still resolves to
+`UNRESOLVED_MULTIPLE_CONTEXTS` -- composing across mutually-exclusive
+modification-state populations requires real state-population/
+conservation data this increment does not add (Stage 2's own job).
 """
 
 from __future__ import annotations
@@ -71,11 +91,14 @@ class _LawResolution:
 
 class _ReactionRateStatus(StrEnum):
     """The reaction-level (not law-level) verdict ``resolve_reaction_rate_expression``
-    returns -- see that function's own docstring. ``RESOLVED_COMPOSED`` is reserved for a
-    future increment: no current Agent 2 contract establishes simultaneous catalytic-context
-    applicability (Step 5 inspection -- ``docs/12_antimony_generation.md`` §11a), so this
-    status is never produced in this version; kept only so the vocabulary does not need to
-    change shape again once such a signal exists."""
+    returns -- see that function's own docstring.
+
+    **Multi-Context Catalytic Rate Composition increment (Stage 1)**: ``RESOLVED_COMPOSED``
+    is now genuinely produced -- see ``_context_group_composability`` for the exact
+    simultaneous-applicability gate. It fires only for a homogeneous group of
+    protein-general-only or complex-general-only contexts (never a group containing any
+    ``enzyme_state_id`` context, and never a group mixing protein-general with
+    complex-general contexts) where every individual law is itself independently resolved."""
 
     RESOLVED_SINGLE = "RESOLVED_SINGLE"
     RESOLVED_COMPOSED = "RESOLVED_COMPOSED"
@@ -102,6 +125,52 @@ class _ReactionRateResolution:
     reasons: tuple[str, ...] = ()
 
 
+def _context_kind(law: KineticLawSpecification) -> str:
+    if law.enzyme_state_id is not None:
+        return "enzyme_state"
+    if law.protein_id is not None:
+        return "protein"
+    if law.complex_id is not None:
+        return "complex"
+    return "general"
+
+
+def _context_group_composability(laws: tuple[KineticLawSpecification, ...]) -> bool:
+    """Multi-Context Catalytic Rate Composition increment (Stage 1) -- the simultaneous-
+    applicability gate ``docs/12_antimony_generation.md`` §11a's own ``RESOLVED_COMPOSED``
+    always required but never had a signal for, until now.
+
+    True only for a **homogeneous** group of two or more distinct protein-general contexts,
+    or a homogeneous group of two or more distinct complex-general contexts -- never a mix
+    of the two (a whole enzyme complex and one of its own subunit proteins are never
+    established as independently, additively active; nothing curated confirms that
+    combination is not double-counting), and never a group containing even one enzyme-state
+    context. ``enzyme_state_id`` distinguishes a *modification state* of the *same*
+    underlying protein/complex, whose own population is mutually exclusive across states at
+    any instant -- summing state-specific rates as though every state were simultaneously,
+    fully present would be fabricated biology (a real total-enzyme-conservation constraint
+    this increment does not add; see the module docstring's own "prepare, do not implement"
+    scope for Stage 2). A "general" (no catalyst identity at all) context is also never
+    composed with anything -- there is no basis to confirm it is biologically distinct from
+    a sibling law rather than an artifact of ambiguous/collapsed evidence.
+
+    This is the only signal this increment adds: real, distinct protein (or complex)
+    identity, with no curated basis for mutual exclusivity, is treated as physically
+    co-present, independently-acting catalysis by default -- the standard systems-biology
+    convention for isozymes, applicable here for the first time now that isozyme contexts
+    are no longer collapsed upstream (the isozyme-context-resolution increment). Distinct
+    identity within the homogeneous group is re-confirmed defensively (never trusted blindly)
+    even though upstream construction already guarantees it.
+    """
+    if len(laws) < 2:
+        return False
+    kinds = {_context_kind(law) for law in laws}
+    if kinds not in ({"protein"}, {"complex"}):
+        return False
+    identities = {law.protein_id or law.complex_id for law in laws}
+    return len(identities) == len(laws)
+
+
 def resolve_reaction_rate_expression(
     reaction: ReactionSpecification,
     laws: tuple[KineticLawSpecification, ...],
@@ -113,13 +182,13 @@ def resolve_reaction_rate_expression(
     **Central architectural rule**: a ``KineticLawSpecification`` is a kinetic
     *contribution*, not a second biochemical reaction. Exactly one law -> that law's own
     resolution, verbatim (``RESOLVED_SINGLE`` or its own unresolved reason). Two or more laws
-    sharing this ``reaction_id`` -> ``UNRESOLVED_MULTIPLE_CONTEXTS`` **unconditionally** in
-    this version: no current Agent 2 contract (``KineticLawSpecification``, ``ModelAssumption``,
-    or any upstream reason code) records that two catalytic contexts are known to act
-    *simultaneously* rather than merely being distinct, separately-evidenced contexts (e.g.
-    alternative isozymes, mutually exclusive enzyme states, condition-specific catalysis) --
-    see ``docs/12_antimony_generation.md`` §11a for the full inspection. Never summed, never
-    arbitrarily chosen, never duplicated into multiple stoichiometric reactions.
+    sharing this ``reaction_id`` compose additively (``RESOLVED_COMPOSED``) only when
+    ``_context_group_composability`` establishes they are simultaneously, independently
+    applicable **and** every one of them is individually resolved on its own; otherwise
+    ``UNRESOLVED_MULTIPLE_CONTEXTS`` -- never summed, never arbitrarily chosen among, never
+    duplicated into multiple stoichiometric reactions. See ``docs/12_antimony_generation.md``
+    §11a for the full inspection and the Multi-Context Catalytic Rate Composition
+    increment's own extension of it.
     """
     ordered_laws = tuple(sorted(laws, key=lambda law: law.kinetic_law_id))
     if not ordered_laws:
@@ -135,12 +204,37 @@ def resolve_reaction_rate_expression(
 
     if len(ordered_laws) > 1:
         law_ids = tuple(law.kinetic_law_id for law in ordered_laws)
+        if not _context_group_composability(ordered_laws):
+            return _ReactionRateResolution(
+                status=_ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS,
+                expression=None,
+                laws=ordered_laws,
+                unresolved_law_ids=law_ids,
+                reasons=("MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED",),
+            )
+        contribution_resolutions = tuple(
+            law_resolutions[law.kinetic_law_id] for law in ordered_laws
+        )
+        if not all(r.resolved for r in contribution_resolutions):
+            # Composable in principle, but at least one contribution is not itself
+            # resolved -- never silently drop it and compose only the resolved remainder
+            # (that would understate the real total rate without disclosure), and never
+            # let its own unresolved status corrupt a sibling contribution's independent
+            # resolution (each ``_LawResolution`` above was computed in total isolation).
+            return _ReactionRateResolution(
+                status=_ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS,
+                expression=None,
+                laws=ordered_laws,
+                unresolved_law_ids=law_ids,
+                reasons=("MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED",),
+            )
+        composed_expression = " + ".join(
+            f"({r.rendered_expression})" for r in contribution_resolutions
+        )
         return _ReactionRateResolution(
-            status=_ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS,
-            expression=None,
+            status=_ReactionRateStatus.RESOLVED_COMPOSED,
+            expression=composed_expression,
             laws=ordered_laws,
-            unresolved_law_ids=law_ids,
-            reasons=("MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED",),
         )
 
     law = ordered_laws[0]
@@ -366,7 +460,7 @@ def _reaction_line(
     antimony_reaction_id = id_map.reactions[reaction.reaction_id]
     reversible_comment = _reversible_comment(reaction)
 
-    if resolution.status in _RESOLVED_REACTION_STATUSES:
+    if resolution.status is _ReactionRateStatus.RESOLVED_SINGLE:
         (law,) = resolution.laws
         context = _law_context(law)
         context_comment = f" catalytic_context={context}" if context else ""
@@ -376,16 +470,45 @@ def _reaction_line(
             f"law_type={law.law_type.value} reversible={reversible_comment}{context_comment}"
         )
 
+    if resolution.status is _ReactionRateStatus.RESOLVED_COMPOSED:
+        # Multi-Context Catalytic Rate Composition increment (Stage 1): two or more
+        # simultaneously-applicable, independently-resolved catalytic contexts, composed
+        # additively -- every contributing law id/context is named explicitly, never
+        # collapsed into an anonymous total (§11a: "each contribution remains individually
+        # inspectable").
+        contexts = ", ".join(
+            f"{law.kinetic_law_id}[{_law_context(law) or 'no-context'}]" for law in resolution.laws
+        )
+        law_types = ",".join(sorted({law.law_type.value for law in resolution.laws}))
+        return (
+            f"{antimony_reaction_id}: {equation}; {resolution.expression};"
+            f"  // reaction_id={reaction.reaction_id} COMPOSED from ({contexts}) "
+            f"law_types=({law_types}) reversible={reversible_comment} reason="
+            "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY -- simultaneously-applicable, "
+            "independently-resolved catalytic contexts summed additively, never merged into "
+            "one shared law or parameter set"
+        )
+
     if resolution.status is _ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS:
         contexts = ", ".join(
             f"{law.kinetic_law_id}[{_law_context(law) or 'no-context'}]" for law in resolution.laws
         )
         reasons = ",".join(resolution.reasons)
+        # Two distinct real reasons share this status: composition was never eligible at
+        # all (mixed/enzyme-state contexts), or it was eligible but at least one
+        # contribution is not itself resolved yet -- ``reasons`` (always present) already
+        # discloses which, machine-readably; the prose below stays generically accurate for
+        # both rather than guessing.
+        outcome = (
+            "eligible for composition but at least one contribution is unresolved"
+            if "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED" in resolution.reasons
+            else "simultaneous composition not established"
+        )
         return (
             f"{antimony_reaction_id}: {equation};"
             f"  // reaction_id={reaction.reaction_id} UNRESOLVED multiple catalytic contexts "
-            f"({contexts}) reasons=({reasons}) reversible={reversible_comment} -- simultaneous "
-            "composition not established, rate withheld, see ModelSpecification.model_assumptions"
+            f"({contexts}) reasons=({reasons}) reversible={reversible_comment} -- {outcome}, "
+            "rate withheld, see ModelSpecification.model_assumptions"
         )
 
     # A single, unresolved law (UNASSIGNED or UNRESOLVED_EXPRESSION -- see _resolve_law).

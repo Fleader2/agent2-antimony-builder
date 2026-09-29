@@ -1206,6 +1206,48 @@ def test_substrate_anchored_mm_assumption_plural_measurements_antimony_generatio
     assert package.full_antimony.antimony_text
 
 
+def test_fas1_mct1_shaped_isozymes_compose_additively_and_become_executable():
+    """Multi-Context Catalytic Rate Composition increment (Stage 1) -- the real, saved-pilot
+    regression: MCT1 (p1, one real Km) and FAS1 (p2, three consolidated Km measurements)
+    each independently reach MICHAELIS_MENTEN with their own real evidence and their own
+    executable-rate-law-fallback kf/kr, and the reaction -- previously stuck
+    NON_EXECUTABLE_UNRESOLVED_KINETICS purely because two isozyme contexts existed -- now
+    composes additively into one real, executable rate."""
+    fas1_measurements = (
+        _measurement(
+            id="km-fas1-a", parameter_type="KM", value=Decimal("18000"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+        _measurement(
+            id="km-fas1-b", parameter_type="KM", value=Decimal("61300"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+        _measurement(
+            id="km-fas1-c", parameter_type="KM", value=Decimal("61300"), unit="nM",
+            reaction_id="r1", compound_id="malonyl-coa", protein_id="p2",
+        ),
+    )
+    handoff = _malonyl_coa_isozyme_handoff(second_catalyst_measurements=fas1_measurements)
+    model = _assemble(handoff)
+    package = generate_antimony(model)
+
+    assert package.full_antimony.readiness is AntimonyArtifactReadiness.EXECUTABLE
+    assert package.full_antimony.unresolved_reaction_ids == ()
+    reaction_line = next(
+        line for line in package.full_antimony.antimony_text.splitlines()
+        if line.startswith("J_r1:")
+    )
+    assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY" in reaction_line
+    assert " + (" in reaction_line.split(";")[1]
+
+    # Every real supporting measurement id is still traceable on the underlying,
+    # individually-preserved kinetic laws -- composition never collapses provenance.
+    p2_law = next(law for law in model.kinetic_laws if law.protein_id == "p2")
+    p1_law = next(law for law in model.kinetic_laws if law.protein_id == "p1")
+    assert p2_law.kinetic_law_id != p1_law.kinetic_law_id
+    assert len(model.kinetic_laws) == 2
+
+
 def test_substrate_anchored_mm_law_type_and_disclosed_fallback_expression():
     """Executable Rate-Law Fallback increment: this genuinely 2-reactant reaction no longer
     stays unexpressed -- a generic, disclosed, non-mechanistic mass-action-style simulation

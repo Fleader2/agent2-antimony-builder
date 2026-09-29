@@ -235,25 +235,38 @@ resolution helper this revision introduced. Given one
 references it, it returns one of:
 
 * `RESOLVED_SINGLE` -- exactly one law, itself resolved (§15).
-* `RESOLVED_COMPOSED` -- **reserved for a future increment.** No current
-  Agent 2 contract (`KineticLawSpecification`, `KineticLawAssignment`,
-  `ModelAssumption`, or any reason-code vocabulary) records that two
-  catalytic contexts are known to act *simultaneously* rather than
-  merely being distinct, separately-evidenced contexts -- confirmed by
-  inspection of `app.agent2.kinetics`/`app.agent2.model_specification`
-  before writing this revision (Step 5 of the revision instructions).
-  This status is therefore never produced by the current implementation;
-  it exists only so the vocabulary will not need to change shape again
-  once such a signal is added upstream. No summation code exists in this
-  version -- writing an unreachable composition renderer with nothing to
-  exercise it would itself be the kind of half-finished implementation
-  this repository avoids.
+* `RESOLVED_COMPOSED` -- **implemented as of the "Multi-Context Catalytic
+  Rate Composition, Stage 1" increment.** `_context_group_composability`
+  (`app.agent2.antimony.generator`) treats a *homogeneous* group of two
+  or more distinct, independently-resolved catalytic contexts -- all
+  protein-general, or all complex-general, never a group containing any
+  `enzyme_state_id` context and never a mixed protein/complex group -- as
+  simultaneously applicable by the standard isozyme-summation convention:
+  nothing in the current data model curates explicit mutual-exclusivity
+  or co-expression signals between distinct isozymes/complexes, so real,
+  distinct catalyst identity with no curated basis for exclusivity is the
+  only defensible, non-fabricated default. Enzyme-state groups are
+  deliberately excluded -- state populations are mutually exclusive
+  fractions of one total enzyme pool and no population-fraction data
+  exists yet to justify summing them; that remains Stage 2's job. A
+  composable group in which at least one individual contribution is
+  itself unresolved does **not** produce `RESOLVED_COMPOSED` -- it
+  produces `UNRESOLVED_MULTIPLE_CONTEXTS` with reason
+  `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED`, never silently
+  dropping the unresolved contribution and composing only the resolved
+  remainder (see "Composition" below for the rendered expression shape).
 * `UNRESOLVED_MULTIPLE_CONTEXTS` -- two or more laws share this
-  `reaction_id`. **Produced unconditionally** in this version, regardless
-  of how each individual law resolves on its own -- distinct enzyme
-  states (§11), isozymes, or any other catalytic-context plurality all
-  land here. Never summed, never arbitrarily chosen among, never
-  duplicated into multiple stoichiometric reactions.
+  `reaction_id`, and either (a) the group is not composable at all
+  (reason `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED` -- a mixed
+  protein/complex group, any group containing an enzyme-state context, or
+  any other case with no established simultaneous-applicability basis),
+  or (b) the group is composable but at least one contribution is itself
+  unresolved (reason `MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_
+  UNRESOLVED`, see above). Distinct enzyme states (§11), or any other
+  catalytic-context plurality that fails composability, land in case (a)
+  exactly as before this increment. Never summed across incompatible
+  contexts, never arbitrarily chosen among, never duplicated into
+  multiple stoichiometric reactions.
 * `UNRESOLVED_EXPRESSION` / `UNASSIGNED` -- exactly one law, itself
   unresolved for its own reasons (§15-17), unchanged from before this
   revision.
@@ -288,13 +301,22 @@ contexts and no simultaneous-applicability signal resolve to
 co-expression, tissue-specificity, or mutual exclusivity are all
 plausible and this package has no basis to prefer one interpretation.
 
-**Composition, if it is ever added**, must build the total expression
-from already-resolved contribution expressions with explicit
-parenthesization (e.g. `(v_E) + (v_EP)`), sorted by
-`kinetic_law_id` for determinism, never algebraically simplified, and
-must never invent a numeric weight not already encoded upstream -- this
-is documented here as the shape a future `RESOLVED_COMPOSED` renderer
-must take, not implemented now.
+**Composition** builds the total expression from already-resolved
+contribution expressions with explicit parenthesization (e.g.
+`(p_k1 * s_a) + (p_k2 * s_a)`), sorted by `kinetic_law_id` for
+determinism (identical output regardless of construction/input order),
+never algebraically simplified, and never invents a numeric weight not
+already encoded upstream. The comment discloses every contributing
+`kinetic_law_id`/context and the reason code
+`MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY`. Real-data result for
+the fresh-pilot fatty-acid pathway (no fresh Agent 1 curation): executable
+reactions went from 5/38 to 38/38 -- every one of the 33 newly-executable
+reactions is a pure protein-general isozyme case (0 of the real 75
+kinetic-law assignments in this pathway carry `complex_id` or
+`enzyme_state_id`), including the real MCT1/FAS1 malonyl-CoA:[acp]
+S-malonyltransferase reaction, whose two isozyme contexts now compose
+additively with each context's own real, distinct Km provenance
+(`LITERATURE_DERIVED`/`AI_PREDICTED`) fully preserved.
 
 ## 12. Reactions
 
@@ -746,14 +768,16 @@ fitting, calibration, critique, ...) remains enforced unchanged.
   Antimony species -- consistent with every upstream increment's own
   "enzyme states are supporting data, not structural graph elements"
   stance (`docs/04` §3).
-* A reaction with more than one catalytic-context kinetic law (§11a) can
-  never reach `EXECUTABLE` status under this version's policy, however
-  well-resolved each individual context's own expression/parameters/
-  reversibility is -- there is no current upstream signal this package
-  can trust to justify summing them, so it always withholds the rate
-  instead. `RESOLVED_COMPOSED` (`app.agent2.antimony.generator
-  ._ReactionRateStatus`) is reserved for a future increment once such a
-  signal exists upstream; no summation renderer exists yet.
+* A reaction whose multiple catalytic-context kinetic laws are **not** a
+  homogeneous, distinct-identity protein-general or complex-general group
+  (§11a) -- a mixed protein/complex group, or any group containing an
+  `enzyme_state_id` context -- can never reach `EXECUTABLE` status under
+  this version's policy, however well-resolved each individual context's
+  own expression/parameters/reversibility is: there is no current
+  upstream signal this package can trust to justify summing enzyme-state
+  populations or heterogeneous catalyst kinds, so it always withholds the
+  rate instead. Enzyme-state composition, state-population fractions, and
+  total-enzyme conservation remain Stage 2's job.
 
 None of these block correctness: each is a disclosed, deliberate scope
 boundary, never a silent wrong answer.

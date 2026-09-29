@@ -25,6 +25,7 @@ from app.agent2.types import (
     Agent1CuratedKnowledgeViewContract,
     CuratedCompartment,
     CuratedCompound,
+    CuratedEnzymeState,
     CuratedExperimentalContext,
     CuratedKineticMeasurement,
     CuratedQuantitativeObservation,
@@ -267,6 +268,88 @@ def test_reconstructed_kcat_beats_heuristic_fallback():
     kcat = _param(parameters, "kcat")
     unusable = (ParameterSource.HEURISTIC_INITIALIZATION, ParameterSource.PLACEHOLDER)
     assert kcat.source not in unusable
+
+
+def _state_specific_mass_action_handoff(
+    *, second_state: bool
+) -> Agent1CuratedKnowledgeViewContract:
+    """A real, bimolecular (forward molecularity 2) state-specific ``MASS_ACTION`` context
+    for protein p1's state ``E``, with a real curated reported law (so this context is
+    ``CURATED_REPORTED``, never tentative -- tentative contexts never attempt any
+    reconstruction at all, by unrelated, unchanged, pre-existing policy), plus real
+    ``VMAX``/``KM`` evidence sufficient to reconstruct ``kf`` via Derivation C -- but only
+    once ``kcat`` itself is first reconstructed via Derivation B
+    (``kcat = Vmax / [E]_total``), which is exactly where a real ``EnzymeConcentration``
+    for p1 becomes load-bearing. ``second_state=True`` adds a sibling state ``E_P`` of the
+    *same* protein p1 on the *same* reaction (Multi-Context Catalytic Rate Composition
+    increment, Stage 1's own ambiguous-parent case); p1 also carries a direct,
+    protein-general association so ``resolve_enzyme_concentrations`` derives a real
+    concentration for it regardless (mirrors this project's own documented scope:
+    concentrations are never inferred from an enzyme state alone)."""
+    enzyme_states = [CuratedEnzymeState(id="E", protein_id="p1", state_type="unmodified")]
+    associations = [
+        _enzyme_association(reaction_id="r1", protein_id="p1"),
+        _enzyme_association(reaction_id="r1", protein_id=None, enzyme_state_id="E"),
+    ]
+    if second_state:
+        enzyme_states.append(
+            CuratedEnzymeState(id="E_P", protein_id="p1", state_type="phosphorylated")
+        )
+        associations.append(
+            _enzyme_association(reaction_id="r1", protein_id=None, enzyme_state_id="E_P")
+        )
+    return _handoff(
+        compartments=(_compartment(),),
+        compounds=(_compound(id="a"), _compound(id="b"), _compound(id="c")),
+        reactions=(_reaction(id="r1"),),
+        reaction_participants=(
+            _participant(reaction_id="r1", compound_id="a", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="b", role="REACTANT"),
+            _participant(reaction_id="r1", compound_id="c", role="PRODUCT"),
+        ),
+        enzyme_states=tuple(enzyme_states),
+        reaction_enzyme_associations=tuple(associations),
+        kinetic_measurements=(
+            _measurement(
+                id="reported-law-e", parameter_type="OTHER", reported_rate_law="k1 * a * b",
+                enzyme_state_id="E",
+            ),
+            _measurement(
+                id="vmax-e", parameter_type="VMAX", value=Decimal("500"), unit="nM_per_s",
+                normalized_value=Decimal("500"), normalized_unit="nM_per_s",
+                enzyme_state_id="E",
+            ),
+            _measurement(
+                id="km-e", parameter_type="KM", value=Decimal("10"), unit="nM",
+                normalized_value=Decimal("10"), normalized_unit="nM",
+                compound_id="a", enzyme_state_id="E",
+            ),
+        ),
+        quantitative_observations=(_concentration_observation(protein_id="p1"),),
+        experimental_contexts=(_context(),),
+    )
+
+
+def test_single_state_context_still_uses_real_enzyme_concentration():
+    """No sibling state of the same protein on this reaction -- p1's own real concentration
+    is used exactly as a plain protein-general context would use it."""
+    handoff = _state_specific_mass_action_handoff(second_state=False)
+    _, _, parameters = _declare(handoff)
+    k = _param(parameters, "k")
+    assert k.source is ParameterSource.DERIVED_FROM_MACRO_KINETICS
+
+
+def test_ambiguous_state_parent_withholds_enzyme_concentration():
+    """The exact same real concentration/Vmax/Km evidence that derives a real ``k`` for a
+    lone state context (``test_single_state_context_still_uses_real_enzyme_concentration``)
+    must *not* derive anything once a sibling state (``E_P``) of the *same* protein exists
+    on the *same* reaction -- p1's own real 100 nM concentration is withheld rather than
+    being handed to ``E`` alone as though ``E_P`` did not also draw from the same pool."""
+    handoff = _state_specific_mass_action_handoff(second_state=True)
+    _, _, parameters = _declare(handoff)
+    k_e = next(p for p in parameters.parameter_specifications if p.parameter_id == "k_r1_E")
+    assert k_e.source is not ParameterSource.DERIVED_FROM_MACRO_KINETICS
+    assert k_e.source is ParameterSource.HEURISTIC_INITIALIZATION
 
 
 def test_ai_predicted_vmax_dependency_preserved_in_derived_kcat():

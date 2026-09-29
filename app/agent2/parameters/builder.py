@@ -15,6 +15,7 @@ anywhere in its call graph.
 from __future__ import annotations
 
 import dataclasses
+from collections import defaultdict
 
 from app.agent2.kinetics.types import (
     KineticLawAssignment,
@@ -121,13 +122,47 @@ def _protein_id_for_assignment(
     return None
 
 
+def _ambiguous_state_parent_keys(
+    assignments: KineticLawAssignmentSet, network: FullNetwork
+) -> frozenset[tuple[str, str]]:
+    """``(reaction_id, protein_id)`` pairs where two or more distinct enzyme-state
+    contexts on the same reaction share the same parent protein (Multi-Context Catalytic
+    Rate Composition increment, Stage 1).
+
+    A derived ``EnzymeConcentration`` represents one protein's own total,
+    undifferentiated abundance -- real only once per protein, never once per modification
+    state. Handing the identical full concentration independently to two or more of that
+    protein's own states on the same reaction (e.g. ``E``/``E_P``) would silently double-
+    (or N-times-) count it -- this repository has no real state-population/conservation
+    data to split it correctly (Stage 2's own job: state-interconversion dynamics), so it
+    is withheld for exactly these keys instead of guessed at. A protein/complex-general
+    context, or a single, unambiguous state context, is never affected.
+    """
+    state_protein_by_id = {state.id: state.protein_id for state in network.enzyme_states}
+    states_by_key: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for assignment in assignments.assignments:
+        if assignment.enzyme_state_id is None:
+            continue
+        protein_id = state_protein_by_id.get(assignment.enzyme_state_id)
+        if protein_id is None:
+            continue
+        states_by_key[(assignment.reaction_id, protein_id)].add(assignment.enzyme_state_id)
+    return frozenset(key for key, states in states_by_key.items() if len(states) > 1)
+
+
 def _enzyme_concentration_for_assignment(
     assignment: KineticLawAssignment,
     network: FullNetwork,
     enzyme_concentrations_by_protein_id: dict[str, EnzymeConcentration],
+    ambiguous_state_parent_keys: frozenset[tuple[str, str]],
 ) -> EnzymeConcentration | None:
     protein_id = _protein_id_for_assignment(assignment, network)
     if protein_id is None:
+        return None
+    if (
+        assignment.enzyme_state_id is not None
+        and (assignment.reaction_id, protein_id) in ambiguous_state_parent_keys
+    ):
         return None
     return enzyme_concentrations_by_protein_id.get(protein_id)
 
@@ -693,6 +728,7 @@ def _declare_for_assignment(
     network: FullNetwork,
     species_by_id: dict[str, SpeciesSpecification],
     enzyme_concentrations_by_protein_id: dict[str, EnzymeConcentration],
+    ambiguous_state_parent_keys: frozenset[tuple[str, str]],
     *,
     sibling_count: int,
 ) -> tuple[tuple[ParameterSpecification, ...], tuple[MicroscopicConstraint, ...]]:
@@ -701,7 +737,7 @@ def _declare_for_assignment(
 
     evidence = _evidence_for(assignment, reaction_measurements, sibling_count=sibling_count)
     enzyme_concentration = _enzyme_concentration_for_assignment(
-        assignment, network, enzyme_concentrations_by_protein_id
+        assignment, network, enzyme_concentrations_by_protein_id, ambiguous_state_parent_keys
     )
 
     if assignment.kinetic_law_type is KineticLawType.MASS_ACTION:
@@ -796,6 +832,7 @@ def declare_parameters(
     sibling_counts: dict[str, int] = {}
     for assignment in assignments.assignments:
         sibling_counts[assignment.reaction_id] = sibling_counts.get(assignment.reaction_id, 0) + 1
+    ambiguous_state_parent_keys = _ambiguous_state_parent_keys(assignments, network)
 
     specs: list[ParameterSpecification] = []
     constraints: list[MicroscopicConstraint] = []
@@ -806,6 +843,7 @@ def declare_parameters(
             network,
             species_by_id,
             enzyme_concentrations_by_protein_id,
+            ambiguous_state_parent_keys,
             sibling_count=sibling_counts[assignment.reaction_id],
         )
         specs.extend(assignment_specs)

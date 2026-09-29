@@ -1122,6 +1122,48 @@ substrate-anchored concept consolidates more than one measurement: previously an
 unhandled exception, now a real ``ModelAssumption`` naming every contributing
 measurement. ``AGENT2_CONTRACT_VERSION`` is unchanged: no field of any
 ``app.agent2.types`` shape changed.
+
+``ANTIMONY_GENERATION_POLICY_VERSION`` was bumped from ``"antimony-generation-v2"``
+to ``"antimony-generation-v3"``, and ``PARAMETER_DECLARATION_POLICY_VERSION`` from
+``"parameter-declaration-v5"`` to ``"parameter-declaration-v6"``, for the "Multi-
+Context Catalytic Rate Composition, Stage 1" increment. Previously,
+``resolve_reaction_rate_expression`` (`app.agent2.antimony.generator`) treated any
+reaction with more than one ``KineticLawSpecification`` as permanently
+``UNRESOLVED_MULTIPLE_CONTEXTS`` -- no combination of distinct, independently-resolved
+catalytic contexts (isozymes, complexes) could ever make such a reaction executable,
+regardless of how well each individual context was itself resolved. This made every
+real multi-isozyme reaction in the fresh-pilot fatty-acid pathway non-executable
+(5/38 reactions executable). ``_context_kind``/``_context_group_composability`` now
+recognize a homogeneous group of distinct, independently-resolved protein-general or
+complex-general contexts as simultaneously applicable by the standard isozyme-
+summation convention (never a group containing any ``enzyme_state_id`` context, never
+a mixed protein/complex group), and ``resolve_reaction_rate_expression`` composes such
+a group's rate additively (status ``RESOLVED_COMPOSED``, reason
+``MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY``) -- each contribution's own
+already-resolved, already-rendered expression is parenthesized and joined with `` +
+``, sorted by ``kinetic_law_id``, never algebraically simplified, never merged into one
+shared law or parameter set. A group that is eligible for composition but has at least
+one individually-unresolved contribution is now distinguished
+(``MULTIPLE_CATALYTIC_CONTEXTS_COMPOSABLE_BUT_UNRESOLVED``) from a group with no
+established simultaneous-applicability basis at all
+(``MULTIPLE_CATALYTIC_CONTEXTS_COMPOSITION_UNRESOLVED``, the pre-existing reason,
+unchanged for those cases). Separately, ``_enzyme_concentration_for_assignment``
+(`app.agent2.parameters.builder`) previously handed a protein's single, undifferentiated
+``EnzymeConcentration`` to every one of that protein's enzyme-state contexts on a
+reaction independently, risking double- (or N-times-) counting the same total
+abundance across sibling states; it now withholds that concentration (forcing
+heuristic fallback instead) for any ``(reaction_id, protein_id)`` pair with two or more
+distinct ``enzyme_state_id`` contexts on the same reaction, via the new
+``_ambiguous_state_parent_keys``, since no real state-population-fraction data exists
+to justify apportioning one total concentration across states. Real-data result for
+the same saved fresh-pilot handoff (no fresh Agent 1 curation): executable reactions
+5/38 -> 38/38, all 33 previously-``NON_EXECUTABLE_UNRESOLVED_KINETICS`` multi-isozyme
+reactions now compose (0 of the real 75 kinetic-law assignments in this pathway carry
+``complex_id`` or ``enzyme_state_id``, so every real multi-context reaction here is a
+pure protein-general isozyme case). Enzyme-state composition, phosphorylation/
+dephosphorylation kinetics, state-population dynamics, and total-enzyme conservation
+remain deliberately unimplemented, deferred to Stage 2. ``AGENT2_CONTRACT_VERSION`` is
+unchanged: no field of any ``app.agent2.types`` shape changed.
 """
 
 from __future__ import annotations
@@ -1131,11 +1173,11 @@ AGENT1_HANDOFF_VERSION = "1.5"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v5"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v6"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v9"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v3"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
