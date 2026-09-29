@@ -364,6 +364,124 @@ def test_translated_handoff_assembles_into_a_full_network():
 # --- Enzyme-state family structural fidelity ------------------------------------------------------
 
 
+# --- Quantitative context (Experimental Context and Quantitative Observation Framework) ---------
+
+
+def test_quantitative_context_defaults_empty_when_absent():
+    """Agent 1.x "Experimental Context and Quantitative Observation Framework" fields are
+    absent entirely from this fixture -- must degrade gracefully to empty, exactly like
+    claims/evidence/confidence_summaries already do."""
+    handoff = translate_agent1_view_to_agent2(_view())
+    assert handoff.experimental_contexts == ()
+    assert handoff.quantitative_observations == ()
+
+
+def test_experimental_context_and_quantitative_observation_translated():
+    view = _view(
+        experimental_contexts=[
+            {
+                "experimental_context_id": "ctx-1",
+                "organism_id": "org-1",
+                "strain": "BY4741",
+                "classification": "REFERENCE",
+                "source": "SGD",
+                "source_id": "sgd-protein-abundance-reference-context:org-1",
+            }
+        ],
+        quantitative_observations=[
+            {
+                "quantitative_observation_id": "qobs-1",
+                "observation_type": "PROTEIN_ABUNDANCE",
+                "value": "6670",
+                "unit": "molecules/cell",
+                "evidence_class": "REFERENCE_BASELINE",
+                "normalized_value": "6670",
+                "normalized_unit": "molecules_per_cell",
+                "uncertainty": "1539",
+                "protein_id": "fas2",
+                "organism_id": "org-1",
+                "experimental_context_id": "ctx-1",
+                "source": "SGD",
+                "source_id": "sgd-protein-abundance:S000006152",
+            }
+        ],
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+
+    (context,) = handoff.experimental_contexts
+    assert context.id == "ctx-1"
+    assert context.strain == "BY4741"
+    assert context.classification == "REFERENCE"
+
+    (observation,) = handoff.quantitative_observations
+    assert observation.id == "qobs-1"
+    assert observation.observation_type == "PROTEIN_ABUNDANCE"
+    assert observation.value == Decimal("6670")
+    assert observation.unit == "molecules/cell"
+    assert observation.normalized_value == Decimal("6670")
+    assert observation.normalized_unit == "molecules_per_cell"
+    assert observation.uncertainty == Decimal("1539")
+    assert observation.protein_id == "fas2"
+    assert observation.experimental_context_id == "ctx-1"
+    assert observation.source == "SGD"
+
+
+def test_quantitative_observation_dependencies_translated():
+    """Agent 1's own ``CuratedQuantitativeObservationDependency`` always names a real input
+    observation id (never a pure, observation-less assumption -- that is exclusively an
+    Agent 2-side concept, ``EnzymeConcentrationDependency``; see that type's own docstring)."""
+    view = _view(
+        quantitative_observations=[
+            {
+                "quantitative_observation_id": "qobs-derived",
+                "observation_type": "PROTEIN_CONCENTRATION",
+                "value": "110.76",
+                "unit": "nM",
+                "evidence_class": "DERIVED",
+                "dependencies": [
+                    {
+                        "input_observation_id": "qobs-1",
+                        "role": "abundance_input",
+                    },
+                ],
+            }
+        ]
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+    (observation,) = handoff.quantitative_observations
+    assert len(observation.dependencies) == 1
+    assert observation.dependencies[0].input_observation_id == "qobs-1"
+    assert observation.dependencies[0].role == "abundance_input"
+
+
+def test_translated_quantitative_observations_assemble_into_a_full_network():
+    view = _view(
+        experimental_contexts=[
+            {
+                "experimental_context_id": "ctx-1",
+                "organism_id": "org-1",
+                "classification": "REFERENCE",
+                "source": "SGD",
+            }
+        ],
+        quantitative_observations=[
+            {
+                "quantitative_observation_id": "qobs-1",
+                "observation_type": "PROTEIN_ABUNDANCE",
+                "value": "6670",
+                "unit": "molecules/cell",
+                "evidence_class": "REFERENCE_BASELINE",
+                "protein_id": "fas2",
+                "experimental_context_id": "ctx-1",
+            }
+        ],
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+    network = assemble_full_network(handoff)
+    assert len(network.experimental_contexts) == 1
+    assert len(network.quantitative_observations) == 1
+
+
 def test_enzyme_state_family_translated_with_correct_id_field_mapping():
     handoff = translate_agent1_view_to_agent2(_view())
     assert handoff.enzyme_states[0].id == "es-1"

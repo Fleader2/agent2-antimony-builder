@@ -31,6 +31,7 @@ from app.agent2.model_specification.validation import (
 )
 from app.agent2.modules.types import ModuleDecompositionSet
 from app.agent2.parameters.types import ParameterDeclarationSet
+from app.agent2.quantitative_context.types import QuantitativeContextResolutionSet
 from app.agent2.types import (
     FullNetwork,
     KineticLawSpecification,
@@ -46,6 +47,7 @@ def assemble_model_specification(
     parameters: ParameterDeclarationSet,
     boundaries: BoundaryAssessmentSet,
     modules: ModuleDecompositionSet,
+    enzyme_concentrations: QuantitativeContextResolutionSet | None = None,
 ) -> ModelSpecification:
     """Deterministically assemble one authoritative ``ModelSpecification`` from every prior
     increment's validated output.
@@ -54,12 +56,38 @@ def assemble_model_specification(
     Agent 2 has decided on so far" -- never "is this model biologically
     correct, numerically stable, or ready to simulate" (Agent 3/4/5's
     job). See ``docs/11_model_specification_assembly.md`` §2.
+
+    ``enzyme_concentrations`` (Quantitative Context Resolution and Derived Enzyme
+    Concentration increment) is optional and defaults to ``None`` -- every existing
+    call site continues to construct an identical ``ModelSpecification``
+    (``enzyme_concentrations=()``, no additional ``ModelAssumption`` records) with
+    no change at all. When supplied, its own ``network_id`` is cross-checked against
+    ``network.network_id`` (mirroring ``_require_matching_networks``'s identical
+    convention for every other artifact), its ``.enzyme_concentrations`` are
+    attached verbatim, and one additional ``ModelAssumption`` category is generated
+    for every protein whose concentration used the 0.1 pL reference assumption (see
+    ``build_model_assumptions``'s own docstring).
     """
     require_full_network(network)
     require_kinetic_law_assignment_set(kinetic_laws)
     require_parameter_declaration_set(parameters)
     require_boundary_assessment_set(boundaries)
     require_module_decomposition_set(modules)
+    if enzyme_concentrations is not None and not isinstance(
+        enzyme_concentrations, QuantitativeContextResolutionSet
+    ):
+        raise ModelSpecificationReferenceError(
+            "assemble_model_specification requires enzyme_concentrations to be a "
+            f"QuantitativeContextResolutionSet or None, got {enzyme_concentrations!r}"
+        )
+    if (
+        enzyme_concentrations is not None
+        and enzyme_concentrations.network_id != network.network_id
+    ):
+        raise IncompatibleArtifactVersionError(
+            f"enzyme_concentrations.network_id ({enzyme_concentrations.network_id!r}) does "
+            f"not match network.network_id ({network.network_id!r})"
+        )
 
     _require_matching_networks(network, kinetic_laws, parameters, boundaries, modules)
     _require_compatible_policy_versions(kinetic_laws, parameters, boundaries, modules)
@@ -85,6 +113,9 @@ def assemble_model_specification(
         kinetic_law_specs.append(law)
         kinetic_law_assignments_by_kinetic_law_id[law.kinetic_law_id] = assignment
 
+    resolved_enzyme_concentrations = (
+        enzyme_concentrations.enzyme_concentrations if enzyme_concentrations is not None else ()
+    )
     model_assumptions = build_model_assumptions(
         kinetic_laws=tuple(kinetic_law_specs),
         kinetic_law_assignments_by_kinetic_law_id=kinetic_law_assignments_by_kinetic_law_id,
@@ -92,6 +123,7 @@ def assemble_model_specification(
         candidate_boundary_ids=decomposition.candidate_boundary_ids,
         kinetic_measurements=network.kinetic_measurements,
         reactions=network.reactions,
+        enzyme_concentrations=resolved_enzyme_concentrations,
     )
 
     model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"
@@ -119,6 +151,7 @@ def assemble_model_specification(
         module_specifications=modules.module_specifications,
         assumptions=assumptions,
         model_assumptions=model_assumptions,
+        enzyme_concentrations=resolved_enzyme_concentrations,
         provenance_refs=provenance_refs,
     )
 

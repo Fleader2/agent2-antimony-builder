@@ -607,6 +607,271 @@ class CuratedEnzymeStateTransition:
 
 
 @dataclass(frozen=True, slots=True)
+class CuratedExperimentalContext:
+    """One curated experimental/reference context, exactly as curated by Agent 1
+    (Agent 1.x "Experimental Context and Quantitative Observation Framework",
+    ``AGENT1_HANDOFF_VERSION`` "1.3" -> "1.4").
+
+    Mirrors ``app.agent1.types.CuratedExperimentalContext`` field-for-field. Every
+    field beyond ``id`` is optional -- Agent 1 itself never fabricates a
+    medium/strain/temperature/pH/growth-phase value it was not given (see that
+    type's own docstring, and ``app.models.experimental_context.ExperimentalContext``
+    in the Agent 1 repository). ``classification``/``source`` are Agent 1's own
+    plain strings, never re-typed as an enum here -- consistent with this module's
+    established policy for every other Agent-1-sourced categorical field (e.g.
+    ``CuratedReaction.reversible`` stays ``bool | None``, never re-validated against
+    a closed vocabulary this side of the handoff does not own).
+    """
+
+    id: str
+    organism_id: str | None = None
+    strain: str | None = None
+    genotype: str | None = None
+    medium: str | None = None
+    carbon_source: str | None = None
+    temperature_c: Decimal | None = None
+    ph: Decimal | None = None
+    growth_phase: str | None = None
+    growth_condition: str | None = None
+    classification: str | None = None
+    source: str | None = None
+    source_id: str | None = None
+    publication_id: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self, "organism_id", _clean_optional_str(self.organism_id, field_name="organism_id")
+        )
+        object.__setattr__(self, "strain", _clean_optional_str(self.strain, field_name="strain"))
+        object.__setattr__(
+            self, "genotype", _clean_optional_str(self.genotype, field_name="genotype")
+        )
+        object.__setattr__(self, "medium", _clean_optional_str(self.medium, field_name="medium"))
+        object.__setattr__(
+            self,
+            "carbon_source",
+            _clean_optional_str(self.carbon_source, field_name="carbon_source"),
+        )
+        object.__setattr__(
+            self,
+            "temperature_c",
+            _require_decimal_or_none(self.temperature_c, field_name="temperature_c"),
+        )
+        object.__setattr__(self, "ph", _require_decimal_or_none(self.ph, field_name="ph"))
+        object.__setattr__(
+            self, "growth_phase", _clean_optional_str(self.growth_phase, field_name="growth_phase")
+        )
+        object.__setattr__(
+            self,
+            "growth_condition",
+            _clean_optional_str(self.growth_condition, field_name="growth_condition"),
+        )
+        object.__setattr__(
+            self,
+            "classification",
+            _clean_optional_str(self.classification, field_name="classification"),
+        )
+        object.__setattr__(self, "source", _clean_optional_str(self.source, field_name="source"))
+        object.__setattr__(
+            self, "source_id", _clean_optional_str(self.source_id, field_name="source_id")
+        )
+        object.__setattr__(
+            self,
+            "publication_id",
+            _clean_optional_str(self.publication_id, field_name="publication_id"),
+        )
+        object.__setattr__(self, "notes", _clean_optional_str(self.notes, field_name="notes"))
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedQuantitativeObservationDependency:
+    """One input a ``CuratedQuantitativeObservation`` (that is itself ``DERIVED``)
+    depends on, exactly as curated by Agent 1 (Agent 1.x "Experimental Context and
+    Quantitative Observation Framework").
+
+    Mirrors ``app.agent1.types.CuratedQuantitativeObservationDependency``
+    field-for-field. Nested inside ``CuratedQuantitativeObservation.dependencies``,
+    never a standalone top-level record -- carries no id of its own, consistent
+    with its Agent 1 counterpart.
+    """
+
+    input_observation_id: str
+    role: str | None = None
+    assumption_notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "input_observation_id",
+            _require_non_empty_str(self.input_observation_id, field_name="input_observation_id"),
+        )
+        object.__setattr__(self, "role", _clean_optional_str(self.role, field_name="role"))
+        object.__setattr__(
+            self,
+            "assumption_notes",
+            _clean_optional_str(self.assumption_notes, field_name="assumption_notes"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedQuantitativeObservation:
+    """One independently-sourced quantitative observation, exactly as curated by
+    Agent 1 (Agent 1.x "Experimental Context and Quantitative Observation
+    Framework", ``AGENT1_HANDOFF_VERSION`` "1.3" -> "1.4").
+
+    Mirrors ``app.agent1.types.CuratedQuantitativeObservation`` field-for-field.
+    Agent 1 curates *reported* quantitative facts (protein abundance, protein/
+    metabolite concentration, reaction flux, cell volume, growth rate) -- this type
+    is never auto-converted into an ``EnzymeConcentration`` or any other derived
+    quantity by anything in this module. That derivation (which observations
+    combine, under what context-compatibility rule, with what fallback assumption)
+    is implemented explicitly by ``app.agent2.quantitative_context`` (Quantitative
+    Context Resolution and Derived Enzyme Concentration increment), never
+    implicitly here -- mirrors ``CuratedKineticMeasurement``'s own identical
+    architectural boundary with ``ParameterSpecification``.
+
+    ``observation_type``/``evidence_class`` are Agent 1's own plain strings, never
+    re-typed as a closed enum here (same policy as ``CuratedExperimentalContext``
+    above). ``value``/``unit`` are the as-reported figures; ``normalized_value``/
+    ``normalized_unit`` are Agent 1's own already-computed canonical-unit
+    conversion (``None``/``None`` when unresolved -- never fabricated by this
+    translation).
+
+    **This increment does not add a top-level ``perturbations``/
+    ``CuratedPerturbation`` mirror** -- ``perturbation_id`` below is preserved
+    verbatim (Agent 1's own foreign key, exactly as every other unresolved-
+    reference-type field on this contract is), but the sibling ``Perturbation``
+    registry itself is deferred: no real Agent 1 data populates it yet (SGD
+    reference abundance carries no perturbation), and this increment's own
+    "smallest integration point" (see ``docs/16_quantitative_context_resolution.md``
+    §1) does not need it. A future increment that actually consumes perturbation
+    context should add it then, exactly as this one adds ``CuratedExperimentalContext``
+    now.
+    """
+
+    id: str
+
+    observation_type: str
+    value: Decimal
+    unit: str
+    evidence_class: str
+
+    reported_observation_type: str | None = None
+    normalized_value: Decimal | None = None
+    normalized_unit: str | None = None
+
+    uncertainty: Decimal | None = None
+    lower_bound: Decimal | None = None
+    upper_bound: Decimal | None = None
+    measurement_method: str | None = None
+
+    time_reference_basis: str | None = None
+    time_value: Decimal | None = None
+    time_unit: str | None = None
+    time_canonical_s: Decimal | None = None
+
+    experimental_context_id: str | None = None
+    perturbation_id: str | None = None
+
+    biological_replicate_id: str | None = None
+    technical_replicate_id: str | None = None
+
+    protein_id: str | None = None
+    compound_id: str | None = None
+    reaction_id: str | None = None
+    organism_id: str | None = None
+    unresolved_identity_kind: str | None = None
+    unresolved_identity_text: str | None = None
+
+    source: str | None = None
+    source_id: str | None = None
+    publication_id: str | None = None
+    dataset_id: str | None = None
+
+    notes: str | None = None
+
+    #: Every input this observation depends on, when it is itself ``DERIVED`` -- see
+    #: ``CuratedQuantitativeObservationDependency``. Empty for every non-``DERIVED``
+    #: observation, exactly as on the Agent 1 side.
+    dependencies: tuple[CuratedQuantitativeObservationDependency, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(
+            self,
+            "observation_type",
+            _require_non_empty_str(self.observation_type, field_name="observation_type"),
+        )
+        if not isinstance(self.value, Decimal):
+            raise TypeError(
+                f"CuratedQuantitativeObservation.value must be a Decimal, got {self.value!r}"
+            )
+        object.__setattr__(self, "unit", _require_non_empty_str(self.unit, field_name="unit"))
+        object.__setattr__(
+            self,
+            "evidence_class",
+            _require_non_empty_str(self.evidence_class, field_name="evidence_class"),
+        )
+        object.__setattr__(
+            self,
+            "reported_observation_type",
+            _clean_optional_str(
+                self.reported_observation_type, field_name="reported_observation_type"
+            ),
+        )
+        for field_name in (
+            "normalized_value",
+            "uncertainty",
+            "lower_bound",
+            "upper_bound",
+            "time_value",
+            "time_canonical_s",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _require_decimal_or_none(getattr(self, field_name), field_name=field_name),
+            )
+        for field_name in (
+            "normalized_unit",
+            "measurement_method",
+            "time_reference_basis",
+            "time_unit",
+            "experimental_context_id",
+            "perturbation_id",
+            "biological_replicate_id",
+            "technical_replicate_id",
+            "protein_id",
+            "compound_id",
+            "reaction_id",
+            "organism_id",
+            "unresolved_identity_kind",
+            "unresolved_identity_text",
+            "source",
+            "source_id",
+            "publication_id",
+            "dataset_id",
+            "notes",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _clean_optional_str(getattr(self, field_name), field_name=field_name),
+            )
+        object.__setattr__(
+            self,
+            "dependencies",
+            _require_tuple_of(
+                self.dependencies,
+                CuratedQuantitativeObservationDependency,
+                field_name="dependencies",
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Agent1CuratedKnowledgeViewContract:
     """Agent 2's local, decoupled representation of the Agent 1 handoff.
 
@@ -636,6 +901,19 @@ class Agent1CuratedKnowledgeViewContract:
     repository maps a ``CuratedEnzymeState`` onto a model species, and
     Whole-Network Assembly (Increment 2) was not modified to consume these
     fields (see ``docs/05_whole_network_assembly.md``).
+
+    **Quantitative context** (Agent 1.x "Experimental Context and Quantitative
+    Observation Framework", ``AGENT1_HANDOFF_VERSION`` "1.3" -> "1.4"):
+    ``experimental_contexts``/``quantitative_observations`` are now available as
+    curated input -- see ``CuratedExperimentalContext``/
+    ``CuratedQuantitativeObservation``, and §4D of
+    ``docs/02_agent1_handoff_contract.md``. Consumed, for the first time, by the
+    "Quantitative Context Resolution and Derived Enzyme Concentration" increment
+    (``app.agent2.quantitative_context``) -- see
+    ``docs/16_quantitative_context_resolution.md``. Agent 1's own sibling
+    ``perturbations``/``Perturbation`` field is deliberately **not** mirrored here
+    yet (see ``CuratedQuantitativeObservation``'s own docstring) -- a disclosed,
+    narrower reading of this bump, not an oversight.
     """
 
     contract_version: str
@@ -651,6 +929,8 @@ class Agent1CuratedKnowledgeViewContract:
     enzyme_modifications: tuple[CuratedEnzymeModification, ...] = ()
     allosteric_interactions: tuple[CuratedAllostericInteraction, ...] = ()
     enzyme_state_transitions: tuple[CuratedEnzymeStateTransition, ...] = ()
+    experimental_contexts: tuple[CuratedExperimentalContext, ...] = ()
+    quantitative_observations: tuple[CuratedQuantitativeObservation, ...] = ()
     claims: tuple[CuratedClaim, ...] = ()
     evidence: tuple[CuratedEvidence, ...] = ()
     confidence_summaries: tuple[CuratedConfidenceSummary, ...] = ()
@@ -1217,6 +1497,16 @@ class FullNetwork:
     type or by ``app.agent2.network`` (that mapping is
     ``app.agent2.characterization``/a future increment's job). See
     ``docs/06_reaction_enzyme_state_characterization.md``.
+
+    **Quantitative Context Resolution and Derived Enzyme Concentration increment**
+    added ``experimental_contexts``/``quantitative_observations`` -- every curated
+    experimental/reference context and quantitative observation, reusing Agent 1's
+    own ``CuratedExperimentalContext``/``CuratedQuantitativeObservation`` types
+    unchanged. Attached as supporting data only -- never turned into a
+    ``SpeciesSpecification`` or any structural graph element by this type or by
+    ``app.agent2.network``; deriving an ``EnzymeConcentration`` from them is
+    ``app.agent2.quantitative_context``'s job (see
+    ``docs/16_quantitative_context_resolution.md``).
     """
 
     network_id: str
@@ -1231,6 +1521,15 @@ class FullNetwork:
     enzyme_modifications: tuple[CuratedEnzymeModification, ...] = ()
     allosteric_interactions: tuple[CuratedAllostericInteraction, ...] = ()
     enzyme_state_transitions: tuple[CuratedEnzymeStateTransition, ...] = ()
+    #: Quantitative Context Resolution and Derived Enzyme Concentration increment.
+    #: Every curated experimental/reference context and quantitative observation in
+    #: the source handoff, attached here as supporting data -- exactly like
+    #: ``kinetic_measurements``/``enzyme_states`` before them (§ module docstring),
+    #: never turned into a structural graph element or an ``EnzymeConcentration`` by
+    #: this type or by ``app.agent2.network`` (that derivation is
+    #: ``app.agent2.quantitative_context``'s job).
+    experimental_contexts: tuple[CuratedExperimentalContext, ...] = ()
+    quantitative_observations: tuple[CuratedQuantitativeObservation, ...] = ()
     organism_id: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
@@ -1318,6 +1617,24 @@ class FullNetwork:
         )
         object.__setattr__(
             self,
+            "experimental_contexts",
+            _require_tuple_of(
+                self.experimental_contexts,
+                CuratedExperimentalContext,
+                field_name="experimental_contexts",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "quantitative_observations",
+            _require_tuple_of(
+                self.quantitative_observations,
+                CuratedQuantitativeObservation,
+                field_name="quantitative_observations",
+            ),
+        )
+        object.__setattr__(
+            self,
             "organism_id",
             _clean_optional_str(self.organism_id, field_name="organism_id"),
         )
@@ -1369,6 +1686,14 @@ class FullNetwork:
         _require_unique(
             tuple(t.id for t in self.enzyme_state_transitions),
             field_name="FullNetwork.enzyme_state_transitions[].id",
+        )
+        _require_unique(
+            tuple(c.id for c in self.experimental_contexts),
+            field_name="FullNetwork.experimental_contexts[].id",
+        )
+        _require_unique(
+            tuple(o.id for o in self.quantitative_observations),
+            field_name="FullNetwork.quantitative_observations[].id",
         )
 
         _validate_full_network_references(self)
@@ -1518,6 +1843,24 @@ def _validate_full_network_references(network: FullNetwork) -> None:
             compound_ids,
             regulation.id,
         )
+
+    # Quantitative Context Resolution and Derived Enzyme Concentration increment:
+    # experimental_contexts is a complete registry within FullNetwork (unlike
+    # compound_ids above), so every observation's own experimental_context_id is
+    # checked against it whenever set -- protein_id/compound_id/reaction_id/
+    # organism_id are deliberately left unchecked, for the same disclosed reason
+    # kinetic_measurements[].protein_id/.organism_id/.publication_id already are
+    # (see this function's own docstring: FullNetwork tracks no such registry).
+    experimental_context_ids = {c.id for c in network.experimental_contexts}
+    for observation in network.quantitative_observations:
+        if (
+            observation.experimental_context_id is not None
+            and observation.experimental_context_id not in experimental_context_ids
+        ):
+            raise ValueError(
+                f"FullNetwork quantitative observation {observation.id!r} references undefined "
+                f"experimental context {observation.experimental_context_id!r}"
+            )
 
 
 def _require_regulation_endpoint_known(
@@ -2268,6 +2611,149 @@ class ModelAssumption:
 
 
 # =================================================================================================
+# 6a. Derived enzyme concentration (Quantitative Context Resolution and Derived Enzyme
+# Concentration increment)
+# =================================================================================================
+
+
+class EnzymeConcentrationBasis(StrEnum):
+    """Which precedence tier produced one ``EnzymeConcentration`` -- a qualitative
+    categorical disclosure, never a numeric confidence weight (mirrors
+    ``BoundaryParameterBasis``'s identical role for ``BoundaryAssessment``).
+
+    Exactly the first five tiers of ``app.agent2.quantitative_context``'s own
+    six-tier precedence order (see that package's module docstring); the sixth
+    tier, "unresolved," produces no ``EnzymeConcentration`` at all and therefore
+    has no member here -- see
+    ``app.agent2.quantitative_context.types.QuantitativeContextResolutionOutcome``
+    for how an unresolved protein is represented instead.
+    """
+
+    EXPERIMENT_SPECIFIC_CONCENTRATION = "EXPERIMENT_SPECIFIC_CONCENTRATION"
+    EXPERIMENT_SPECIFIC_ABUNDANCE_AND_VOLUME = "EXPERIMENT_SPECIFIC_ABUNDANCE_AND_VOLUME"
+    REFERENCE_CONCENTRATION = "REFERENCE_CONCENTRATION"
+    REFERENCE_ABUNDANCE_AND_COMPATIBLE_VOLUME = "REFERENCE_ABUNDANCE_AND_COMPATIBLE_VOLUME"
+    REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME = "REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME"
+
+
+@dataclass(frozen=True, slots=True)
+class EnzymeConcentrationDependency:
+    """One input a derived ``EnzymeConcentration`` depends on -- either a real
+    Agent 1 ``CuratedQuantitativeObservation`` (``observation_id`` set) or an
+    explicit, disclosed modeling assumption with no underlying observation at all
+    (``assumption_notes`` set, ``observation_id=None`` -- the 0.1 pL reference
+    cell-volume case). At least one of the two must be set; both may be set
+    together (e.g. a real cell-volume observation whose own applicability to this
+    exact protein/context still carries a caveat worth stating).
+
+    Mirrors ``app.agent1.types.CuratedQuantitativeObservationDependency``'s own
+    ``role``/``assumption_notes`` shape, extended with ``observation_id`` since,
+    unlike Agent 1's own record (nested only inside an already-``DERIVED``
+    observation that always names real inputs), this dependency must also be able
+    to represent a pure assumption with nothing to point to.
+    """
+
+    role: str
+    observation_id: str | None = None
+    assumption_notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "role", _require_non_empty_str(self.role, field_name="role"))
+        object.__setattr__(
+            self,
+            "observation_id",
+            _clean_optional_str(self.observation_id, field_name="observation_id"),
+        )
+        object.__setattr__(
+            self,
+            "assumption_notes",
+            _clean_optional_str(self.assumption_notes, field_name="assumption_notes"),
+        )
+        if self.observation_id is None and self.assumption_notes is None:
+            raise ValueError(
+                "EnzymeConcentrationDependency requires at least one of "
+                "observation_id/assumption_notes"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class EnzymeConcentration:
+    """One protein's derived enzyme concentration, in canonical nM -- never a curated
+    Agent 1 measurement itself, always Agent 2's own derivation (Quantitative
+    Context Resolution and Derived Enzyme Concentration increment).
+
+    Produced exclusively by
+    ``app.agent2.quantitative_context.resolver.resolve_enzyme_concentrations``,
+    never assembled by hand elsewhere in this repository. ``unit`` is always
+    ``"nM"`` -- this type represents a concentration, never an abundance or a raw
+    observation; ``basis`` names which precedence tier produced it, and
+    ``dependencies`` preserves exactly what real observation(s) (or explicit
+    assumption) it was derived from -- never silently discarded provenance, and
+    never a rewrite of the source ``CuratedQuantitativeObservation`` itself.
+
+    Derived at the **protein level only** (task's own explicit scope): no
+    allocation across enzyme states, PTM states, complexes, or isoforms is ever
+    performed here -- a protein with more than one catalytic context (multiple
+    ``EnzymeState``s, a homo-/hetero-oligomeric complex) still gets exactly one
+    total-protein concentration, and any state-specific allocation remains
+    unresolved, deliberately, for later work.
+    """
+
+    protein_id: str
+    value: Decimal
+    basis: EnzymeConcentrationBasis
+    policy_version: str
+    unit: str = "nM"
+    dependencies: tuple[EnzymeConcentrationDependency, ...] = ()
+    experimental_context_id: str | None = None
+    assumption_reason_codes: tuple[str, ...] = ()
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "protein_id", _require_non_empty_str(self.protein_id, field_name="protein_id")
+        )
+        if not isinstance(self.value, Decimal):
+            raise TypeError(f"EnzymeConcentration.value must be a Decimal, got {self.value!r}")
+        if self.value < 0:
+            raise ValueError(f"EnzymeConcentration.value must be >= 0, got {self.value!r}")
+        if not isinstance(self.basis, EnzymeConcentrationBasis):
+            raise TypeError(
+                f"EnzymeConcentration.basis must be an EnzymeConcentrationBasis, "
+                f"got {self.basis!r}"
+            )
+        object.__setattr__(
+            self,
+            "policy_version",
+            _require_non_empty_str(self.policy_version, field_name="policy_version"),
+        )
+        if self.unit != "nM":
+            raise ValueError(f"EnzymeConcentration.unit must be 'nM', got {self.unit!r}")
+        object.__setattr__(
+            self,
+            "dependencies",
+            _require_tuple_of(
+                self.dependencies, EnzymeConcentrationDependency, field_name="dependencies"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "experimental_context_id",
+            _clean_optional_str(
+                self.experimental_context_id, field_name="experimental_context_id"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "assumption_reason_codes",
+            _require_str_tuple(
+                self.assumption_reason_codes, field_name="assumption_reason_codes"
+            ),
+        )
+        object.__setattr__(self, "notes", _clean_optional_str(self.notes, field_name="notes"))
+
+
+# =================================================================================================
 # 7. ModelSpecification -- the top-level, authoritative contract
 # =================================================================================================
 
@@ -2296,6 +2782,14 @@ class ModelSpecification:
     module_specifications: tuple[ModuleSpecification, ...] = ()
     assumptions: tuple[str, ...] = ()
     model_assumptions: tuple[ModelAssumption, ...] = ()
+    #: Quantitative Context Resolution and Derived Enzyme Concentration increment.
+    #: Zero or more ``EnzymeConcentration`` records, at most one per protein (see
+    #: ``__post_init__``'s own uniqueness check below) -- never referenced against
+    #: any ``FullNetwork`` protein registry, since ``FullNetwork`` tracks no such
+    #: registry at all (the same disclosed, pre-existing limitation
+    #: ``_validate_full_network_references``/``_validate_model_specification_references``
+    #: already document for every other ``protein_id``-typed field).
+    enzyme_concentrations: tuple[EnzymeConcentration, ...] = ()
     provenance_refs: tuple[str, ...] = ()
     contract_version: str = AGENT2_CONTRACT_VERSION
 
@@ -2356,6 +2850,13 @@ class ModelSpecification:
         )
         object.__setattr__(
             self,
+            "enzyme_concentrations",
+            _require_tuple_of(
+                self.enzyme_concentrations, EnzymeConcentration, field_name="enzyme_concentrations"
+            ),
+        )
+        object.__setattr__(
+            self,
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
@@ -2376,6 +2877,10 @@ class ModelSpecification:
         _require_unique(
             tuple(module.module_id for module in self.module_specifications),
             field_name="ModelSpecification.module_specifications[].module_id",
+        )
+        _require_unique(
+            tuple(ec.protein_id for ec in self.enzyme_concentrations),
+            field_name="ModelSpecification.enzyme_concentrations[].protein_id",
         )
         _require_unique(
             tuple(boundary.boundary_id for boundary in self.boundary_assessments),

@@ -98,6 +98,8 @@ def assemble_full_network(handoff: Agent1CuratedKnowledgeViewContract) -> FullNe
         enzyme_modifications=handoff.enzyme_modifications,
         allosteric_interactions=handoff.allosteric_interactions,
         enzyme_state_transitions=handoff.enzyme_state_transitions,
+        experimental_contexts=handoff.experimental_contexts,
+        quantitative_observations=handoff.quantitative_observations,
         organism_id=handoff.organism_id,
     )
 

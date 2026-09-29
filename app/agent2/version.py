@@ -886,22 +886,98 @@ reading" already applied to every enum-value-only ``ParameterSource``
 addition above). ``AGENT2_CONTRACT_VERSION``/``AGENT1_HANDOFF_VERSION``
 are unchanged -- no ``app.agent2.types`` dataclass gained or lost a
 field, and Agent 1 was not modified.
+
+``AGENT1_HANDOFF_VERSION`` was bumped from ``"1.3"`` to ``"1.4"`` for the
+"Quantitative Context Resolution and Derived Enzyme Concentration" increment,
+mirroring Agent 1's own "Experimental Context and Quantitative Observation
+Framework" increment (``AGENT1_CONTRACT_VERSION`` "1.3" -> "1.4" in the Agent 1
+repository): ``Agent1CuratedKnowledgeViewContract`` gained ``experimental_contexts``/
+``quantitative_observations``, and two new types,
+``CuratedExperimentalContext``/``CuratedQuantitativeObservation`` (plus the small
+nested ``CuratedQuantitativeObservationDependency``), were added to
+``app.agent2.types``, mirroring Agent 1's identically-named types field-for-field.
+Agent 1's own sibling ``perturbations``/``Perturbation`` field is **not** mirrored
+here -- a disclosed, narrower reading: no real Agent 1 data populates it yet (SGD
+reference abundance carries no perturbation), and this increment's own scope does
+not need it (see ``CuratedQuantitativeObservation``'s own docstring and
+``docs/16_quantitative_context_resolution.md`` §1). Both new fields have empty-
+tuple defaults, so every existing keyword-based construction of
+``Agent1CuratedKnowledgeViewContract`` continues to construct unchanged.
+
+``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.9"`` to ``"0.10"`` for the same
+increment, for three separate reasons, each independently sufficient per this
+file's own bump criterion: (1) ``FullNetwork`` gained ``experimental_contexts``/
+``quantitative_observations`` (attached verbatim from the handoff, exactly like
+``kinetic_measurements`` before them -- see that type's own docstring), plus a new
+``_validate_full_network_references`` check (every ``quantitative_observations[]
+.experimental_context_id`` must resolve against the new ``experimental_contexts``
+registry, when set); (2) three new types were introduced directly in
+``app.agent2.types`` -- ``EnzymeConcentrationBasis``, ``EnzymeConcentrationDependency``,
+and ``EnzymeConcentration`` -- the final, materialized derived-quantity record a
+``ModelSpecification`` must reference directly, promoted here rather than kept in
+``app.agent2.quantitative_context`` (the new package that actually computes it),
+exactly mirroring ``KineticLawSpecification``/``ParameterSpecification``'s own
+precedent (the *decision* record is promoted; the *policy-internal* wrapping types
+-- ``QuantitativeContextResolutionOutcome``/``.Set``, both in
+``app.agent2.quantitative_context.types`` -- stay local, matching
+``KineticLawAssignment``'s/``BoundaryAssessmentSet``'s own identical split); (3)
+``ModelSpecification`` gained ``enzyme_concentrations: tuple[EnzymeConcentration, ...]
+= ()``, plus a new uniqueness check (at most one ``EnzymeConcentration`` per
+``protein_id``). Every new field has a default (``()``), so every existing
+keyword-based construction of ``FullNetwork``/``ModelSpecification`` continues to
+construct unchanged.
+
+``QUANTITATIVE_CONTEXT_POLICY_VERSION`` is introduced at
+``"quantitative-context-v1"`` for the first real quantitative-context resolution
+policy (``app.agent2.quantitative_context``): the fixed six-tier precedence order
+(experiment-specific concentration > experiment-specific abundance+volume >
+reference concentration > reference abundance+compatible reference volume >
+reference abundance+assumed 0.1 pL volume > unresolved), the deterministic
+context-compatibility classifier (a direct, independent reimplementation of Agent
+1's own ``classify_context_compatibility``, never a cross-repository import), and
+the Decimal-safe ``[E]_nM = N / (N_A * V) * 1e9`` concentration equation (CODATA
+2019 exact Avogadro constant). Two or more candidates at what would otherwise be
+the winning tier that disagree never fall through to a weaker tier (mirrors
+``PARAMETER_DECLARATION_POLICY_VERSION``'s own ``initialize_with_fallback``
+precedent) -- the protein is reported unresolved instead, never averaged, never
+arbitrarily chosen.
+
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` was bumped from
+``"model-specification-v6"`` to ``"model-specification-v7"`` for the same
+increment: ``assemble_model_specification`` gained one new, optional parameter
+(``enzyme_concentrations: QuantitativeContextResolutionSet | None = None``,
+defaulted for full backward compatibility with every existing call site) that,
+when supplied, attaches its own ``.enzyme_concentrations`` verbatim onto the
+assembled ``ModelSpecification`` and cross-checks its ``network_id`` against the
+network being assembled (mirroring ``_require_matching_networks``'s own identical
+convention for every other artifact). ``build_model_assumptions`` gained a ninth
+disclosure category: one ``ModelAssumption`` (category ``"quantitative_context"``,
+reason code ``REFERENCE_CELL_VOLUME_ASSUMED``) per ``EnzymeConcentration`` whose
+own ``basis`` is ``REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME`` -- task's own explicit
+"add a machine-readable assumption... when 0.1 pL is used" requirement. A
+materially different, observable result for the same real input whenever
+``enzyme_concentrations`` is supplied (real sce00061 evaluation: 13 real SGD
+abundance observations each produce one such assumption) -- omitted entirely
+(``()``, no behavior change at all) for any caller that does not pass this new
+parameter, exactly as every other optional-parameter addition in this file's own
+history has been.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.9"
-AGENT1_HANDOFF_VERSION = "1.3"
+AGENT2_CONTRACT_VERSION = "0.10"
+AGENT1_HANDOFF_VERSION = "1.4"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v4"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v3"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v6"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v7"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v2"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
+QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -914,6 +990,7 @@ __all__ = [
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
+    "QUANTITATIVE_CONTEXT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
     "REACTION_CONTEXT_RESOLUTION_POLICY_VERSION",
 ]

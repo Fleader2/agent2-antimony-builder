@@ -84,6 +84,7 @@ from __future__ import annotations
 
 from app.agent2.kinetics.types import KineticLawAssignment, KineticLawReasonCode
 from app.agent2.model_specification.errors import ModelSpecificationReferenceError
+from app.agent2.quantitative_context.types import QuantitativeContextReasonCode
 from app.agent2.reversibility import (
     REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
     effective_reversible,
@@ -91,6 +92,8 @@ from app.agent2.reversibility import (
 )
 from app.agent2.types import (
     CuratedKineticMeasurement,
+    EnzymeConcentration,
+    EnzymeConcentrationBasis,
     KineticLawSpecification,
     KineticLawType,
     ModelAssumption,
@@ -407,6 +410,7 @@ def build_model_assumptions(
     candidate_boundary_ids: tuple[str, ...],
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = (),
     reactions: tuple[ReactionSpecification, ...] = (),
+    enzyme_concentrations: tuple[EnzymeConcentration, ...] = (),
 ) -> tuple[ModelAssumption, ...]:
     """Deterministic `ModelAssumption` records for eight disclosed-incompleteness categories:
     the four Increment 8 instructions, Step 18, name concretely (tentative mass-action
@@ -428,10 +432,17 @@ def build_model_assumptions(
     this increment has no clean, already-computed signal for (see docs/11 §16 for what was
     deliberately not attempted, e.g. "known incompleteness of regulation context").
 
-    ``kinetic_measurements``/``reactions`` both default to ``()`` for backward compatibility
-    with any existing caller that does not (yet) pass them -- an empty tuple simply produces
-    no assumptions of the corresponding new category, exactly as if that parameter did not
-    exist."""
+    ``kinetic_measurements``/``reactions``/``enzyme_concentrations`` all default to ``()`` for
+    backward compatibility with any existing caller that does not (yet) pass them -- an empty
+    tuple simply produces no assumptions of the corresponding new category, exactly as if that
+    parameter did not exist. ``enzyme_concentrations`` (Quantitative Context Resolution and
+    Derived Enzyme Concentration increment) contributes a ninth category: one ``ModelAssumption``
+    (category ``"quantitative_context"``, reason code ``REFERENCE_CELL_VOLUME_ASSUMED``) per
+    ``EnzymeConcentration`` whose own ``basis`` is
+    ``EnzymeConcentrationBasis.REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME`` -- task's own explicit
+    "add a machine-readable assumption... when 0.1 pL is used" requirement. Every other basis
+    (a real concentration or a real compatible cell-volume observation) produces no assumption
+    of this kind, since no cell-volume figure was invented for it."""
     assumptions: list[ModelAssumption] = []
     measurements_by_id = {m.id: m for m in kinetic_measurements}
     reactions_by_id = {r.reaction_id: r for r in reactions}
@@ -646,6 +657,39 @@ def build_model_assumptions(
                 related_entity_ids=(reaction.reaction_id,),
                 source="app.agent2.reversibility",
                 reason_code=REVERSIBILITY_ASSUMED_FROM_UNRESOLVED_EVIDENCE,
+            )
+        )
+
+    assumed_volume_basis = EnzymeConcentrationBasis.REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME
+    for concentration in sorted(enzyme_concentrations, key=lambda ec: ec.protein_id):
+        if concentration.basis is not assumed_volume_basis:
+            continue
+        # Quantitative Context Resolution and Derived Enzyme Concentration increment (task's
+        # own explicit requirement): the 0.1 pL reference cell-volume assumption is disclosed
+        # here, machine-readably, exactly once per protein it was used for -- never silently
+        # embedded only in EnzymeConcentration.notes free text.
+        dependency_ids = tuple(
+            dep.observation_id
+            for dep in concentration.dependencies
+            if dep.observation_id is not None
+        )
+        assumptions.append(
+            ModelAssumption(
+                assumption_id=(
+                    f"assumption::reference-cell-volume-assumed::{concentration.protein_id}"
+                ),
+                category="quantitative_context",
+                statement=(
+                    f"Protein {concentration.protein_id}'s derived enzyme concentration "
+                    f"({concentration.value} {concentration.unit}) uses an explicit assumed "
+                    "reference yeast cell volume of 0.1 pL -- no curated cell-volume "
+                    "observation exists for this protein's own context. Never a curated "
+                    "measurement; requires calibration/refinement once a real cell-volume "
+                    "observation becomes available."
+                ),
+                related_entity_ids=(concentration.protein_id, *dependency_ids),
+                source="app.agent2.quantitative_context",
+                reason_code=QuantitativeContextReasonCode.REFERENCE_CELL_VOLUME_ASSUMED.value,
             )
         )
 

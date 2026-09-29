@@ -90,7 +90,10 @@ from app.agent2.types import (
     CuratedEnzymeState,
     CuratedEnzymeStateTransition,
     CuratedEvidence,
+    CuratedExperimentalContext,
     CuratedKineticMeasurement,
+    CuratedQuantitativeObservation,
+    CuratedQuantitativeObservationDependency,
     CuratedReaction,
     CuratedReactionEnzymeAssociation,
     CuratedReactionParticipant,
@@ -291,6 +294,83 @@ def _translate_enzyme_state_transition(raw: Mapping[str, Any]) -> CuratedEnzymeS
     )
 
 
+def _translate_experimental_context(raw: Mapping[str, Any]) -> CuratedExperimentalContext:
+    return CuratedExperimentalContext(
+        id=str(_require(raw, "experimental_context_id", entity="experimental_context")),
+        organism_id=_str_or_none(raw.get("organism_id")),
+        strain=_str_or_none(raw.get("strain")),
+        genotype=_str_or_none(raw.get("genotype")),
+        medium=_str_or_none(raw.get("medium")),
+        carbon_source=_str_or_none(raw.get("carbon_source")),
+        temperature_c=_decimal_or_none(raw.get("temperature_c")),
+        ph=_decimal_or_none(raw.get("ph")),
+        growth_phase=_str_or_none(raw.get("growth_phase")),
+        growth_condition=_str_or_none(raw.get("growth_condition")),
+        classification=_str_or_none(raw.get("classification")),
+        source=_str_or_none(raw.get("source")),
+        source_id=_str_or_none(raw.get("source_id")),
+        publication_id=_str_or_none(raw.get("publication_id")),
+        notes=_str_or_none(raw.get("notes")),
+    )
+
+
+def _translate_quantitative_observation_dependency(
+    raw: Mapping[str, Any],
+) -> CuratedQuantitativeObservationDependency:
+    return CuratedQuantitativeObservationDependency(
+        input_observation_id=str(
+            _require(raw, "input_observation_id", entity="quantitative_observation_dependency")
+        ),
+        role=_str_or_none(raw.get("role")),
+        assumption_notes=_str_or_none(raw.get("assumption_notes")),
+    )
+
+
+def _translate_quantitative_observation(raw: Mapping[str, Any]) -> CuratedQuantitativeObservation:
+    dependencies_raw = raw.get("dependencies") or ()
+    return CuratedQuantitativeObservation(
+        id=str(_require(raw, "quantitative_observation_id", entity="quantitative_observation")),
+        observation_type=str(
+            _require(raw, "observation_type", entity="quantitative_observation")
+        ),
+        value=_require_decimal(
+            _require(raw, "value", entity="quantitative_observation"),
+            entity="quantitative_observation.value",
+        ),
+        unit=str(_require(raw, "unit", entity="quantitative_observation")),
+        evidence_class=str(_require(raw, "evidence_class", entity="quantitative_observation")),
+        reported_observation_type=_str_or_none(raw.get("reported_observation_type")),
+        normalized_value=_decimal_or_none(raw.get("normalized_value")),
+        normalized_unit=_str_or_none(raw.get("normalized_unit")),
+        uncertainty=_decimal_or_none(raw.get("uncertainty")),
+        lower_bound=_decimal_or_none(raw.get("lower_bound")),
+        upper_bound=_decimal_or_none(raw.get("upper_bound")),
+        measurement_method=_str_or_none(raw.get("measurement_method")),
+        time_reference_basis=_str_or_none(raw.get("time_reference_basis")),
+        time_value=_decimal_or_none(raw.get("time_value")),
+        time_unit=_str_or_none(raw.get("time_unit")),
+        time_canonical_s=_decimal_or_none(raw.get("time_canonical_s")),
+        experimental_context_id=_str_or_none(raw.get("experimental_context_id")),
+        perturbation_id=_str_or_none(raw.get("perturbation_id")),
+        biological_replicate_id=_str_or_none(raw.get("biological_replicate_id")),
+        technical_replicate_id=_str_or_none(raw.get("technical_replicate_id")),
+        protein_id=_str_or_none(raw.get("protein_id")),
+        compound_id=_str_or_none(raw.get("compound_id")),
+        reaction_id=_str_or_none(raw.get("reaction_id")),
+        organism_id=_str_or_none(raw.get("organism_id")),
+        unresolved_identity_kind=_str_or_none(raw.get("unresolved_identity_kind")),
+        unresolved_identity_text=_str_or_none(raw.get("unresolved_identity_text")),
+        source=_str_or_none(raw.get("source")),
+        source_id=_str_or_none(raw.get("source_id")),
+        publication_id=_str_or_none(raw.get("publication_id")),
+        dataset_id=_str_or_none(raw.get("dataset_id")),
+        notes=_str_or_none(raw.get("notes")),
+        dependencies=tuple(
+            _translate_quantitative_observation_dependency(d) for d in dependencies_raw
+        ),
+    )
+
+
 def _translate_claim(raw: Mapping[str, Any]) -> CuratedClaim:
     return CuratedClaim(
         id=str(_require(raw, "id", entity="claim")),
@@ -383,6 +463,14 @@ def translate_agent1_view_to_agent2(
         enzyme_state_transitions=tuple(
             _translate_enzyme_state_transition(t)
             for t in _require_list(view, "enzyme_state_transitions")
+        ),
+        experimental_contexts=tuple(
+            _translate_experimental_context(c)
+            for c in _require_list(view, "experimental_contexts")
+        ),
+        quantitative_observations=tuple(
+            _translate_quantitative_observation(o)
+            for o in _require_list(view, "quantitative_observations")
         ),
         claims=tuple(_translate_claim(c) for c in _require_list(view, "claims")),
         evidence=tuple(_translate_evidence(e) for e in _require_list(view, "evidence")),

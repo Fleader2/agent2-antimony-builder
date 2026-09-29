@@ -105,6 +105,22 @@ it never causes a real-valued parameter to be generated from the
 measurement it describes. This remains true regardless of how many
 reactions the named protein(s) catalyze.
 
+## 4D. Quantitative context (Experimental Context and Quantitative Observation Framework, Agent 1.x; consumed by the "Quantitative Context Resolution and Derived Enzyme Concentration" increment)
+
+| Field | Agent 2 may assume | Agent 2 must not assume | Missing information | Confidence/provenance |
+|---|---|---|---|---|
+| `experimental_contexts` | Zero or more `CuratedExperimentalContext` entries; `classification`/`source` are Agent 1's own plain strings (e.g. `"REFERENCE"`/`"SGD"`), never re-typed as a closed enum on this side. | That every detail field (`strain`/`medium`/`carbon_source`/`temperature_c`/`ph`/`growth_phase`/`growth_condition`) is populated -- Agent 1 never fabricates one it was not given (SGD's own reference context reports none of them). | Empty tuple if none for this scope. | `source`/`source_id`/`publication_id`, when present, name the connector-ingested source. |
+| `quantitative_observations` | Zero or more `CuratedQuantitativeObservation` entries, each with an `observation_type` (Agent 1's own open string: `"PROTEIN_ABUNDANCE"`/`"PROTEIN_CONCENTRATION"`/`"METABOLITE_CONCENTRATION"`/`"REACTION_FLUX"`/`"CELL_VOLUME"`/`"GROWTH_RATE"`/`"OTHER"`), an as-reported `value`/`unit`, and an `evidence_class` (`"EXPERIMENT_SPECIFIC"`/`"REFERENCE_BASELINE"`/`"MODEL_PREDICTED"`/`"DERIVED"`). | That this list is auto-converted into an `EnzymeConcentration` or any other derived quantity by anything outside `app.agent2.quantitative_context` -- that mapping is that package's own explicit, deterministic resolution policy, never implicit. That `normalized_value`/`.normalized_unit` are always populated -- `None`/`None` when Agent 1's own canonical-unit conversion could not resolve one, never fabricated. | Empty tuple if none for this scope -- never "no quantitative data exists," only "none is currently curated." | `source`/`source_id` name the connector; `uncertainty`/`lower_bound`/`upper_bound` are exposed verbatim, never recomputed. |
+| `CuratedQuantitativeObservation.dependencies` | Every input a `DERIVED` observation depends on (`CuratedQuantitativeObservationDependency`, each always naming a real `input_observation_id`). Empty for every non-`DERIVED` observation. | That this repository ever performs the derivation itself -- Agent 1 curates dependency/provenance only (no real Agent 1 data is `DERIVED` yet). | Empty tuple for a non-`DERIVED` observation, or one Agent 1 has not (yet) recorded dependencies for. | n/a |
+
+**Agent 1's own sibling `perturbations`/`Perturbation` field is deliberately not
+mirrored here** -- no real Agent 1 data populates it yet (SGD reference abundance
+carries no perturbation), and the "Quantitative Context Resolution and Derived Enzyme
+Concentration" increment's own scope does not need it (see
+`docs/16_quantitative_context_resolution.md` §1). A future increment that actually
+consumes perturbation context should add `CuratedPerturbation`/`perturbations` then,
+exactly as this one added `CuratedExperimentalContext` now -- see §9 below.
+
 ## 5. General assumptions Agent 2 may make
 
 * Every id is a stable, opaque identifier (a UUID or string) — Agent 2
@@ -195,5 +211,15 @@ Agent 1 produces or Agent 2 receives from Agent 1.
   Characterization stage will consume these state distinctions (a state
   may become a distinct model species with its own kinetic-law
   applicability and parameters) -- not implemented here.
+
+* **Quantitative context (Experimental Context and Quantitative Observation
+  Framework, Agent 1.x).** `AGENT1_HANDOFF_VERSION` was bumped "1.3" -> "1.4".
+  `experimental_contexts`/`quantitative_observations` (§4D) now mirror Agent 1's
+  identically-named fields exactly, and are consumed, for the first time, by the
+  "Quantitative Context Resolution and Derived Enzyme Concentration" increment
+  (`app.agent2.quantitative_context`, `docs/16_quantitative_context_resolution.md`) --
+  deriving canonical-nM enzyme concentrations from protein abundance plus cell volume.
+  Agent 1's own sibling `perturbations`/`Perturbation` field remains unmirrored (§4D's
+  own note) -- a future increment that needs perturbation context should add it then.
 
 None of these are required for Increment 1.
