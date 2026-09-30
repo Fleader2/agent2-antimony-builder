@@ -1223,6 +1223,78 @@ members, one new ``ParameterSource`` member, the new ``EnzymeStatePool`` type, a
 ``ModelSpecification``'s two new fields) -- every new field defaults to its type's own
 "absent" value (``None``/``()``), so every pre-existing construction of any of these types
 continues to produce an identical value.
+
+**Substrate-Specific Kinetic Parameterization for Promiscuous Reactions increment**
+(motivated by the Pilot 4 real-data evaluation: two real reactions, a promiscuous
+palmitate:CoA ligase and a promiscuous fatty-acid-elongation acyltransferase, each had
+correctly-attributed kinetic measurements for the identical reaction/catalyst context
+tagged to *chemically distinct* substrate compounds -- one a genuine reactant, the other
+that reaction's own product or a compound belonging to a different, structurally
+distinct step the same promiscuous catalyst also acts on. These were being collapsed
+into one undifferentiated ``kcat``/``Km`` slot and forced to a disclosed ``PLACEHOLDER``
+merely because two, three, or four distinct substrate identities disagreed -- not a
+real experimental conflict, but this codebase's own multi-substrate evidence never
+having a dedicated per-substrate concept for anything other than ``Km`` (which already
+declared one slot per reactant). 8 ``PLACEHOLDER`` parameters and 2/38 non-executable
+reactions on the real ``sce00061`` pathway were the direct, real consequence).
+
+``app.agent2.parameters.initializer.initialize_from_evidence``/
+``.initialize_from_ai_predicted_evidence``/``.initialize_with_fallback`` gained one new,
+backward-compatible (default ``False``) parameter, ``already_substrate_scoped``: when a
+caller has already narrowed evidence to exactly one substrate concept (including a
+caller-decided tagged+untagged merge, e.g. for a single-reactant context), this skips
+``consolidate_by_substrate``'s own further per-``compound_id`` split, which would
+otherwise wrongly re-partition that already-decided single concept back into spurious
+"different substrate" groups (the real Pilot 4 ``dc8db885-...`` regression). ``kcat``
+declaration (`app.agent2.parameters.builder._declare_kcat_specs`, new) now mirrors
+``Km``'s own per-reactant-compound anchoring: kcat evidence tagged to a real compound
+this reaction does not itself declare as a reactant (a product, or a compound entirely
+foreign to this coarse reaction model) is excluded from every substrate-specific
+concept -- never merged, never guessed onto the wrong species -- and disclosed instead
+via a new per-assignment note on ``ParameterDeclarationSet.assumptions`` (task's own
+"preserve the ambiguity explicitly rather than fabricating a mapping"). Two or more
+reactant compounds each carrying their own independently-resolvable kcat evidence now
+coexist as separate, substrate-suffixed ``kcat`` parameters (mirroring ``Km``'s own
+naming, ``kcat_<reaction>_<context>_<compound>``) rather than being forced into one
+conflicting slot; the one generic, backward-compatible position-0 ``kcat`` slot every
+Michaelis-Menten law still declares is left an explicitly-disclosed ``PLACEHOLDER`` in
+that (real-data-rare) case, naming every contributing substrate, rather than arbitrarily
+preferring one. Derivation C (`_reconstruct_k_eff_for_context`) now restricts *both*
+sides of ``k_eff = kcat/Km`` to the identical anchor compound (never pairing ``kcat``
+from one substrate with ``Km`` from another) -- except that an untagged ``kcat``
+measurement, unlike an untagged ``Km``, is never treated as substrate-ambiguous (a
+turnover number makes no substrate-specific claim at all when untagged, so it is always
+compatible with the one substrate ``Km`` itself anchors to). ``app.agent2
+.model_specification.mapping.build_expression_and_species``'s own multi-substrate
+fallback parameter slice is now bounded to its own exact expected count (1 or 2,
+depending on reversibility) rather than open-ended, so the rare trailing
+substrate-specific ``kcat`` extras above are never misread as fallback rate constants --
+every existing single-substrate/no-extras case is unaffected (the count was already
+exactly right for it).
+
+Real-data effect on the ``sce00061`` pathway (re-run against the same, unchanged, saved
+Pilot 4 handoff -- no fresh Agent 1 curation): ``PLACEHOLDER`` parameters 8 -> 0;
+executable reactions 36/38 -> 38/38 (``FullAntimonyArtifact.readiness`` back to
+``EXECUTABLE``); real-evidence final parameters 13/109 (11.9%) -> 21/109 (19.3%); one new
+``DERIVED_FROM_MACRO_KINETICS`` context was newly eligible to attempt Derivation C
+(no new winners beyond the pre-existing 3 -- the two previously-blocked reactions are
+either 3-reactant, dimensionally ineligible, or single-substrate, molecularity-1,
+neither ever eligible for ``k_eff``'s own ``per_nMs`` requirement); 2 new
+``PARTIALLY_CONSTRAINED`` ``MicroscopicConstraint`` records (Derivation D), now reachable
+for the first time because both ``kcat``/``Km`` resolve to real values for that
+single-substrate context.
+
+No public contract type shape changed (``ParameterDeclarationSet.assumptions`` already
+existed) -- ``AGENT2_CONTRACT_VERSION`` is unchanged.
+``PARAMETER_DECLARATION_POLICY_VERSION`` was bumped from ``"parameter-declaration-v7"``
+to ``"parameter-declaration-v8"`` (declared-parameter shape/values change for a
+multi-substrate context with 2+ independently-resolvable ``kcat`` concepts, and for
+every context whose evidence includes a now-disclosed unmapped-substrate note) and
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` from ``"model-specification-v10"`` to
+``"model-specification-v11"`` (the bounded fallback-parameter-count change above).
+``MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION`` is left unchanged
+(``"macro-to-micro-v1"``) -- ``app.agent2.parameters.reconstruction`` itself was not
+modified; only its caller's own evidence-filtering changed.
 """
 
 from __future__ import annotations
@@ -1232,10 +1304,10 @@ AGENT1_HANDOFF_VERSION = "1.5"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
-PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v7"
+PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v8"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v10"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v11"
 ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v4"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"

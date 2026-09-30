@@ -27,6 +27,7 @@ from decimal import Decimal
 from app.agent2.kinetics.evidence_consolidation import (
     ConsolidationClassification,
     consolidate_by_substrate,
+    consolidate_concept,
     publication_years_for_network,
     reference_experimental_context_for_network,
 )
@@ -63,9 +64,7 @@ _NO_MATCH = Initialization(
     unit=None,
     source_reference=None,
     provenance_refs=(),
-    uncertainty_text=(
-        "No curated measurement matches this parameter; requires calibration."
-    ),
+    uncertainty_text=("No curated measurement matches this parameter; requires calibration."),
 )
 
 
@@ -73,6 +72,7 @@ def initialize_from_evidence(
     evidence_of_kind: tuple[CuratedKineticMeasurement, ...],
     *,
     network: FullNetwork | None = None,
+    already_substrate_scoped: bool = False,
 ) -> Initialization:
     """Resolve one parameter slot from the *experimental* curated measurements that match
     its recognized kind -- GotEnzymes2-sourced (AI-predicted) measurements are excluded here
@@ -112,15 +112,33 @@ def initialize_from_evidence(
     order with no organism filtering and ``CONDITIONS_UNKNOWN`` throughout, degrading
     gracefully to the deterministic tie-break.
 
+    ``already_substrate_scoped`` (Substrate-Specific Kinetic Parameterization for
+    Promiscuous Reactions increment; defaults to ``False`` for full backward
+    compatibility) tells this function ``evidence_of_kind`` was already narrowed, by
+    the caller's own substrate/compound-identity policy (e.g.
+    ``app.agent2.parameters.builder``'s own per-reactant-compound anchoring, which may
+    deliberately fold genuinely-generic/untagged evidence in alongside one specific
+    reactant compound's own tagged evidence for a single-substrate context -- see that
+    module's own ``_substrate_matches``), to already represent exactly *one* substrate
+    concept -- so this function consolidates it directly (``consolidate_concept``), never
+    re-splitting it by ``compound_id`` (``consolidate_by_substrate``) a second time. Doing
+    the split twice, once by the caller and again here, would wrongly re-partition a
+    caller's own deliberate tagged+untagged merge back into two spurious "different
+    substrate" groups and force an incorrect ``PLACEHOLDER`` -- exactly the real
+    regression this increment fixes (Pilot 4 evaluation, reaction ``dc8db885-...``: a
+    single-substrate context's own real curated Km evidence, already correctly merged by
+    the caller, was wrongly re-split into "tagged" vs. "untagged" concepts here and
+    treated as an unresolved disagreement). A caller that has *not* already narrowed to
+    one substrate (the historical, still-default behavior) leaves this ``False`` and gets
+    the original, unchanged substrate-splitting behavior.
+
     Never assigns ``ParameterSource.DEFAULT`` (see
     `docs/08_parameter_declaration_initialization.md` §7 for why -- no
     conventional default value is established anywhere in this codebase
     to assign deterministically) or ``ParameterSource.CALIBRATED`` (Step 9:
     "reserve exclusively for future Agent 4").
     """
-    evidence_of_kind = tuple(
-        m for m in evidence_of_kind if m.source != _GOTENZYMES_SOURCE_LABEL
-    )
+    evidence_of_kind = tuple(m for m in evidence_of_kind if m.source != _GOTENZYMES_SOURCE_LABEL)
     if not evidence_of_kind:
         return _NO_MATCH
 
@@ -129,12 +147,22 @@ def initialize_from_evidence(
         reference_experimental_context_for_network(network) if network is not None else None
     )
     publication_years = publication_years_for_network(network) if network is not None else {}
-    concepts = consolidate_by_substrate(
-        evidence_of_kind,
-        target_organism_id=target_organism_id,
-        reference_context=reference_context,
-        publication_years=publication_years,
-    )
+    if already_substrate_scoped:
+        concepts = (
+            consolidate_concept(
+                evidence_of_kind,
+                target_organism_id=target_organism_id,
+                reference_context=reference_context,
+                publication_years=publication_years,
+            ),
+        )
+    else:
+        concepts = consolidate_by_substrate(
+            evidence_of_kind,
+            target_organism_id=target_organism_id,
+            reference_context=reference_context,
+            publication_years=publication_years,
+        )
 
     all_candidate_ids = tuple(sorted(m.id for m in evidence_of_kind))
     if len(concepts) != 1:
@@ -192,6 +220,7 @@ def initialize_from_ai_predicted_evidence(
     evidence_of_kind: tuple[CuratedKineticMeasurement, ...],
     *,
     network: FullNetwork | None = None,
+    already_substrate_scoped: bool = False,
 ) -> Initialization:
     """Resolve one parameter slot from GotEnzymes2-sourced (AI-predicted) measurements only,
     at the precedence rung directly below ``initialize_from_evidence``'s own
@@ -215,6 +244,9 @@ def initialize_from_ai_predicted_evidence(
     biologically compatible candidates no longer force ``PLACEHOLDER`` on their own,
     Multi-Measurement Kinetic Evidence Consolidation and Prioritization increment); every
     candidate id is always preserved in ``provenance_refs``.
+
+    ``already_substrate_scoped`` mirrors ``initialize_from_evidence``'s own parameter of
+    the same name exactly -- see that function's docstring.
     """
     candidates = tuple(
         m
@@ -229,13 +261,24 @@ def initialize_from_ai_predicted_evidence(
         reference_experimental_context_for_network(network) if network is not None else None
     )
     publication_years = publication_years_for_network(network) if network is not None else {}
-    concepts = consolidate_by_substrate(
-        candidates,
-        target_organism_id=target_organism_id,
-        reference_context=reference_context,
-        publication_years=publication_years,
-        value_of=_normalized_value_unit,
-    )
+    if already_substrate_scoped:
+        concepts = (
+            consolidate_concept(
+                candidates,
+                target_organism_id=target_organism_id,
+                reference_context=reference_context,
+                publication_years=publication_years,
+                value_of=_normalized_value_unit,
+            ),
+        )
+    else:
+        concepts = consolidate_by_substrate(
+            candidates,
+            target_organism_id=target_organism_id,
+            reference_context=reference_context,
+            publication_years=publication_years,
+            value_of=_normalized_value_unit,
+        )
 
     all_candidate_ids = tuple(sorted(m.id for m in candidates))
     base_note = "AI-predicted by GotEnzymes2 -- never a curated experimental measurement."
@@ -287,6 +330,7 @@ def initialize_with_fallback(
     molecularity: int | None = None,
     macro_reconstruction: Initialization | None = None,
     network: FullNetwork | None = None,
+    already_substrate_scoped: bool = False,
 ) -> Initialization:
     """The full precedence a parameter slot resolves through: ``LITERATURE_DERIVED``/
     ``CURATED`` > ``AI_PREDICTED`` > ``DERIVED_FROM_MACRO_KINETICS`` >
@@ -322,12 +366,19 @@ def initialize_with_fallback(
     Hill coefficient or an equilibrium constant), the plain, no-evidence-at-all
     ``PLACEHOLDER`` from the experimental tier is returned unchanged, never an invented
     convention for an unsupported kind.
+
+    ``already_substrate_scoped`` is passed straight through to both evidence tiers --
+    see ``initialize_from_evidence``'s own docstring.
     """
-    experimental = initialize_from_evidence(evidence_of_kind, network=network)
+    experimental = initialize_from_evidence(
+        evidence_of_kind, network=network, already_substrate_scoped=already_substrate_scoped
+    )
     if experimental.source is not ParameterSource.PLACEHOLDER or experimental.provenance_refs:
         return experimental
 
-    ai_predicted = initialize_from_ai_predicted_evidence(evidence_of_kind, network=network)
+    ai_predicted = initialize_from_ai_predicted_evidence(
+        evidence_of_kind, network=network, already_substrate_scoped=already_substrate_scoped
+    )
     if ai_predicted.source is not ParameterSource.PLACEHOLDER or ai_predicted.provenance_refs:
         return ai_predicted
 

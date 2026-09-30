@@ -88,13 +88,11 @@ def _matches_context(
         return measurement.enzyme_state_id == assignment.enzyme_state_id
     if assignment.protein_id is not None:
         return (
-            assignment.protein_id in measurement.protein_ids
-            and measurement.enzyme_state_id is None
+            assignment.protein_id in measurement.protein_ids and measurement.enzyme_state_id is None
         )
     if assignment.complex_id is not None:
         return (
-            measurement.complex_id == assignment.complex_id
-            and measurement.enzyme_state_id is None
+            measurement.complex_id == assignment.complex_id and measurement.enzyme_state_id is None
         )
     return (
         measurement.enzyme_state_id is None
@@ -179,37 +177,62 @@ def _enzyme_concentration_for_assignment(
     return enzyme_concentrations_by_protein_id.get(protein_id)
 
 
-def _anchored_km_initialization(
+def _substrate_matches(
+    evidence_of_kind: tuple[CuratedKineticMeasurement, ...],
+    compound_id: str,
+    *,
+    single_substrate: bool,
+) -> tuple[CuratedKineticMeasurement, ...]:
+    """Every measurement of one already-recognized kind (Km, kcat, ...) that legitimately
+    supports ``compound_id``'s own substrate-specific kinetic-parameter concept for this
+    catalytic context (Substrate-Specific Kinetic Parameterization for Promiscuous
+    Reactions increment): an exact ``compound_id`` match always, plus untagged
+    (``compound_id is None``) evidence only when this reaction has exactly one reactant at
+    all -- the only context in which "unspecified substrate" can unambiguously mean "this
+    one reactant" (task's own "[use generic evidence] only where existing policy supports
+    generic applicability"; for two or more reactants, an untagged measurement could name
+    any of them and is never assumed to be this one -- see ``_declare_kcat_specs``'s own
+    handling of leftover untagged evidence there).
+
+    The result is intentionally handed to ``initialize_with_fallback`` with
+    ``already_substrate_scoped=True``: for the single-reactant case this set may contain
+    both a real ``compound_id`` and ``None``-tagged entries together, which
+    ``consolidate_by_substrate`` would otherwise wrongly re-split into two spurious
+    "different substrate" concepts (the real Pilot 4 regression this increment fixes).
+    """
+    return tuple(
+        m
+        for m in evidence_of_kind
+        if m.compound_id == compound_id or (m.compound_id is None and single_substrate)
+    )
+
+
+def _anchor_compound_id(
     km_evidence: tuple[CuratedKineticMeasurement, ...],
     reactant_compound_ids: tuple[str, ...],
-    network: FullNetwork,
-) -> Initialization:
-    """A single-substrate-anchored ``Km`` ``Initialization``, for use only as an internal
-    input to Derivations C/D (never itself declared as a ``ParameterSpecification`` outside
-    `_declare_michaelis_menten`, which declares its own per-substrate `Km` slots
-    separately).
+) -> str | None:
+    """The single reactant compound this catalytic context's own curated ``Km`` evidence
+    unambiguously anchors to, or ``None`` when no such single anchor exists.
 
-    For a single-reactant context, an untagged ``Km`` measurement is assumed to name that
-    one reactant (mirrors `_declare_michaelis_menten`'s own identical policy). For a multi-
-    reactant context, only a `Km` explicitly and unambiguously naming exactly one of this
-    reaction's own reactant compounds is usable (mirrors
+    A single-reactant context is always its own anchor (evidence or not -- there is only
+    ever one candidate). A multi-reactant context anchors only when exactly one of its own
+    declared reactant compounds has any ``Km`` evidence naming it at all (mirrors
     `app.agent2.kinetics.selector`'s own `SUBSTRATE_ANCHORED_MM_MULTI_REACTANT_
-    APPROXIMATION` eligibility rule exactly: never an untagged `Km` -- which reactant would
-    it even be? -- and never one naming a compound this reaction does not have as a
-    reactant) -- two or more distinct anchored compounds is also treated as "nothing usable"
-    here, since Derivations C/D both need exactly one `Km` value for exactly one substrate.
+    APPROXIMATION` eligibility rule exactly) -- never an untagged `Km` for a multi-reactant
+    context (which reactant would it even be?), and never a `Km` naming a compound this
+    reaction does not have as a reactant at all (a real, observed case: a promiscuous
+    catalyst's own curated evidence naming a product, or a compound belonging to a
+    chemically related but structurally distinct reaction this coarse model does not
+    itself represent -- excluded here, never guessed onto this reaction's own species).
+    Two or more distinct anchored compounds is also "no anchor" -- Derivation C/D and the
+    ``kcat``/``Km`` pairing both need exactly one shared substrate concept.
     """
     if len(reactant_compound_ids) == 1:
-        matches = tuple(
-            m
-            for m in km_evidence
-            if m.compound_id == reactant_compound_ids[0] or m.compound_id is None
-        )
-    else:
-        anchored = tuple(m for m in km_evidence if m.compound_id in reactant_compound_ids)
-        anchored_compound_ids = {m.compound_id for m in anchored}
-        matches = anchored if len(anchored_compound_ids) == 1 else ()
-    return initialize_with_fallback(matches, kind=ParameterKind.CONCENTRATION, network=network)
+        return reactant_compound_ids[0]
+    anchored_ids = {m.compound_id for m in km_evidence if m.compound_id in reactant_compound_ids}
+    if len(anchored_ids) == 1:
+        return next(iter(anchored_ids))
+    return None
 
 
 def _reconstruct_k_eff_for_context(
@@ -225,10 +248,36 @@ def _reconstruct_k_eff_for_context(
     ``kcat`` half of the ratio -- mirrors the design doc's own step-2-before-step-3+
     ordering). Returns ``None`` immediately for any molecularity other than 2 -- see
     `reconstruction.reconstruct_k_eff_from_kcat_and_km`'s own docstring for why.
+
+    **Never pairs ``kcat`` from one substrate with ``Km`` from another** (Substrate-
+    Specific Kinetic Parameterization for Promiscuous Reactions increment, task's own
+    central rule): both sides are restricted to the identical anchor compound
+    (``_anchor_compound_id``, computed once from this context's own ``Km`` evidence) before
+    either is ever resolved -- real Pilot 4 regression this fixes: reaction
+    ``10c1fab0-...`` (palmitate:CoA ligase), where one real ``kcat`` measurement is tagged
+    with this reaction's own genuine reactant substrate and a second, equally real
+    ``kcat`` measurement is tagged with this reaction's own *product* (the reverse-
+    direction "substrate") -- the second is correctly excluded here, never merged with, or
+    treated as contradicting, the first.
     """
     if molecularity != 2:
         return None
-    kcat_matches = policy.measurements_of_kind(evidence, policy.KCAT_TYPES)
+    km_evidence = policy.measurements_of_kind(evidence, policy.KM_TYPES)
+    anchor = _anchor_compound_id(km_evidence, reactant_compound_ids)
+    if anchor is None:
+        return None
+    single_substrate = len(reactant_compound_ids) == 1
+    km_matches = _substrate_matches(km_evidence, anchor, single_substrate=single_substrate)
+    kcat_evidence = policy.measurements_of_kind(evidence, policy.KCAT_TYPES)
+    # Unlike Km/Ki (a property of one specific substrate's own binding), kcat is a
+    # property of the catalytic turnover itself -- an *untagged* kcat measurement makes no
+    # substrate-specific claim at all, so it is never treated as ambiguous about which
+    # reactant it concerns the way an untagged Km genuinely would be for 2+ reactants; it is
+    # always compatible with the one substrate Km itself anchors to
+    # (`_substrate_matches(..., single_substrate=True)` unconditionally, regardless of this
+    # reaction's own real reactant count). Only kcat evidence explicitly tagged to a
+    # *different* real compound is excluded -- a genuine, real competing substrate claim.
+    kcat_matches = _substrate_matches(kcat_evidence, anchor, single_substrate=True)
     vmax_matches = policy.measurements_of_kind(evidence, policy.VMAX_TYPES)
     macro_kcat = reconstruction.resolve_kcat_with_reconstruction(
         kcat_matches, vmax_matches, enzyme_concentration
@@ -238,9 +287,13 @@ def _reconstruct_k_eff_for_context(
         kind=ParameterKind.RATE_FIRST_ORDER,
         macro_reconstruction=macro_kcat,
         network=network,
+        already_substrate_scoped=True,
     )
-    km_initialization = _anchored_km_initialization(
-        policy.measurements_of_kind(evidence, policy.KM_TYPES), reactant_compound_ids, network
+    km_initialization = initialize_with_fallback(
+        km_matches,
+        kind=ParameterKind.CONCENTRATION,
+        network=network,
+        already_substrate_scoped=True,
     )
     return reconstruction.reconstruct_k_eff_from_kcat_and_km(
         kcat_initialization, km_initialization, molecularity=molecularity
@@ -332,9 +385,7 @@ def _placeholder_spec(
     )
 
 
-def _reaction_molecularity(
-    network: FullNetwork, reaction_id: str, role: ParticipantRole
-) -> int:
+def _reaction_molecularity(network: FullNetwork, reaction_id: str, role: ParticipantRole) -> int:
     """The total stoichiometry of every participant with the given role -- the reaction
     order a mass-action rate constant's own dimensionality depends on (Heuristic Simulation
     Parameter Initialization increment: ``[k] = nM^(1-n) * s^-1``, ``n`` the *reactant*
@@ -343,9 +394,7 @@ def _reaction_molecularity(
     whole number (``ReactionParticipantSpecification``'s own docstring); this only sums it.
     """
     (reaction,) = (r for r in network.reactions if r.reaction_id == reaction_id)
-    total = sum(
-        p.stoichiometry for p in reaction.participants if p.role is role
-    )
+    total = sum(p.stoichiometry for p in reaction.participants if p.role is role)
     return int(total)
 
 
@@ -488,6 +537,156 @@ def _reactant_compound_ids(
     return tuple(reactant_ids)
 
 
+def _unmapped_substrate_note(
+    assignment: KineticLawAssignment,
+    evidence: tuple[CuratedKineticMeasurement, ...],
+    reactant_compound_ids: tuple[str, ...],
+) -> str | None:
+    """Substrate-Specific Kinetic Parameterization for Promiscuous Reactions increment:
+    one disclosed sentence, or ``None``, naming every curated ``Km``/``kcat`` measurement
+    tagged with a real compound this reaction does not itself declare as a reactant
+    participant (a product -- the reverse-direction "substrate" -- or a compound entirely
+    foreign to this reaction, e.g. one belonging to a chemically related but structurally
+    distinct step a promiscuous catalyst also acts on).
+
+    Never used to build any parameter's value -- excluded from every substrate-specific
+    slot entirely (`_substrate_matches` already only ever matches `reactant_compound_ids`)
+    -- this function only makes that exclusion visible rather than silent, per the task's
+    own "preserve the ambiguity explicitly rather than fabricating a mapping." Real Pilot 4
+    cases: reaction `10c1fab0-...` (palmitate:CoA ligase) has real `kcat`/`Km` evidence
+    tagged with its own product compound; reaction `dc8db885-...` (a promiscuous
+    fatty-acid-elongation acyltransferase, EC 2.3.1.86) has real evidence tagged with two
+    compounds belonging to other elongation-cycle steps this coarse reaction model does not
+    itself represent.
+    """
+    relevant = policy.measurements_of_kind(evidence, policy.KM_TYPES | policy.KCAT_TYPES)
+    unmapped_ids = sorted(
+        m.id
+        for m in relevant
+        if m.compound_id is not None and m.compound_id not in reactant_compound_ids
+    )
+    if not unmapped_ids:
+        return None
+    unmapped_compounds = sorted(
+        {
+            m.compound_id
+            for m in relevant
+            if m.compound_id is not None and m.compound_id not in reactant_compound_ids
+        }
+    )
+    return (
+        f"kinetic-law-assignment::{assignment.assignment_id}: {len(unmapped_ids)} curated "
+        f"Km/kcat measurement(s) ({', '.join(unmapped_ids)}) name a compound "
+        f"({', '.join(unmapped_compounds)}) that is not one of this reaction's own declared "
+        "reactant participants (a product, or a compound belonging to a different reaction "
+        "this coarse model does not itself represent) -- excluded from every "
+        "substrate-specific kcat/Km concept for this context rather than mapped onto a "
+        "species it does not actually describe."
+    )
+
+
+def _declare_kcat_specs(
+    assignment: KineticLawAssignment,
+    kcat_evidence: tuple[CuratedKineticMeasurement, ...],
+    reactant_compound_ids: tuple[str, ...],
+    macro_kcat: Initialization | None,
+    network: FullNetwork,
+) -> tuple[ParameterSpecification, tuple[ParameterSpecification, ...], Initialization]:
+    """The primary (position-0, backward-compatible, unsuffixed) ``kcat`` slot every
+    Michaelis-Menten assignment declares exactly one of, plus zero or more additional,
+    substrate-suffixed ``kcat`` slots -- one per reactant compound that carries its own,
+    independently-resolvable evidence distinct from every other reactant's -- returned
+    *separately* from the primary slot so the caller (`_declare_michaelis_menten`) can
+    place them strictly *after* every positionally-significant parameter this law type
+    declares (`app.agent2.model_specification.mapping.build_expression_and_species` reads
+    `kcat` from position 0 and `Km`/fallback parameters immediately after by a fixed
+    count; see that module's own docstring). Also returns the primary slot's own
+    ``Initialization``, for `_declare_michaelis_menten`'s own Derivation D use.
+
+    Substrate-Specific Kinetic Parameterization for Promiscuous Reactions increment,
+    central rule: kcat evidence explicitly tagged to different, real reactant compounds
+    represents genuinely distinct kinetic concepts, never merged, never averaged, never
+    forced to agree merely because one physical enzyme active site is shared:
+
+    * **Zero or one reactant compound has evidence explicitly tagged to it** (every
+      reaction in the real Pilot 4 evaluation) -- the ordinary case, unchanged in shape
+      from before this increment: one primary slot, resolved from that one compound's own
+      tagged evidence plus any untagged evidence (kcat, unlike Km/Ki, makes no
+      substrate-specific claim at all when untagged, so it is never treated as a competing
+      claim against the one tagged compound -- see `_reconstruct_k_eff_for_context`'s
+      identical policy), or from untagged evidence alone when no reactant compound is
+      tagged at all.
+    * **Two or more reactant compounds each have their own explicitly-tagged evidence** --
+      a real, disclosed ambiguity for the *one* generic slot every Michaelis-Menten law
+      declares (which single number would it even report?): that slot is left an explicit
+      ``PLACEHOLDER`` naming every contributing substrate, while each substrate's own
+      concept is fully preserved, immediately after, as its own named, independently
+      resolved parameter -- built from its own exact tag only, never diluted with the
+      now-genuinely-ambiguous untagged evidence (which of the 2+ real concepts would it
+      belong to?) -- never silently dropped, never arbitrarily preferred.
+    """
+    tagged_by_compound: dict[str, tuple[CuratedKineticMeasurement, ...]] = {}
+    for compound_id in reactant_compound_ids:
+        tagged = tuple(m for m in kcat_evidence if m.compound_id == compound_id)
+        if tagged:
+            tagged_by_compound[compound_id] = tagged
+    generic = tuple(m for m in kcat_evidence if m.compound_id is None)
+
+    if len(tagged_by_compound) <= 1:
+        only_tagged = next(iter(tagged_by_compound.values()), ())
+        primary_evidence = only_tagged + generic
+        primary_initialization = initialize_with_fallback(
+            primary_evidence,
+            # kcat (a turnover number) is always first-order regardless of the reaction's
+            # own molecularity -- never molecularity-dependent the way a mass-action rate
+            # constant is.
+            kind=ParameterKind.RATE_FIRST_ORDER,
+            macro_reconstruction=macro_kcat,
+            network=network,
+            already_substrate_scoped=True,
+        )
+        primary_spec = _spec_from_initialization(
+            "kcat", assignment=assignment, initialization=primary_initialization
+        )
+        return primary_spec, (), primary_initialization
+
+    primary_initialization = Initialization(
+        source=ParameterSource.PLACEHOLDER,
+        value=None,
+        unit=None,
+        source_reference=None,
+        provenance_refs=tuple(sorted(m.id for group in tagged_by_compound.values() for m in group)),
+        uncertainty_text=(
+            f"{len(tagged_by_compound)} distinct reactant substrates "
+            f"({', '.join(sorted(tagged_by_compound))}) each carry their own "
+            "independently-resolvable kcat evidence for this catalytic context; no single "
+            "one is this reaction's own generic turnover number, so none is arbitrarily "
+            "preferred for this slot. See this same kinetic-law assignment's own "
+            "substrate-specific kcat parameters for each individually-resolved concept. "
+            "Requires calibration."
+        ),
+    )
+    primary_spec = _spec_from_initialization(
+        "kcat", assignment=assignment, initialization=primary_initialization
+    )
+    extra_specs = tuple(
+        _spec_from_initialization(
+            "kcat",
+            assignment=assignment,
+            initialization=initialize_with_fallback(
+                tagged_by_compound[compound_id],
+                kind=ParameterKind.RATE_FIRST_ORDER,
+                network=network,
+                already_substrate_scoped=True,
+            ),
+            substrate_id=compound_id,
+        )
+        for compound_id in reactant_compound_ids
+        if compound_id in tagged_by_compound
+    )
+    return primary_spec, extra_specs, primary_initialization
+
+
 def _declare_michaelis_menten(
     assignment: KineticLawAssignment,
     evidence: tuple[CuratedKineticMeasurement, ...],
@@ -499,37 +698,32 @@ def _declare_michaelis_menten(
     # Reconstruction increment): kcat = Vmax / [E]_total, attempted only when direct/AI-
     # predicted kcat evidence is genuinely absent (the "macro_reconstruction" tier is only
     # ever consulted by initialize_with_fallback after both stronger tiers return empty).
+    # Computed once, against the *primary* kcat concept only (below) -- a reaction with two
+    # or more independently-resolvable substrate-specific kcat concepts (rare; see
+    # `_declare_kcat_specs`) does not attempt a substrate-specific Derivation B for each one.
     kcat_evidence = policy.measurements_of_kind(evidence, policy.KCAT_TYPES)
     vmax_evidence = policy.measurements_of_kind(evidence, policy.VMAX_TYPES)
     macro_kcat = reconstruction.resolve_kcat_with_reconstruction(
         kcat_evidence, vmax_evidence, enzyme_concentration
     )
-    kcat_initialization = initialize_with_fallback(
-        kcat_evidence,
-        # kcat (a turnover number) is always first-order regardless of the reaction's own
-        # molecularity -- never molecularity-dependent the way a mass-action rate constant
-        # is.
-        kind=ParameterKind.RATE_FIRST_ORDER,
-        macro_reconstruction=macro_kcat,
-        network=network,
+    primary_kcat_spec, extra_kcat_specs, kcat_initialization = _declare_kcat_specs(
+        assignment, kcat_evidence, reactant_compound_ids, macro_kcat, network
     )
-    kcat_spec = _spec_from_initialization(
-        "kcat", assignment=assignment, initialization=kcat_initialization
-    )
-    specs = [kcat_spec]
+    specs = [primary_kcat_spec]
 
     km_evidence = policy.measurements_of_kind(evidence, policy.KM_TYPES)
     single_substrate = len(reactant_compound_ids) == 1
     km_initializations_by_compound: dict[str, Initialization] = {}
     km_specs_by_compound: dict[str, ParameterSpecification] = {}
     for compound_id in reactant_compound_ids:
-        substrate_matches = tuple(
-            m
-            for m in km_evidence
-            if m.compound_id == compound_id or (m.compound_id is None and single_substrate)
+        substrate_matches = _substrate_matches(
+            km_evidence, compound_id, single_substrate=single_substrate
         )
         km_initialization = initialize_with_fallback(
-            substrate_matches, kind=ParameterKind.CONCENTRATION, network=network
+            substrate_matches,
+            kind=ParameterKind.CONCENTRATION,
+            network=network,
+            already_substrate_scoped=True,
         )
         km_spec = _spec_from_initialization(
             "Km", assignment=assignment, initialization=km_initialization, substrate_id=compound_id
@@ -544,14 +738,16 @@ def _declare_michaelis_menten(
     if single_substrate:
         # Derivation D: preserve Km=(kr+kcat)/kf as a disclosed constraint, never a chosen
         # (kf, kr) point -- only meaningful for the single-substrate E+S<=>ES->E+P
-        # mechanism (design doc §2.1/§2.2's own multi-substrate scope exclusion).
+        # mechanism (design doc §2.1/§2.2's own multi-substrate scope exclusion). A
+        # single-reactant context always has exactly one (the primary) kcat concept -- see
+        # `_declare_kcat_specs`.
         (only_compound_id,) = reactant_compound_ids
         constraint = reconstruction.classify_km_kcat_constraint(
             kcat_initialization,
             km_initializations_by_compound[only_compound_id],
             reaction_id=assignment.reaction_id,
             kinetic_law_assignment_id=assignment.assignment_id,
-            kcat_parameter_id=kcat_spec.parameter_id,
+            kcat_parameter_id=primary_kcat_spec.parameter_id,
             km_parameter_id=km_specs_by_compound[only_compound_id].parameter_id,
         )
         if constraint is not None:
@@ -577,6 +773,13 @@ def _declare_michaelis_menten(
                 assignment, evidence, reactant_compound_ids, enzyme_concentration, network
             )
         )
+    # Any additional, substrate-suffixed kcat concepts (`_declare_kcat_specs`, the rare
+    # two-or-more-mappable-reactants case) are appended last, strictly after every
+    # positionally-significant parameter above -- `build_expression_and_species` only ever
+    # reads a fixed, bounded number of parameters from each known position, so purely
+    # informational extras trailing after them are never misread as Km or fallback
+    # rate-constant slots.
+    specs.extend(extra_kcat_specs)
     return tuple(specs), tuple(constraints)
 
 
@@ -744,9 +947,9 @@ def _declare_for_assignment(
     enzyme_concentrations_by_state_id: dict[str, EnzymeConcentration],
     *,
     sibling_count: int,
-) -> tuple[tuple[ParameterSpecification, ...], tuple[MicroscopicConstraint, ...]]:
+) -> tuple[tuple[ParameterSpecification, ...], tuple[MicroscopicConstraint, ...], tuple[str, ...]]:
     if assignment.kinetic_law_type is KineticLawType.UNASSIGNED:
-        return (), ()
+        return (), (), ()
 
     evidence = _evidence_for(assignment, reaction_measurements, sibling_count=sibling_count)
     enzyme_concentration = _enzyme_concentration_for_assignment(
@@ -761,33 +964,39 @@ def _declare_for_assignment(
         reactant_compound_ids = _reactant_compound_ids(
             network, assignment.reaction_id, species_by_id
         )
+        note = _unmapped_substrate_note(assignment, evidence, reactant_compound_ids)
         return (
             _declare_mass_action(
                 assignment, evidence, reactant_compound_ids, enzyme_concentration, network
             ),
             (),
+            (note,) if note is not None else (),
         )
     if assignment.kinetic_law_type is KineticLawType.REVERSIBLE_MASS_ACTION:
         reactant_compound_ids = _reactant_compound_ids(
             network, assignment.reaction_id, species_by_id
         )
+        note = _unmapped_substrate_note(assignment, evidence, reactant_compound_ids)
         return (
             _declare_reversible_mass_action(
                 assignment, evidence, reactant_compound_ids, enzyme_concentration, network
             ),
             (),
+            (note,) if note is not None else (),
         )
     if assignment.kinetic_law_type is KineticLawType.MICHAELIS_MENTEN:
         reactant_compound_ids = _reactant_compound_ids(
             network, assignment.reaction_id, species_by_id
         )
-        return _declare_michaelis_menten(
+        note = _unmapped_substrate_note(assignment, evidence, reactant_compound_ids)
+        specs, constraints = _declare_michaelis_menten(
             assignment, evidence, reactant_compound_ids, enzyme_concentration, network
         )
+        return specs, constraints, (note,) if note is not None else ()
     if assignment.kinetic_law_type is KineticLawType.HILL:
-        return _declare_hill(assignment, evidence, network), ()
+        return _declare_hill(assignment, evidence, network), (), ()
     if assignment.kinetic_law_type is KineticLawType.CUSTOM:
-        return _declare_custom(assignment, evidence, network), ()
+        return _declare_custom(assignment, evidence, network), (), ()
 
     raise ParameterReferenceError(
         f"declare_parameters has no declaration policy for kinetic_law_type="
@@ -871,8 +1080,9 @@ def declare_parameters(
 
     specs: list[ParameterSpecification] = []
     constraints: list[MicroscopicConstraint] = []
+    assumptions: list[str] = []
     for assignment in sorted(assignments.assignments, key=lambda a: a.assignment_id):
-        assignment_specs, assignment_constraints = _declare_for_assignment(
+        assignment_specs, assignment_constraints, assignment_notes = _declare_for_assignment(
             assignment,
             tuple(measurements_by_reaction.get(assignment.reaction_id, ())),
             network,
@@ -884,6 +1094,7 @@ def declare_parameters(
         )
         specs.extend(assignment_specs)
         constraints.extend(assignment_constraints)
+        assumptions.extend(assignment_notes)
 
     declaration_set = ParameterDeclarationSet(
         network_id=assignments.network_id,
@@ -891,6 +1102,7 @@ def declare_parameters(
         parameter_policy_version=PARAMETER_DECLARATION_POLICY_VERSION,
         parameter_specifications=tuple(specs),
         microscopic_constraints=tuple(constraints),
+        assumptions=tuple(assumptions),
     )
 
     valid_assignment_ids = {a.assignment_id for a in assignments.assignments}

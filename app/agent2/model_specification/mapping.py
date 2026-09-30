@@ -155,15 +155,11 @@ def _used_multi_substrate_mm_fallback(
 
 
 def _reactant_species_ids(reaction: ReactionSpecification) -> tuple[str, ...]:
-    return tuple(
-        p.species_id for p in reaction.participants if p.role is ParticipantRole.REACTANT
-    )
+    return tuple(p.species_id for p in reaction.participants if p.role is ParticipantRole.REACTANT)
 
 
 def _product_species_ids(reaction: ReactionSpecification) -> tuple[str, ...]:
-    return tuple(
-        p.species_id for p in reaction.participants if p.role is ParticipantRole.PRODUCT
-    )
+    return tuple(p.species_id for p in reaction.participants if p.role is ParticipantRole.PRODUCT)
 
 
 def _all_participant_species_ids(reaction: ReactionSpecification) -> tuple[str, ...]:
@@ -236,8 +232,21 @@ def build_expression_and_species(
             # `_declare_multi_substrate_mm_fallback` appended after kcat/Km for exactly this
             # case -- never a claim that this is the true enzyme mechanism (see
             # `_assumptions_for`/`build_model_assumptions` for the required disclosure).
+            # Substrate-Specific Kinetic Parameterization for Promiscuous Reactions
+            # increment: bounded to the exact expected fallback count (1 for irreversible, 2
+            # for reversible -- `_build_multi_substrate_mm_fallback_expression`'s own
+            # identical count) rather than an open-ended slice, since `_declare_kcat_specs`
+            # may append zero or more additional, purely-informational, substrate-suffixed
+            # `kcat` parameters strictly after the fallback rate constant(s) -- those must
+            # never be misread as part of this fallback.
+            fallback_count = 2 if effective_reversible(reaction.reversible) else 1
+            fallback_start = 1 + len(reactants)
             return _build_multi_substrate_mm_fallback_expression(
-                assignment, reaction, law_parameters[1 + len(reactants) :], reactants, products
+                assignment,
+                reaction,
+                law_parameters[fallback_start : fallback_start + fallback_count],
+                reactants,
+                products,
             )
         (s, km) = terms[0]
         numerator = f"{kcat} * {s}"
@@ -495,9 +504,7 @@ def build_model_assumptions(
                 for mid in anchor_measurement_ids
                 if mid in measurements_by_id
             )
-            anchored_compound = (
-                anchor_measurements[0].compound_id if anchor_measurements else None
-            )
+            anchored_compound = anchor_measurements[0].compound_id if anchor_measurements else None
             if not anchor_measurement_ids:
                 measurement_clause = "no specific curated measurement reports"
             elif len(anchor_measurement_ids) == 1:
@@ -655,9 +662,7 @@ def build_model_assumptions(
             else "unknown source"
         )
         protein_ref = (
-            ", ".join(measurement.protein_ids)
-            if measurement.protein_ids
-            else "no resolved protein"
+            ", ".join(measurement.protein_ids) if measurement.protein_ids else "no resolved protein"
         )
         assumptions.append(
             ModelAssumption(
@@ -741,9 +746,7 @@ def build_model_assumptions(
             )
         )
 
-    for constraint in sorted(
-        microscopic_constraints, key=lambda c: c.kinetic_law_assignment_id
-    ):
+    for constraint in sorted(microscopic_constraints, key=lambda c: c.kinetic_law_assignment_id):
         # Identifiability-Aware Macroscopic-to-Microscopic Kinetic Reconstruction increment,
         # Derivation D (task's own explicit requirement): kf/kr remain on an unresolved
         # curve even though Km/kcat are both resolved -- disclosed here, machine-readably,
@@ -754,9 +757,7 @@ def build_model_assumptions(
                     f"assumption::microscopic-constraint::{constraint.kinetic_law_assignment_id}"
                 ),
                 category="reconstruction",
-                statement=(
-                    f"Reaction {constraint.reaction_id}: {constraint.explanation}"
-                ),
+                statement=(f"Reaction {constraint.reaction_id}: {constraint.explanation}"),
                 related_entity_ids=(
                     constraint.reaction_id,
                     constraint.kinetic_law_assignment_id,
