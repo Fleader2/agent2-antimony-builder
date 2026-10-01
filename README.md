@@ -90,13 +90,8 @@ itself.
 
 ## Current Status
 
-> Increment 1 (Architecture and Core Contracts), Increment 2
-> (Whole-Network Assembly), Increment 3 (Reaction and Enzyme-State
-> Characterization), Increment 4 (Kinetic-Law Assignment), Increment 5
-> (Parameter Declaration / Initialization), Increment 6 (Heuristic
-> Boundary Assessment), Increment 7 (Module Decomposition), Increment 8
-> (ModelSpecification Assembly), and Increment 9 (Antimony Generation)
-> are implemented. See `docs/04_core_domain_contracts.md`,
+> Increment 1 (Architecture and Core Contracts) through Increment 9
+> (Antimony Generation) are implemented. See `docs/04_core_domain_contracts.md`,
 > `docs/05_whole_network_assembly.md`,
 > `docs/06_reaction_enzyme_state_characterization.md`,
 > `docs/07_kinetic_law_assignment.md`,
@@ -104,8 +99,21 @@ itself.
 > `docs/09_heuristic_boundary_assessment.md`,
 > `docs/10_module_decomposition.md`,
 > `docs/11_model_specification_assembly.md`, and
-> `docs/12_antimony_generation.md`. Next: Increment 10, End-to-End Agent 2
-> Build / Syntax Contract (see Roadmap).
+> `docs/12_antimony_generation.md`.
+>
+> **Five-Agent Workflow V1 Hardening increment:** Increment 10
+> (End-to-End Agent 2 Build / Syntax Contract) is implemented as
+> `app.agent2.pipeline.run_agent2_pipeline` — the one official,
+> already-tested entrypoint that chains every increment above in the
+> correct order (including the two-pass enzyme-state-dynamics wiring),
+> given a serialized Agent 1 handoff. See
+> `docs/19_canonical_orchestration_entrypoint.md`, and
+> `scripts/run_agent2_pipeline.py` for the CLI wrapper. It emits the one
+> canonical downstream contract, `AGENT2_DOWNSTREAM_CONTRACT_VERSION =
+> "agent2-downstream-v1"`, consumed unchanged by Agent 3, Agent 4, and
+> Agent 5 — see the sibling `five-agent-integration-harness` repository's
+> `docs/00_five_agent_workflow_v1_architecture.md` for the full Version 1
+> system map (tagged `v1.0.0`).
 
 ## Roadmap
 
@@ -118,10 +126,10 @@ itself.
 - **Increment 7** — Module Decomposition (implemented)
 - **Increment 8** — ModelSpecification Assembly (implemented)
 - **Increment 9** — Antimony Generation (implemented)
-- **Increment 10** — End-to-End Agent 2 Build / Syntax Contract
+- **Increment 10** — End-to-End Agent 2 Build / Syntax Contract (implemented, as `run_agent2_pipeline`)
 
-This roadmap describes planned scope, not a commitment to a fixed
-timeline or final design for increments beyond the next one.
+This roadmap describes implemented scope; Version 2 planning is tracked
+separately and has not begun.
 
 ---
 
@@ -139,6 +147,7 @@ timeline or final design for increments beyond the next one.
 - `docs/10_module_decomposition.md` — Increment 7 (Module Decomposition), implemented
 - `docs/11_model_specification_assembly.md` — Increment 8 (ModelSpecification Assembly), implemented
 - `docs/12_antimony_generation.md` — Increment 9 (Antimony Generation), implemented
+- `docs/19_canonical_orchestration_entrypoint.md` — Increment 10, the canonical `run_agent2_pipeline` entrypoint and downstream contract, implemented
 
 ## Repository Structure
 
