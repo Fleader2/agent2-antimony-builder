@@ -79,6 +79,26 @@ names actually changes.
   readiness policy, the reversibility and amount-vs-concentration
   serialization conventions). Also a *behavioral rule set* version, not a
   data shape.
+* ``AGENT2_ORCHESTRATION_POLICY_VERSION`` -- the version of
+  ``app.agent2.pipeline.run_agent2_pipeline``'s own stage-sequencing
+  policy (Five-Agent Workflow V1 Hardening increment): which existing
+  stage functions are called, in what order, and how their results are
+  threaded between each other (e.g. the enzyme-state-dynamics two-pass
+  wiring). Versions *orchestration sequencing* only -- never a scientific
+  policy of any individual stage, each of which keeps its own existing
+  policy version above unchanged unless that stage's own behavior
+  actually changes.
+* ``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` -- the version of the one
+  canonical, serialized Agent 2 -> {Agent 3, Agent 4, Agent 5} downstream
+  handoff shape (``app.agent2.pipeline.build_canonical_downstream_handoff``;
+  Five-Agent Workflow V1 Hardening increment). Replaces three previously
+  divergent per-consumer names (``"agent2-to-agent3-v1"``,
+  ``"agent2-agent3-to-agent4-v1"``, ``"agent2-agent4-to-agent5-v1"``) that
+  all named the identical real artifact shape -- see
+  ``docs/19_canonical_orchestration_entrypoint.md``. Distinct from
+  ``AGENT2_CONTRACT_VERSION`` (which versions ``ModelSpecification``'s own,
+  richer internal shape): this versions only the narrower, already-
+  serialized subset Agents 3-5 actually consume.
 
 ``AGENT2_CONTRACT_VERSION`` was bumped from ``"0.1"`` to ``"0.2"`` in
 Increment 1: ``ModelSpecification``'s shape changed in a
@@ -1295,6 +1315,26 @@ every context whose evidence includes a now-disclosed unmapped-substrate note) a
 ``MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION`` is left unchanged
 (``"macro-to-micro-v1"``) -- ``app.agent2.parameters.reconstruction`` itself was not
 modified; only its caller's own evidence-filtering changed.
+
+**Five-Agent Workflow V1 Hardening increment.** Introduced two new constants,
+``AGENT2_ORCHESTRATION_POLICY_VERSION`` (``"agent2-orchestration-v1"``) and
+``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` (``"agent2-downstream-v1"``), and the new
+``app.agent2.pipeline`` module they version. This closes the two known Version-1
+integration debts: (1) Agent 2 previously had no single, verified, end-to-end
+orchestration entrypoint -- every discrete stage function was independently tested, but
+no code chained them together in the correct order outside of test fixtures; (2) Agents
+3, 4, and 5 each independently named the identical real downstream artifact shape with
+three different ``contract_version`` strings, which the integration harness had to
+paper over with a re-stamping workaround. ``app.agent2.pipeline.run_agent2_pipeline``
+sequences the existing, already-committed stage functions in the one order their own
+test suites already independently prove correct (``tests/agent2/test_model_specification
+.py``'s own ``_assemble_full`` helper for the base seven-stage chain,
+``tests/agent2/test_reaction_context.py`` for reaction-context resolution's placement,
+and ``tests/agent2/test_enzyme_state_dynamics.py`` for the two-pass enzyme-state-
+augmentation wiring) -- no scientific policy of any individual stage changed, so every
+other constant in this file is unchanged. ``AGENT2_CONTRACT_VERSION`` is also
+unchanged -- ``ModelSpecification``'s own shape did not change; only a new, narrower,
+already-serialized downstream subset of it gained one canonical name.
 """
 
 from __future__ import annotations
@@ -1315,11 +1355,15 @@ QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
 MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
 EVIDENCE_CONSOLIDATION_POLICY_VERSION = "evidence-consolidation-v1"
 ENZYME_STATE_DYNAMICS_POLICY_VERSION = "enzyme-state-dynamics-v1"
+AGENT2_ORCHESTRATION_POLICY_VERSION = "agent2-orchestration-v1"
+AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
     "AGENT1_TRANSLATION_POLICY_VERSION",
     "AGENT2_CONTRACT_VERSION",
+    "AGENT2_DOWNSTREAM_CONTRACT_VERSION",
+    "AGENT2_ORCHESTRATION_POLICY_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
