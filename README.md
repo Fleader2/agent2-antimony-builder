@@ -123,6 +123,17 @@ itself.
 > exact pre-existing behavior with no change whatsoever. See
 > `docs/20_scoped_build_support.md` for the full contract, supported/
 > unsupported constraints, and cross-repository wiring.
+>
+> **Antimony Import increment:** Agent 2 now supports a second entry path into the same
+> canonical `ModelSpecification`/`FullNetwork` representation — real, live Antimony/SBML
+> parsing (`app.agent2.antimony_import.import_antimony`), with new `rules`/`events`/
+> `observables`/`source_type`/`source_provenance` fields. `antimony`/`python-libsbml` are
+> this repository's first, deliberate runtime dependencies, confined entirely to that one
+> package. `generate_antimony` (the existing, unchanged entry point) now also serializes
+> rules/events/observables and fixes a reversibility-arrow correctness bug found while
+> building the semantic round trip. `agent2-downstream-v1` is unchanged. See
+> `docs/21_antimony_import_and_canonical_model.md` for the full design, supported/unsupported
+> constructs, and round-trip guarantees.
 
 ## Roadmap
 
@@ -137,6 +148,7 @@ itself.
 - **Increment 9** — Antimony Generation (implemented)
 - **Increment 10** — End-to-End Agent 2 Build / Syntax Contract (implemented, as `run_agent2_pipeline`)
 - **Scoped-Build Support** — Workbench `ModelBuildRequest` → Agent 2 scoped builds (implemented)
+- **Antimony Import** — real Antimony/SBML parsing into the canonical representation, with semantic round-trip (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -159,6 +171,7 @@ separately and has not begun.
 - `docs/12_antimony_generation.md` — Increment 9 (Antimony Generation), implemented
 - `docs/19_canonical_orchestration_entrypoint.md` — Increment 10, the canonical `run_agent2_pipeline` entrypoint and downstream contract, implemented
 - `docs/20_scoped_build_support.md` — Scoped-Build Support increment: the Workbench `ModelBuildRequest` → Agent 2 contract, ownership boundary, supported/unsupported constraints, and cross-repository wiring, implemented
+- `docs/21_antimony_import_and_canonical_model.md` — Antimony Import increment: the canonical model schema additions, import/export flow, supported/unsupported constructs, and semantic round-trip guarantees, implemented
 
 ## Repository Structure
 

@@ -56,12 +56,14 @@ def test_boundary_likelihood_has_exactly_five_values():
     }
 
 
-def test_parameter_source_has_exactly_nine_values():
+def test_parameter_source_has_exactly_ten_values():
     """AI_PREDICTED/HEURISTIC_INITIALIZATION added by the Heuristic Simulation Parameter
     Initialization increment; DERIVED_FROM_MACRO_KINETICS added by the Identifiability-Aware
     Macroscopic-to-Microscopic Kinetic Reconstruction increment; DERIVED_FROM_POOL_
-    CONSERVATION added by the Multi-Context Catalytic Rate Composition increment, Stage 2 --
-    four new, distinct rungs, never confused with the five original values."""
+    CONSERVATION added by the Multi-Context Catalytic Rate Composition increment, Stage 2;
+    IMPORTED added by the Antimony Import increment (a value read verbatim from an
+    externally-authored model, outside the build-path precedence chain entirely) -- five new,
+    distinct rungs, never confused with the five original values."""
     assert {member.value for member in ParameterSource} == {
         "CURATED",
         "LITERATURE_DERIVED",
@@ -72,6 +74,7 @@ def test_parameter_source_has_exactly_nine_values():
         "DEFAULT",
         "PLACEHOLDER",
         "CALIBRATED",
+        "IMPORTED",
     }
 
 
@@ -273,6 +276,16 @@ def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+#: Antimony Import increment: ``antimony``/``libsbml`` are real, deliberate dependencies now
+#: (parsing/validating externally-authored Antimony into the canonical ``ModelSpecification``),
+#: confined entirely to ``app/agent2/antimony_import/`` -- the one, explicit carve-out from
+#: ``_FORBIDDEN_IMPORT_ROOTS`` below, scoped to that directory only. Every other file in
+#: ``app/`` (including the generator package, ``app/agent2/antimony/``) remains held to the
+#: original rule with no exception.
+_ANTIMONY_IMPORT_ROOT = APP_ROOT / "agent2" / "antimony_import"
+_ANTIMONY_IMPORT_ALLOWED_ROOTS = frozenset({"antimony", "libsbml"})
+
+
 def test_no_forbidden_library_imported_anywhere_in_app():
     offenders: dict[str, set[str]] = {}
     for path in _iter_app_python_files():
@@ -284,9 +297,33 @@ def test_no_forbidden_library_imported_anywhere_in_app():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 roots.add(node.module.split(".")[0])
         hits = roots & _FORBIDDEN_IMPORT_ROOTS
+        if path.resolve().is_relative_to(_ANTIMONY_IMPORT_ROOT):
+            hits -= _ANTIMONY_IMPORT_ALLOWED_ROOTS
         if hits:
             offenders[str(path.relative_to(PROJECT_ROOT))] = hits
     assert offenders == {}, f"forbidden simulation/modeling-execution imports found: {offenders}"
+
+
+def test_only_antimony_import_package_imports_antimony_or_libsbml():
+    """The flip side of the carve-out above: confirms no *other* file anywhere in ``app/``
+    (in particular the generator package, ``app/agent2/antimony/``) reaches for ``antimony``/
+    ``libsbml`` -- the carve-out must never silently widen to cover a file it was not written
+    for."""
+    offenders: dict[str, set[str]] = {}
+    for path in _iter_app_python_files():
+        if path.resolve().is_relative_to(_ANTIMONY_IMPORT_ROOT):
+            continue
+        tree = _parse(path)
+        roots = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".")[0])
+        hits = roots & _ANTIMONY_IMPORT_ALLOWED_ROOTS
+        if hits:
+            offenders[str(path.relative_to(PROJECT_ROOT))] = hits
+    assert offenders == {}, f"antimony/libsbml imported outside antimony_import/: {offenders}"
 
 
 def test_no_forbidden_definitions_anywhere_in_app():
@@ -347,7 +384,14 @@ def test_no_simulation_or_validation_module_exists_yet():
         assert not (APP_ROOT / "agent2" / stale_name).exists()
 
 
-def test_pyproject_declares_no_modeling_or_simulation_dependency():
+def test_pyproject_declares_no_simulation_or_numeric_dependency():
+    """Antimony Import increment: ``antimony``/``python-libsbml`` are now this repository's
+    first, deliberate runtime dependencies (real parsing/validation for Antimony import --
+    see ``docs/21_antimony_import_and_canonical_model.md``), confined to
+    ``app/agent2/antimony_import/`` (checked by
+    ``test_antimony_import_scope.py::test_only_antimony_import_package_imports_antimony_or_libsbml``).
+    Every genuine simulation/numeric-fitting library remains forbidden -- this increment never
+    added simulation, calibration, or parameter estimation."""
     import tomllib
 
     with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
@@ -356,8 +400,6 @@ def test_pyproject_declares_no_modeling_or_simulation_dependency():
     all_dependency_text = " ".join(dependencies).lower()
     for forbidden in (
         "tellurium",
-        "libsbml",
-        "antimony",
         "copasi",
         "basico",
         "roadrunner",

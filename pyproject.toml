@@ -8,7 +8,17 @@ description = "Agent 2: transforms Agent 1's curated biochemical knowledge into 
 readme = "README.md"
 requires-python = ">=3.12"
 dynamic = ["version"]
-dependencies = []
+dependencies = [
+    # Antimony Import increment: real libAntimony/libSBML bindings, isolated to
+    # app/agent2/antimony_import/ (parsing/validating externally-authored Antimony source into
+    # the canonical ModelSpecification). This repository's own generator package,
+    # app/agent2/antimony/ (ModelSpecification -> Antimony text), remains dependency-free and is
+    # still scope-tested (tests/agent2/test_antimony_scope.py) to never import either library --
+    # these two are the first runtime dependencies this repository has ever declared, deliberately
+    # confined to import/validation, never generation.
+    "antimony>=3.0",
+    "python-libsbml>=5.20",
+]
 
 [project.optional-dependencies]
 dev = [

@@ -268,7 +268,7 @@ def test_one_compartment_one_species_one_reaction_serializes():
     assert "compartment c_cyto" in text
     assert "species s_a in c_cyto" in text
     assert "species s_b in c_cyto" in text
-    assert "J_r1: s_a -> s_b; k1 * s_a;" in text.replace("p_k1", "k1")
+    assert "J_r1: s_a => s_b; k1 * s_a;" in text.replace("p_k1", "k1")
 
 
 def test_multiple_reactions_all_serialized():
@@ -377,7 +377,7 @@ def test_stoichiometric_coefficients_preserved_verbatim():
         )
     )
     text = generate_antimony(model).full_antimony.antimony_text
-    assert "2 s_a -> 3 s_b" in text
+    assert "2 s_a => 3 s_b" in text
 
 
 def test_determinism_byte_identical_across_repeated_generation():
@@ -407,7 +407,7 @@ def test_mass_action_expression_rendered_with_antimony_ids():
     model = _resolved_model(law, (_parameter(parameter_id="k1"),))
     artifact = generate_antimony(model).full_antimony
     assert artifact.readiness is AntimonyArtifactReadiness.EXECUTABLE
-    assert "s_a -> s_b; p_k1 * s_a;" in artifact.antimony_text
+    assert "s_a => s_b; p_k1 * s_a;" in artifact.antimony_text
 
 
 def test_reversible_mass_action_expression_rendered():
@@ -1188,7 +1188,7 @@ def test_multiple_modules_each_get_their_own_artifact():
 def test_module_view_never_invents_a_source_or_sink_reaction():
     model = _model()
     view = generate_antimony(model).module_artifacts[0].antimony_view
-    assert view.count("->") == 1
+    assert view.count("->") + view.count("=>") == 1
 
 
 def test_module_marked_view_only_without_boundary_interfaces():

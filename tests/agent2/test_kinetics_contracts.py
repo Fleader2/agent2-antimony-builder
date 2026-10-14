@@ -41,7 +41,10 @@ def _parameter(**overrides) -> ParameterSpecification:
 # --- Enum vocabulary -----------------------------------------------------------------------
 
 
-def test_kinetic_law_type_has_exactly_six_values():
+def test_kinetic_law_type_has_exactly_seven_values():
+    """IMPORTED added by the Antimony Import increment -- distinct from CUSTOM: its own
+    expression's symbols are already known species_ids/parameter_ids, safe to render by
+    substitution (see KineticLawType.IMPORTED's own docstring)."""
     assert {member.value for member in KineticLawType} == {
         "MASS_ACTION",
         "MICHAELIS_MENTEN",
@@ -49,6 +52,7 @@ def test_kinetic_law_type_has_exactly_six_values():
         "REVERSIBLE_MASS_ACTION",
         "CUSTOM",
         "UNASSIGNED",
+        "IMPORTED",
     }
 
 

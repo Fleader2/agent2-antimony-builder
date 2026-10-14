@@ -1,11 +1,16 @@
 """Scope-safety tests for Antimony Generation (Increment 9).
 
-Confirms ``app.agent2.antimony`` never reaches for simulation, parameter
-fitting/optimization, boundary reassessment, module recomputation, Agent
-3 validation, Agent 4/5 behavior, an LLM, Agent 1's runtime, or a
-Tellurium/RoadRunner/libSBML/COPASI/antimony runtime dependency -- all
-explicit non-goals of this increment (see
-``docs/12_antimony_generation.md`` §29).
+Confirms ``app.agent2.antimony`` (the *generator*: ``ModelSpecification`` -> Antimony text)
+never reaches for simulation, parameter fitting/optimization, boundary reassessment, module
+recomputation, Agent 3 validation, Agent 4/5 behavior, an LLM, Agent 1's runtime, or a
+Tellurium/RoadRunner/libSBML/COPASI/antimony runtime dependency -- all explicit non-goals of
+this increment (see ``docs/12_antimony_generation.md`` §29). This remains true after the
+Antimony Import increment: real ``antimony``/``libsbml`` bindings are now genuine, deliberate
+dependencies of this repository, but confined entirely to the *separate*
+``app.agent2.antimony_import`` package (Antimony text -> ``ModelSpecification``) --
+``test_antimony_import_scope.py`` holds that package to the identical discipline this file
+holds the generator to, plus the one additional check that only that package imports
+``antimony``/``libsbml`` at all.
 """
 
 from __future__ import annotations

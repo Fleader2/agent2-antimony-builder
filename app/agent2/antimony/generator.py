@@ -46,6 +46,7 @@ still be fabricated biology.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -60,6 +61,7 @@ from app.agent2.antimony.serializer import (
     format_decimal,
     format_stoichiometry,
     render_kinetic_law_expression,
+    substitute_identifiers,
 )
 from app.agent2.antimony.validation import validate_serializer_integrity
 from app.agent2.reversibility import ReversibilityBasis, classify_reversibility_basis
@@ -67,15 +69,19 @@ from app.agent2.types import (
     Agent2OutputPackage,
     AntimonyArtifactReadiness,
     CompartmentSpecification,
+    EventSpecification,
     FullAntimonyArtifact,
     KineticLawSpecification,
     KineticLawType,
     ModelSpecification,
     ModuleAntimonyArtifact,
     ModuleSpecification,
+    ObservableSpecification,
     ParameterSpecification,
     ParticipantRole,
     ReactionSpecification,
+    RuleSpecification,
+    RuleType,
     SpeciesSpecification,
 )
 from app.agent2.version import AGENT2_CONTRACT_VERSION, ANTIMONY_GENERATION_POLICY_VERSION
@@ -343,6 +349,9 @@ def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
         reaction_resolutions=reaction_resolutions,
         parameters=model.parameters,
         id_map=id_map,
+        rules=model.rules,
+        events=model.events,
+        observables=model.observables,
     )
     full_antimony = FullAntimonyArtifact(
         model_id=model.model_id,
@@ -493,7 +502,21 @@ def _reaction_line(
     ]
     lhs = " + ".join(format_stoichiometry(stoich, id_map.species[sid]) for sid, stoich in reactants)
     rhs = " + ".join(format_stoichiometry(stoich, id_map.species[sid]) for sid, stoich in products)
-    equation = f"{lhs} -> {rhs}".strip()
+    # Antimony Import increment correctness fix: the arrow itself must encode reversibility
+    # (``=>`` irreversible, ``->`` reversible -- confirmed directly against real libAntimony),
+    # never only the trailing comment. A model re-parsed by a real Antimony/SBML reader (as
+    # ``app.agent2.antimony_import`` now does) previously always saw every reaction as
+    # reversible regardless of ``reaction.reversible``, since every equation always used
+    # ``->``. The structured downstream handoff's own ``reversible`` field
+    # (``app.agent2.pipeline.build_canonical_downstream_handoff``) was never affected -- it
+    # reads ``ReactionSpecification.reversible`` directly, never the Antimony arrow.
+    arrow = (
+        "=>"
+        if classify_reversibility_basis(reaction.reversible)
+        is ReversibilityBasis.CURATED_IRREVERSIBLE
+        else "->"
+    )
+    equation = f"{lhs} {arrow} {rhs}".strip()
     antimony_reaction_id = id_map.reactions[reaction.reaction_id]
     reversible_comment = _reversible_comment(reaction)
 
@@ -579,6 +602,74 @@ def _parameter_line(parameter: ParameterSpecification, antimony_id: str) -> str:
     )
 
 
+# --- Rules, events, observables (Antimony Import increment) --------------------------------------
+#
+# Formulas on all three constructs are opaque text (``RuleSpecification.formula`` etc.'s own
+# docstrings) holding the *raw* species/parameter ids a model actually declares -- substituted
+# through the identical, already-tested, exact-token ``substitute_identifiers`` every kinetic
+# law expression already uses, so a reference to a raw id this module renamed (e.g. a
+# category-prefix collision) is never left dangling. Unlike kinetic-law rendering, no
+# closed-vocabulary character check is applied here: rule/event formulas may legitimately use
+# syntax (comparisons, function calls) a kinetic law's own narrower template grammar does not.
+
+#: The exact comment tag ``_observable_lines`` writes and
+#: ``app.agent2.antimony_import.parser`` looks for, to recover an ``ObservableSpecification``
+#: on a canonical -> Antimony -> canonical round trip through *this repository's own*
+#: exporter/importer specifically -- never inferred from arbitrary third-party Antimony (see
+#: ``ObservableSpecification``'s own docstring).
+OBSERVABLE_COMMENT_PREFIX = "// agent2:observable"
+
+
+def _rule_line(rule: RuleSpecification, token_map: dict[str, str]) -> str:
+    formula = substitute_identifiers(rule.formula, token_map=token_map)
+    if rule.rule_type is RuleType.ALGEBRAIC:
+        return f"0 = {formula};  // rule_id={rule.rule_id} type=ALGEBRAIC"
+    variable = token_map.get(rule.variable, rule.variable)
+    if rule.rule_type is RuleType.RATE:
+        return f"{variable}' = {formula};  // rule_id={rule.rule_id} type=RATE"
+    return f"{variable} := {formula};  // rule_id={rule.rule_id} type=ASSIGNMENT"
+
+
+def _event_lines(
+    event: EventSpecification, antimony_id: str, token_map: dict[str, str]
+) -> list[str]:
+    """``delay``/``priority`` are deliberately never re-serialized here (disclosed in the
+    emitted comment when present, never silently dropped): this package's real, live
+    Antimony-syntax verification found no confirmed Antimony grammar for either on an ``at``
+    event declaration, and guessing at invalid syntax is worse than omitting it with a clear
+    comment -- a construct this exporter does not yet round-trip, not a fabricated
+    workaround."""
+    trigger = substitute_identifiers(event.trigger_formula, token_map=token_map)
+    assignments = ", ".join(
+        f"{token_map.get(ea.variable, ea.variable)} = "
+        f"{substitute_identifiers(ea.formula, token_map=token_map)}"
+        for ea in event.assignments
+    )
+    dropped = []
+    if event.delay_formula:
+        dropped.append(f"delay={event.delay_formula!r}")
+    if event.priority_formula:
+        dropped.append(f"priority={event.priority_formula!r}")
+    dropped_comment = f" DROPPED_ON_EXPORT=({','.join(dropped)})" if dropped else ""
+    return [
+        f"{antimony_id}: at ({trigger}): {assignments};"
+        f"  // event_id={event.event_id}{dropped_comment}"
+    ]
+
+
+def _observable_lines(
+    observable: ObservableSpecification, antimony_id: str, token_map: dict[str, str]
+) -> list[str]:
+    formula = substitute_identifiers(observable.formula, token_map=token_map)
+    unit_comment = f" unit={observable.unit}" if observable.unit else ""
+    return [
+        f"{antimony_id} := {formula};"
+        f"  // observable_id={observable.observable_id} name={observable.name}",
+        f"{OBSERVABLE_COMMENT_PREFIX} id={observable.observable_id} "
+        f"name={observable.name!r}{unit_comment}",
+    ]
+
+
 def _render_model(
     *,
     model_name: str,
@@ -589,6 +680,9 @@ def _render_model(
     reaction_resolutions: dict[str, _ReactionRateResolution],
     parameters: tuple[ParameterSpecification, ...],
     id_map: IdentifierMap,
+    rules: tuple[RuleSpecification, ...] = (),
+    events: tuple[EventSpecification, ...] = (),
+    observables: tuple[ObservableSpecification, ...] = (),
 ) -> tuple[str, AntimonyArtifactReadiness, tuple[str, ...], tuple[str, ...]]:
     """Deterministic Antimony text for one full model or module view/standalone body (Step
     33 ordering: model declaration, compartments, species, reactions, parameters, ``end``).
@@ -628,7 +722,25 @@ def _render_model(
                 unresolved_law_ids.extend(resolution.unresolved_law_ids)
         lines.append("")
 
-    referenced_parameter_ids = {pid for law in kinetic_laws for pid in law.parameter_ids}
+    # Antimony Import increment: a parameter referenced only by a rule/event formula (never by
+    # any kinetic law) must still be declared, or the reference would be silently dangling on
+    # export -- additive to the pre-existing kinetic-law-only filter, so a GENERATED model
+    # (which never has rules/events today) emits byte-identical parameter declarations to
+    # before this increment.
+    rule_event_text = " ".join(
+        [r.formula for r in rules]
+        + [r.variable or "" for r in rules]
+        + [e.trigger_formula for e in events]
+        + [e.delay_formula or "" for e in events]
+        + [e.priority_formula or "" for e in events]
+        + [ea.formula for e in events for ea in e.assignments]
+        + [ea.variable for e in events for ea in e.assignments]
+    )
+    referenced_parameter_ids = {pid for law in kinetic_laws for pid in law.parameter_ids} | {
+        p.parameter_id
+        for p in parameters
+        if re.search(rf"\b{re.escape(p.parameter_id)}\b", rule_event_text)
+    }
     ordered_parameters = sorted(
         (p for p in parameters if p.parameter_id in referenced_parameter_ids),
         key=lambda p: id_map.parameters[p.parameter_id],
@@ -638,6 +750,28 @@ def _render_model(
         lines.extend(
             _parameter_line(p, id_map.parameters[p.parameter_id]) for p in ordered_parameters
         )
+        lines.append("")
+
+    full_token_map = {**id_map.species, **id_map.parameters, **id_map.compartments}
+
+    ordered_rules = sorted(rules, key=lambda r: r.rule_id)
+    if ordered_rules:
+        lines.append("// rules")
+        lines.extend(_rule_line(r, full_token_map) for r in ordered_rules)
+        lines.append("")
+
+    ordered_events = sorted(events, key=lambda e: id_map.events[e.event_id])
+    if ordered_events:
+        lines.append("// events")
+        for e in ordered_events:
+            lines.extend(_event_lines(e, id_map.events[e.event_id], full_token_map))
+        lines.append("")
+
+    ordered_observables = sorted(observables, key=lambda o: id_map.observables[o.observable_id])
+    if ordered_observables:
+        lines.append("// observables")
+        for o in ordered_observables:
+            lines.extend(_observable_lines(o, id_map.observables[o.observable_id], full_token_map))
         lines.append("")
 
     lines.append("end")
@@ -668,9 +802,7 @@ def _generate_module_artifact(
     species_by_id: dict[str, SpeciesSpecification],
 ) -> ModuleAntimonyArtifact:
     module_reaction_ids = set(module.reaction_ids)
-    module_laws = tuple(
-        law for law in model.kinetic_laws if law.reaction_id in module_reaction_ids
-    )
+    module_laws = tuple(law for law in model.kinetic_laws if law.reaction_id in module_reaction_ids)
     module_species = tuple(species_by_id[sid] for sid in module.species_ids if sid in species_by_id)
 
     module_compartments = tuple(

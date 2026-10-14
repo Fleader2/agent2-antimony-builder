@@ -138,11 +138,14 @@ def _by_context(assignment_set: KineticLawAssignmentSet, **context):
 
 
 def test_assignment_source_vocabulary_is_exact():
+    """IMPORTED added by the Antimony Import increment -- a rate law's form read verbatim
+    from an externally-authored model, never decided by Agent 2."""
     assert {member.value for member in KineticLawAssignmentSource} == {
         "CURATED_REPORTED",
         "DETERMINISTIC_STRUCTURAL",
         "HEURISTIC",
         "UNASSIGNED",
+        "IMPORTED",
     }
 
 

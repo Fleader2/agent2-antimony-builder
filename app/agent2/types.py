@@ -113,9 +113,7 @@ def _require_known(ids: tuple[str, ...], known: set[str], *, field_name: str) ->
 
 def _require_tuple_of(value: tuple, item_type: type, *, field_name: str) -> tuple:
     if not isinstance(value, tuple) or any(not isinstance(item, item_type) for item in value):
-        raise TypeError(
-            f"{field_name} must be a tuple of {item_type.__name__}, got {value!r}"
-        )
+        raise TypeError(f"{field_name} must be a tuple of {item_type.__name__}, got {value!r}")
     return value
 
 
@@ -1094,6 +1092,14 @@ class ParameterSource(StrEnum):
     DEFAULT = "DEFAULT"
     PLACEHOLDER = "PLACEHOLDER"
     CALIBRATED = "CALIBRATED"
+    #: Antimony Import increment. A value read verbatim from an externally-authored Antimony/
+    #: SBML model the user supplied -- never computed, curated, predicted, or defaulted by this
+    #: codebase, and deliberately outside the CURATED/.../PLACEHOLDER precedence chain
+    #: documented above (that chain governs Agent 2's own *build* path; an imported value has
+    #: no such provenance at all, it simply is what the source file said). Used for both
+    #: ``ParameterSpecification.source`` and ``SpeciesSpecification.initialization_source`` by
+    #: ``app.agent2.antimony_import``.
+    IMPORTED = "IMPORTED"
 
 
 class BoundaryLikelihood(StrEnum):
@@ -1141,6 +1147,14 @@ class KineticLawType(StrEnum):
     REVERSIBLE_MASS_ACTION = "REVERSIBLE_MASS_ACTION"
     CUSTOM = "CUSTOM"
     UNASSIGNED = "UNASSIGNED"
+    #: Antimony Import increment. Distinct from ``CUSTOM`` on purpose: ``CUSTOM`` means
+    #: curated free text with no structured symbol mapping safe to substitute
+    #: (``app.agent2.antimony.serializer.render_kinetic_law_expression`` always returns
+    #: ``None`` for it, by design). ``IMPORTED``'s own ``expression`` was extracted directly
+    #: from a real SBML ``KineticLaw`` AST, so every symbol it references is already a real,
+    #: known ``species_ids``/``parameter_ids`` entry -- safe to render by substitution exactly
+    #: like ``MASS_ACTION``/``MICHAELIS_MENTEN``/etc. are.
+    IMPORTED = "IMPORTED"
 
 
 class KineticLawAssignmentSource(StrEnum):
@@ -1176,6 +1190,10 @@ class KineticLawAssignmentSource(StrEnum):
     DETERMINISTIC_STRUCTURAL = "DETERMINISTIC_STRUCTURAL"
     HEURISTIC = "HEURISTIC"
     UNASSIGNED = "UNASSIGNED"
+    #: Antimony Import increment. The rate law's expression/structural form was not decided by
+    #: Agent 2 at all -- it was read verbatim from an externally-authored Antimony/SBML model.
+    #: Mirrors ``ParameterSource.IMPORTED``'s identical reasoning on the parameter-value axis.
+    IMPORTED = "IMPORTED"
 
 
 class ParticipantRole(StrEnum):
@@ -1359,9 +1377,7 @@ class SpeciesSpecification:
         object.__setattr__(
             self,
             "source_enzyme_state_id",
-            _clean_optional_str(
-                self.source_enzyme_state_id, field_name="source_enzyme_state_id"
-            ),
+            _clean_optional_str(self.source_enzyme_state_id, field_name="source_enzyme_state_id"),
         )
         if self.source_compound_id is not None and self.source_enzyme_state_id is not None:
             raise ValueError(
@@ -2901,8 +2917,7 @@ class EnzymeConcentration:
             raise ValueError(f"EnzymeConcentration.value must be >= 0, got {self.value!r}")
         if not isinstance(self.basis, EnzymeConcentrationBasis):
             raise TypeError(
-                f"EnzymeConcentration.basis must be an EnzymeConcentrationBasis, "
-                f"got {self.basis!r}"
+                f"EnzymeConcentration.basis must be an EnzymeConcentrationBasis, got {self.basis!r}"
             )
         object.__setattr__(
             self,
@@ -2921,16 +2936,12 @@ class EnzymeConcentration:
         object.__setattr__(
             self,
             "experimental_context_id",
-            _clean_optional_str(
-                self.experimental_context_id, field_name="experimental_context_id"
-            ),
+            _clean_optional_str(self.experimental_context_id, field_name="experimental_context_id"),
         )
         object.__setattr__(
             self,
             "assumption_reason_codes",
-            _require_str_tuple(
-                self.assumption_reason_codes, field_name="assumption_reason_codes"
-            ),
+            _require_str_tuple(self.assumption_reason_codes, field_name="assumption_reason_codes"),
         )
         object.__setattr__(self, "notes", _clean_optional_str(self.notes, field_name="notes"))
         object.__setattr__(
@@ -3014,6 +3025,257 @@ class EnzymeStatePool:
 
 
 # =================================================================================================
+# 7a. Rules, events, observables, and model-source provenance (Antimony Import increment)
+# =================================================================================================
+#
+# None of the three constructs below has an Agent-1-curated provenance concept -- unlike
+# FullNetwork's own compartments/species/reactions, they are pure modeling constructs that may
+# equally originate from Agent 2's own generation path (none yet does) or from a parsed,
+# externally-authored Antimony model. They therefore live on ModelSpecification itself, exactly
+# where KineticLawSpecification/ParameterSpecification already live, never on FullNetwork.
+
+
+class RuleType(StrEnum):
+    """SBML Level 3's three rule kinds, unchanged in meaning -- see
+    ``docs/21_antimony_import_and_canonical_model.md`` §2."""
+
+    ASSIGNMENT = "ASSIGNMENT"
+    RATE = "RATE"
+    ALGEBRAIC = "ALGEBRAIC"
+
+
+@dataclass(frozen=True, slots=True)
+class RuleSpecification:
+    """One assignment/rate/algebraic rule. ``formula`` is free-form Antimony/SBML infix math
+    text (e.g. ``"k1 * A"``) -- never parsed into an AST or evaluated here, the same "opaque
+    expression text" convention ``KineticLawSpecification.expression`` already uses.
+
+    ``variable`` is the left-hand-side target for ``ASSIGNMENT``/``RATE`` rules (SBML requires
+    one); ``ALGEBRAIC`` rules have no distinguished target at all (SBML's own
+    ``AlgebraicRule`` carries none), so ``variable`` is always ``None`` for that rule type --
+    enforced in ``__post_init__``. ``variable`` is deliberately never checked against
+    ``FullNetwork``'s species/compartment ids or ``ModelSpecification.parameters``: a rule's
+    own target may legitimately be a bare symbol introduced by the rule itself (SBML implicitly
+    declares it a constant=false Parameter), never inventing a cross-reference requirement
+    Antimony/SBML itself does not impose.
+    """
+
+    rule_id: str
+    rule_type: RuleType
+    formula: str
+    variable: str | None = None
+    unit: str | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "rule_id", _require_non_empty_str(self.rule_id, field_name="rule_id")
+        )
+        if not isinstance(self.rule_type, RuleType):
+            raise TypeError(
+                f"RuleSpecification.rule_type must be a RuleType, got {self.rule_type!r}"
+            )
+        object.__setattr__(
+            self, "formula", _require_non_empty_str(self.formula, field_name="formula")
+        )
+        object.__setattr__(
+            self, "variable", _clean_optional_str(self.variable, field_name="variable")
+        )
+        if self.rule_type is RuleType.ALGEBRAIC and self.variable is not None:
+            raise ValueError(
+                f"RuleSpecification {self.rule_id!r} is ALGEBRAIC but names a variable "
+                f"({self.variable!r}) -- SBML's own AlgebraicRule has no distinguished target."
+            )
+        if self.rule_type is not RuleType.ALGEBRAIC and self.variable is None:
+            raise ValueError(
+                f"RuleSpecification {self.rule_id!r} is {self.rule_type.value} but names no "
+                "variable -- SBML requires one for every AssignmentRule/RateRule."
+            )
+        object.__setattr__(self, "unit", _clean_optional_str(self.unit, field_name="unit"))
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EventAssignmentSpecification:
+    """One ``<variable> = <formula>`` assignment an ``EventSpecification`` applies when its
+    trigger fires. ``formula`` is opaque text, same convention as ``RuleSpecification.formula``.
+    """
+
+    variable: str
+    formula: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "variable", _require_non_empty_str(self.variable, field_name="variable")
+        )
+        object.__setattr__(
+            self, "formula", _require_non_empty_str(self.formula, field_name="formula")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EventSpecification:
+    """One discrete event: a boolean ``trigger_formula`` plus one or more assignments applied
+    when it transitions from false to true. ``delay_formula``/``priority_formula`` mirror SBML
+    Level 3's own optional ``Delay``/``Priority`` constructs; ``use_values_from_trigger_time``
+    mirrors SBML L3's own required ``Event`` attribute of the same name (``None`` only for a
+    model imported from SBML Level 2, which has no such attribute -- never defaulted to a
+    guessed value)."""
+
+    event_id: str
+    trigger_formula: str
+    assignments: tuple[EventAssignmentSpecification, ...] = ()
+    name: str | None = None
+    use_values_from_trigger_time: bool | None = None
+    delay_formula: str | None = None
+    priority_formula: str | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "event_id", _require_non_empty_str(self.event_id, field_name="event_id")
+        )
+        object.__setattr__(
+            self,
+            "trigger_formula",
+            _require_non_empty_str(self.trigger_formula, field_name="trigger_formula"),
+        )
+        object.__setattr__(
+            self,
+            "assignments",
+            _require_tuple_of(
+                self.assignments, EventAssignmentSpecification, field_name="assignments"
+            ),
+        )
+        object.__setattr__(self, "name", _clean_optional_str(self.name, field_name="name"))
+        object.__setattr__(
+            self,
+            "use_values_from_trigger_time",
+            _require_bool_or_none(
+                self.use_values_from_trigger_time, field_name="use_values_from_trigger_time"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "delay_formula",
+            _clean_optional_str(self.delay_formula, field_name="delay_formula"),
+        )
+        object.__setattr__(
+            self,
+            "priority_formula",
+            _clean_optional_str(self.priority_formula, field_name="priority_formula"),
+        )
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ObservableSpecification:
+    """One named, derived, non-dynamical reporter quantity (e.g. a total-protein-pool sum
+    exposed for later Agent 3/4/5 consumption) -- semantically a labeled assignment expression,
+    never a dynamical state in its own right. Antimony/SBML has no native "observable" keyword
+    (confirmed: neither core SBML Level 3 nor Antimony's own grammar declares one -- this is a
+    PEtab/COPASI-style convention layered on top), so an ``ObservableSpecification`` round-trips
+    through *this repository's own* Antimony export/import (a structured trailing comment the
+    exporter writes and only this repository's own importer looks for -- see
+    ``app.agent2.antimony_import.parser``'s own module docstring) but is never inferred from
+    arbitrary, externally-authored Antimony text: importing a third-party model always produces
+    ``observables=()``, exactly like every other "never invent a mapping" rule in this project.
+    """
+
+    observable_id: str
+    name: str
+    formula: str
+    unit: str | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "observable_id",
+            _require_non_empty_str(self.observable_id, field_name="observable_id"),
+        )
+        object.__setattr__(self, "name", _require_non_empty_str(self.name, field_name="name"))
+        object.__setattr__(
+            self, "formula", _require_non_empty_str(self.formula, field_name="formula")
+        )
+        object.__setattr__(self, "unit", _clean_optional_str(self.unit, field_name="unit"))
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+class ModelSourceType(StrEnum):
+    """Where a ``ModelSpecification``'s own content actually came from. ``GENERATED`` (the
+    default) is Agent 2's own pre-existing build path (Agent 1 curated knowledge -> assembled
+    network); ``IMPORTED`` is the Antimony Import increment's new path (externally-authored
+    Antimony source -> parsed canonical representation). See
+    ``docs/21_antimony_import_and_canonical_model.md``."""
+
+    GENERATED = "GENERATED"
+    IMPORTED = "IMPORTED"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSourceProvenance:
+    """Durable provenance for an ``IMPORTED`` ``ModelSpecification`` -- never populated (and
+    never meaningful) for a ``GENERATED`` one; see ``ModelSpecification.__post_init__`` for the
+    enforced one-to-one link with ``source_type``.
+
+    ``original_antimony_text`` is preserved verbatim, byte for byte, as an immutable source
+    artifact (task requirement) -- never reformatted, never re-derived from the parsed model.
+    ``checksum`` is a hex SHA-256 digest of that exact text, letting a caller cheaply detect
+    whether a later "original text" has actually changed without a full string comparison.
+    """
+
+    original_antimony_text: str
+    checksum: str
+    parser_version: str
+    imported_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "original_antimony_text",
+            _require_non_empty_str(
+                self.original_antimony_text, field_name="original_antimony_text"
+            ),
+        )
+        object.__setattr__(
+            self, "checksum", _require_non_empty_str(self.checksum, field_name="checksum")
+        )
+        object.__setattr__(
+            self,
+            "parser_version",
+            _require_non_empty_str(self.parser_version, field_name="parser_version"),
+        )
+        object.__setattr__(
+            self, "imported_at", _require_non_empty_str(self.imported_at, field_name="imported_at")
+        )
+
+
+# =================================================================================================
 # 7b. ModelSpecification -- the top-level, authoritative contract
 # =================================================================================================
 
@@ -3066,6 +3328,19 @@ class ModelSpecification:
     #: "at most one per protein" invariant (a protein-level total) is never disturbed by an
     #: unrelated, state-level partial figure.
     enzyme_state_concentrations: tuple[EnzymeConcentration, ...] = ()
+    #: Antimony Import increment. See ``RuleSpecification``/``EventSpecification``/
+    #: ``ObservableSpecification``'s own docstrings (§7a above) -- always empty for every
+    #: pre-existing ``GENERATED`` model this repository has ever assembled (Agent 2's build
+    #: path declares no rules/events/observables today), populated only by
+    #: ``app.agent2.antimony_import`` when parsing an externally-authored Antimony model.
+    rules: tuple[RuleSpecification, ...] = ()
+    events: tuple[EventSpecification, ...] = ()
+    observables: tuple[ObservableSpecification, ...] = ()
+    #: Antimony Import increment. ``GENERATED`` (the default) for every pre-existing build-path
+    #: model; ``IMPORTED`` only for a model built by ``app.agent2.antimony_import.import_antimony``
+    #: -- enforced one-to-one with ``source_provenance`` below in ``__post_init__``.
+    source_type: ModelSourceType = ModelSourceType.GENERATED
+    source_provenance: ModelSourceProvenance | None = None
     provenance_refs: tuple[str, ...] = ()
     contract_version: str = AGENT2_CONTRACT_VERSION
 
@@ -3154,6 +3429,35 @@ class ModelSpecification:
                     f"enzyme_state_id set, got {ec!r}"
                 )
         object.__setattr__(
+            self, "rules", _require_tuple_of(self.rules, RuleSpecification, field_name="rules")
+        )
+        object.__setattr__(
+            self, "events", _require_tuple_of(self.events, EventSpecification, field_name="events")
+        )
+        object.__setattr__(
+            self,
+            "observables",
+            _require_tuple_of(self.observables, ObservableSpecification, field_name="observables"),
+        )
+        if not isinstance(self.source_type, ModelSourceType):
+            raise TypeError(
+                "ModelSpecification.source_type must be a ModelSourceType, got "
+                f"{self.source_type!r}"
+            )
+        if self.source_provenance is not None and not isinstance(
+            self.source_provenance, ModelSourceProvenance
+        ):
+            raise TypeError(
+                "ModelSpecification.source_provenance must be a ModelSourceProvenance or None, "
+                f"got {self.source_provenance!r}"
+            )
+        if (self.source_type is ModelSourceType.IMPORTED) != (self.source_provenance is not None):
+            raise ValueError(
+                "ModelSpecification.source_type is IMPORTED if and only if source_provenance "
+                f"is set -- got source_type={self.source_type.value!r}, "
+                f"source_provenance={self.source_provenance!r}"
+            )
+        object.__setattr__(
             self,
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
@@ -3191,6 +3495,18 @@ class ModelSpecification:
         _require_unique(
             tuple(boundary.boundary_id for boundary in self.boundary_assessments),
             field_name="ModelSpecification.boundary_assessments[].boundary_id",
+        )
+        _require_unique(
+            tuple(rule.rule_id for rule in self.rules),
+            field_name="ModelSpecification.rules[].rule_id",
+        )
+        _require_unique(
+            tuple(event.event_id for event in self.events),
+            field_name="ModelSpecification.events[].event_id",
+        )
+        _require_unique(
+            tuple(observable.observable_id for observable in self.observables),
+            field_name="ModelSpecification.observables[].observable_id",
         )
 
         _validate_model_specification_references(self)
@@ -3349,8 +3665,7 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
                 interface.shared_species_ids,
                 species_ids,
                 field_name=(
-                    f"module_decomposition interface {interface.interface_id}"
-                    ".shared_species_ids"
+                    f"module_decomposition interface {interface.interface_id}.shared_species_ids"
                 ),
             )
         for module in spec.module_specifications:
@@ -3500,9 +3815,7 @@ class FullAntimonyArtifact:
         object.__setattr__(
             self,
             "unresolved_reaction_ids",
-            _require_str_tuple(
-                self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"
-            ),
+            _require_str_tuple(self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"),
         )
         _require_unique(
             self.unresolved_reaction_ids,
@@ -3629,9 +3942,7 @@ class ModuleAntimonyArtifact:
         object.__setattr__(
             self,
             "unresolved_reaction_ids",
-            _require_str_tuple(
-                self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"
-            ),
+            _require_str_tuple(self.unresolved_reaction_ids, field_name="unresolved_reaction_ids"),
         )
         _require_unique(
             self.unresolved_reaction_ids,
@@ -3800,22 +4111,29 @@ __all__ = [
     "CuratedReactionEnzymeAssociation",
     "CuratedReactionParticipant",
     "CuratedRegulatoryInteraction",
+    "EventAssignmentSpecification",
+    "EventSpecification",
     "FullAntimonyArtifact",
     "FullNetwork",
     "KineticLawSpecification",
     "KineticLawType",
     "ModelAssumption",
+    "ModelSourceProvenance",
+    "ModelSourceType",
     "ModelSpecification",
     "ModuleAntimonyArtifact",
     "ModuleBoundaryInterface",
     "ModuleDecomposition",
     "ModuleInterfaceRole",
     "ModuleSpecification",
+    "ObservableSpecification",
     "ParameterSource",
     "ParameterSpecification",
     "ParticipantRole",
     "ReactionEnzymeAssociation",
     "ReactionParticipantSpecification",
     "ReactionSpecification",
+    "RuleSpecification",
+    "RuleType",
     "SpeciesSpecification",
 ]

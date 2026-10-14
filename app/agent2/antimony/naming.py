@@ -5,12 +5,13 @@ the input ids themselves: stable across repeated generation, independent
 of collection order (every ordering-sensitive step sorts explicitly
 first).
 
-Each structural category (compartments, species, reactions, parameters)
-gets its own name prefix (``c_``/``s_``/``J_``/``p_``), so identifiers
-from different categories can never collide with each other by
-construction -- only within-category collisions (two different source ids
-sanitizing to the same string) need explicit resolution, handled by
-``_resolve_category``.
+Each structural category (compartments, species, reactions, parameters, and -- Antimony
+Import increment -- events, observables) gets its own name prefix (``c_``/``s_``/``J_``/
+``p_``/``E_``/``obs_``), so identifiers from different categories can never collide with each
+other by construction -- only within-category collisions (two different source ids
+sanitizing to the same string) need explicit resolution, handled by ``_resolve_category``.
+Rules need no category of their own: a rule's own ``variable`` always names an existing
+species or parameter identifier, already covered by those two maps.
 """
 
 from __future__ import annotations
@@ -122,6 +123,9 @@ class IdentifierMap:
     species: dict[str, str]
     parameters: dict[str, str]
     reactions: dict[str, str]
+    #: Antimony Import increment.
+    events: dict[str, str]
+    observables: dict[str, str]
 
 
 def sanitize_model_name(raw: str) -> str:
@@ -145,11 +149,17 @@ def build_identifier_map(model: ModelSpecification) -> IdentifierMap:
     reactions = _resolve_category(
         [(r.reaction_id, r.reaction_id) for r in network.reactions], prefix="J_"
     )
+    events = _resolve_category([(e.event_id, e.event_id) for e in model.events], prefix="E_")
+    observables = _resolve_category(
+        [(o.observable_id, o.observable_id) for o in model.observables], prefix="obs_"
+    )
     return IdentifierMap(
         compartments=compartments,
         species=species,
         parameters=parameters,
         reactions=reactions,
+        events=events,
+        observables=observables,
     )
 
 
@@ -160,6 +170,8 @@ def all_identifiers(id_map: IdentifierMap) -> Iterable[str]:
     yield from id_map.species.values()
     yield from id_map.parameters.values()
     yield from id_map.reactions.values()
+    yield from id_map.events.values()
+    yield from id_map.observables.values()
 
 
 __all__ = [
