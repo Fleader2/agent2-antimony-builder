@@ -1359,28 +1359,96 @@ field is unchanged. Agent 3's own independent re-derivation
 (``app.agent3.antimony_ids``) is removed entirely in the same change; Agent 3 now reads
 this field as its one source of truth for resolving a handoff entity id to its real,
 compiled Antimony identifier.
+
+**Agent 1 -> Agent 2 Biological Display Metadata Contract increment.** ``AGENT1_HANDOFF_VERSION``
+bumped ``"1.5"`` -> ``"1.7"`` -- tracking Agent 1's own real, current ``AGENT1_CONTRACT_VERSION``
+for the first time since it went stale at Increment 3 (previously disclosed, unenforced
+technical debt; see the sibling ``agent-integration-harness`` repository's own
+``app/harness/version.py`` docstring, which tracked Agent 1's real version itself rather than
+relying on this constant). Agent 1's own "1.7" bump added ``genes``/``proteins`` (raw
+``Gene``/``Protein`` rows) to its handoff -- this repository's own
+``Agent1CuratedKnowledgeViewContract`` gained matching additive ``genes: tuple[CuratedGene,
+...]``/``proteins: tuple[CuratedProtein, ...]`` fields, ``CuratedReaction`` gained
+``ec_number``, and ``app.agent2.handoff.translate.translate_agent1_view_to_agent2`` parses
+all three (``_require_list`` already defaults a missing key to ``[]``, so a still-"1.6"
+payload translates unchanged, with empty gene/protein tuples).
+
+``AGENT2_CONTRACT_VERSION`` bumped ``"0.12"`` -> ``"0.13"``: ``FullNetwork`` gained matching
+``genes``/``proteins`` passthrough fields (mirroring its own pre-existing
+``enzyme_associations`` convention), ``ReactionSpecification`` gained ``ec_number``, and
+``ParameterSpecification`` gained ``substrate_id`` (the compound id a substrate-specific
+parameter, e.g. a Michaelis constant, was declared for -- previously flattened into
+``parameter_id``'s own slug and never otherwise retained).
+
+``ANTIMONY_GENERATION_POLICY_VERSION`` bumped again, ``"antimony-generation-v5"`` ->
+``"antimony-generation-v6"``: a reaction's own Antimony symbol now prefers a curated gene
+symbol or protein name (via its own ``FullNetwork.enzyme_associations``/``.proteins``/
+``.genes``) over its curated name when one is available -- a real behavioral change to the
+generated Antimony text's content for any model with curated gene/protein associations. A
+substrate-specific parameter's own symbol likewise now appends its substrate's readable
+compound name (e.g. ``Km_ACC1_Acetyl_CoA``) when ``substrate_id`` resolves to a known
+compound. ``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` is unchanged (still
+``"agent2-downstream-v2"``) -- the downstream handoff's own shape (including
+``antimony_symbol_map``) does not change; only the *symbol values* it carries improve. See
+``docs/24_biological_display_metadata.md``.
+
+**Explicit Enzyme Concentration Representation increment.** New package
+``app.agent2.enzyme_concentration_species`` (``ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION``
+``"enzyme-concentration-species-v1"``) materializes one explicit catalytic-enzyme
+``SpeciesSpecification`` (``source_protein_id`` set) per distinct, resolvable
+(``protein_id``, ``compartment_id``) catalytic context, from the already-resolved,
+already-correct ``EnzymeConcentration`` data the Quantitative Context Resolution and
+Derived Enzyme Concentration increment produced but never previously consumed (that
+increment's own ``docs/16_quantitative_context_resolution.md`` explicitly disclosed this as
+future work). ``app.agent2.model_specification.mapping.build_expression_and_species`` now
+multiplies a single-substrate Michaelis-Menten law's own rate expression by that catalytic
+context's explicit enzyme species (``kcat * E * S / (Km + S)``) whenever one is resolvable --
+every other law family (``MASS_ACTION``/``REVERSIBLE_MASS_ACTION``/``HILL``) remains
+lumped/effective, a genuinely scientifically-justified choice (task's own §7) since this
+codebase has no real decomposition basis for those law families today. New
+``KineticLawSpecification.rate_law_scope`` (``KineticLawRateScope``) tags every kinetic law
+``EXPLICIT_ENZYME_CONCENTRATION``/``LUMPED_EFFECTIVE_RATE`` explicitly -- defaults to
+``LUMPED_EFFECTIVE_RATE`` for every existing construction site, so this is purely additive.
+
+``AGENT2_CONTRACT_VERSION`` bumped ``"0.13"`` -> ``"0.14"``: ``SpeciesSpecification`` gained
+``source_protein_id`` (a third, mutually-exclusive species origin alongside
+``source_compound_id``/``source_enzyme_state_id``), and ``KineticLawSpecification`` gained
+``rate_law_scope``. ``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` bumped ``"v11"`` ->
+``"v12"``: ``assemble_model_specification`` now accepts an optional enzyme-species lookup and
+threads it into kinetic-law materialization. ``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` bumped
+``"agent2-downstream-v2"`` -> ``"agent2-downstream-v3"``: ``species[]`` gained
+``source_protein_id`` and ``kinetic_laws[]`` gained ``rate_law_scope`` -- both purely
+additive, needed so Agents 3/4/5 can eventually distinguish an explicit enzyme-concentration
+species/rate law from a compound species/lumped rate for their own future calibration and
+regulation work (not implemented by this increment itself). See
+``docs/25_explicit_enzyme_concentration_representation.md``.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.12"
-AGENT1_HANDOFF_VERSION = "1.5"
+AGENT2_CONTRACT_VERSION = "0.14"
+AGENT1_HANDOFF_VERSION = "1.7"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
 KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v8"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v11"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v5"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v12"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v6"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
 MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
 EVIDENCE_CONSOLIDATION_POLICY_VERSION = "evidence-consolidation-v1"
 ENZYME_STATE_DYNAMICS_POLICY_VERSION = "enzyme-state-dynamics-v1"
+#: Explicit Enzyme Concentration Representation increment -- the version of
+#: ``app.agent2.enzyme_concentration_species``'s own deterministic policy (which catalytic
+#: contexts get an explicit species, how each one's initial concentration/provenance is
+#: derived from an already-resolved ``EnzymeConcentration``).
+ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION = "enzyme-concentration-species-v1"
 AGENT2_ORCHESTRATION_POLICY_VERSION = "agent2-orchestration-v1"
-AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v2"
+AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1390,6 +1458,7 @@ __all__ = [
     "AGENT2_ORCHESTRATION_POLICY_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION",
     "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
     "EVIDENCE_CONSOLIDATION_POLICY_VERSION",
     "HEURISTIC_INITIALIZATION_POLICY_VERSION",

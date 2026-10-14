@@ -43,6 +43,13 @@ _SPECIES_ID_SEPARATOR = "::in::"
 #: Separator used by ``build_enzyme_association_id``.
 _ENZYME_ASSOCIATION_ID_SEPARATOR = "::enzyme::"
 
+#: Separator used by ``build_enzyme_concentration_species_id`` (Explicit Enzyme
+#: Concentration Representation increment) -- distinct from ``_SPECIES_ID_SEPARATOR``'s own
+#: ``compound_id``-keyed usage so the two id families can never collide, even though both
+#: ultimately key one entry in the same flat ``FullNetwork.species`` collection.
+_ENZYME_CONCENTRATION_SPECIES_ID_PREFIX = "enzyme-concentration::"
+_ENZYME_CONCENTRATION_SPECIES_ID_SEPARATOR = "::in::"
+
 
 def build_species_id(compound_id: str, compartment_id: str) -> str:
     """Deterministic ``SpeciesSpecification.species_id`` for one ``SpeciesKey``.
@@ -69,8 +76,20 @@ def build_enzyme_association_id(reaction_id: str, index_within_reaction: int) ->
     return f"{reaction_id}{_ENZYME_ASSOCIATION_ID_SEPARATOR}{index_within_reaction}"
 
 
+def build_enzyme_concentration_species_id(protein_id: str, compartment_id: str) -> str:
+    """Deterministic ``SpeciesSpecification.species_id`` for one protein-level enzyme-
+    concentration species (Explicit Enzyme Concentration Representation increment) -- a pure
+    function of its two inputs, mirroring ``build_species_id``'s own identical convention.
+    """
+    return (
+        f"{_ENZYME_CONCENTRATION_SPECIES_ID_PREFIX}{protein_id}"
+        f"{_ENZYME_CONCENTRATION_SPECIES_ID_SEPARATOR}{compartment_id}"
+    )
+
+
 __all__ = [
     "SpeciesKey",
     "build_enzyme_association_id",
+    "build_enzyme_concentration_species_id",
     "build_species_id",
 ]

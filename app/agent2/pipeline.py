@@ -43,6 +43,7 @@ from app.agent2.antimony import generate_antimony
 from app.agent2.boundaries import assess_boundaries
 from app.agent2.build_request import ModelBuildRequest, apply_build_request_scope
 from app.agent2.characterization import characterize_full_network
+from app.agent2.enzyme_concentration_species import build_enzyme_concentration_species
 from app.agent2.enzyme_state_dynamics import (
     build_enzyme_state_dynamics,
     merge_transition_assignments,
@@ -142,19 +143,30 @@ def run_agent2_pipeline(
     )
     modules = decompose_network(network, kinetic_laws, parameters_for_boundaries, boundaries)
 
-    # Pass 2: final parameters and model computed against the enzyme-state-augmented network
-    # and the merged (original + transition) kinetic-law assignments.
+    # Pass 2: final parameters and model computed against the enzyme-state- and explicit-
+    # enzyme-concentration-species-augmented network and the merged (original + transition)
+    # kinetic-law assignments. Explicit Enzyme Concentration Representation increment: one
+    # explicit catalytic-enzyme species per resolvable (protein, compartment) context is
+    # appended here, after enzyme-state dynamics (whose own pool/complex species this
+    # increment does not duplicate or interact with) and before final parameter declaration
+    # and model assembly, so every later stage sees the real species list and
+    # app.agent2.model_specification.assembler's own enzyme_species_lookup (built from
+    # final_network.species) picks these species up automatically.
     merged_kinetic_laws = merge_transition_assignments(
         kinetic_laws, dynamics.transition_assignments
     )
+    enzyme_species_result = build_enzyme_concentration_species(
+        dynamics.network, enzyme_concentrations
+    )
+    final_network = enzyme_species_result.network
     final_parameters = declare_parameters(
         merged_kinetic_laws,
-        dynamics.network,
+        final_network,
         enzyme_concentrations,
         enzyme_state_concentrations=dynamics.state_concentrations,
     )
     model = assemble_model_specification(
-        dynamics.network,
+        final_network,
         merged_kinetic_laws,
         final_parameters,
         boundaries,
@@ -191,6 +203,12 @@ def _species_dict(species) -> dict[str, Any]:
         "compartment_id": species.compartment_id,
         "source_compound_id": species.source_compound_id,
         "source_enzyme_state_id": species.source_enzyme_state_id,
+        # Explicit Enzyme Concentration Representation increment (AGENT2_DOWNSTREAM_
+        # CONTRACT_VERSION "agent2-downstream-v3"): the one new, additive field a downstream
+        # consumer needs to distinguish an explicit catalytic-enzyme species from a compound/
+        # enzyme-state species -- never None for one, always None for the other two origins
+        # (SpeciesSpecification's own mutually-exclusive-origin validation).
+        "source_protein_id": species.source_protein_id,
         "initial_amount": _decimal_str(species.initial_amount),
         "initial_concentration": _decimal_str(species.initial_concentration),
         "constant": species.constant,
@@ -229,6 +247,12 @@ def _kinetic_law_dict(law) -> dict[str, Any]:
         "enzyme_state_id": law.enzyme_state_id,
         "protein_id": law.protein_id,
         "complex_id": law.complex_id,
+        # Explicit Enzyme Concentration Representation increment (AGENT2_DOWNSTREAM_
+        # CONTRACT_VERSION "agent2-downstream-v3"): whether this law's own expression already
+        # multiplies by an explicit enzyme-concentration species (EXPLICIT_ENZYME_CONCENTRATION)
+        # or stays a lumped/effective rate (LUMPED_EFFECTIVE_RATE) -- never re-derivable by a
+        # downstream consumer from the expression text alone.
+        "rate_law_scope": law.rate_law_scope.value,
         "assumptions": list(law.assumptions),
     }
 

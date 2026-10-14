@@ -78,10 +78,15 @@ limitation, not an oversight -- see §6 below).
 **C. `k_eff = kcat/Km`**
 (`reconstruct_k_eff_from_kcat_and_km`). Dimensionally valid **only** for a genuine
 two-reactant elementary encounter: `heuristic_defaults.mass_action_rate_unit(n)` gives
-`per_sec` for `n=1` and `per_nMs` only for `n=2`, and this codebase never represents the
-enzyme itself as a species (only curated compounds are species) -- a single-substrate
-reaction's own mass-action rate constant is therefore unimolecular in this codebase's
-structural model, not bimolecular, and `kcat/Km` cannot dimensionally seed it. `n >= 3`
+`per_sec` for `n=1` and `per_nMs` only for `n=2`, where `n` is the reaction's own curated
+reactant-*participant* count. The Explicit Enzyme Concentration Representation increment
+(`docs/25_explicit_enzyme_concentration_representation.md`) later added explicit catalytic-
+enzyme species to the network, but never as a reaction *participant* -- `n` here is, and
+remains, computed purely from compound-reactant participants, so this reasoning (and
+`mass_action_rate_unit`'s own result) is completely unaffected by that increment. A
+single-substrate reaction's own mass-action rate constant is therefore unimolecular in this
+codebase's structural model, not bimolecular, and `kcat/Km` cannot dimensionally seed it.
+`n >= 3`
 is excluded per the task's own explicit "do not apply generically to arbitrary
 multi-reactant reactions" instruction. Wired into three call sites sharing one helper
 (`builder._reconstruct_k_eff_for_context`): `_declare_mass_action`'s `k`,

@@ -210,9 +210,7 @@ def test_complete_structural_translation_preserves_every_entity_count():
     assert len(handoff.reactions) == len(view["reactions"]) == 1
     assert len(handoff.reaction_participants) == len(view["reaction_participants"]) == 4
     assert (
-        len(handoff.reaction_enzyme_associations)
-        == len(view["reaction_enzyme_associations"])
-        == 1
+        len(handoff.reaction_enzyme_associations) == len(view["reaction_enzyme_associations"]) == 1
     )
     assert len(handoff.regulatory_interactions) == len(view["regulatory_interactions"]) == 1
     assert len(handoff.kinetic_measurements) == len(view["kinetic_measurements"]) == 1
@@ -587,3 +585,75 @@ def test_missing_optional_lists_default_to_empty_not_an_error():
     assert handoff.evidence == ()
     assert handoff.confidence_summaries == ()
     assert handoff.limitations == ()
+
+
+# --- Biological Display Metadata increment (AGENT1_HANDOFF_VERSION "1.6" -> "1.7") ------------
+
+
+def test_genes_and_proteins_translated():
+    view = _view(
+        genes=[
+            {
+                "id": "gene-acc1",
+                "symbol": "ACC1",
+                "systematic_name": "YNR016C",
+                "name": None,
+            }
+        ],
+        proteins=[
+            {
+                "id": "fas2",
+                "name": "Fatty acid synthase subunit alpha",
+                "gene_id": "gene-fas2",
+                "ec_number": "2.3.1.86",
+            }
+        ],
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+    assert len(handoff.genes) == 1
+    assert handoff.genes[0].id == "gene-acc1"
+    assert handoff.genes[0].symbol == "ACC1"
+    assert handoff.genes[0].systematic_name == "YNR016C"
+    assert handoff.genes[0].name is None
+    assert len(handoff.proteins) == 1
+    assert handoff.proteins[0].id == "fas2"
+    assert handoff.proteins[0].name == "Fatty acid synthase subunit alpha"
+    assert handoff.proteins[0].gene_id == "gene-fas2"
+    assert handoff.proteins[0].ec_number == "2.3.1.86"
+
+
+def test_genes_and_proteins_default_empty_when_absent():
+    """A pre-"1.7" payload (``AGENT1_HANDOFF_VERSION`` "1.6") carries no ``genes``/
+    ``proteins`` keys at all -- this must translate successfully with empty tuples, never
+    raise, exactly like every other additive field this contract has ever gained."""
+    view = _view()
+    assert "genes" not in view
+    assert "proteins" not in view
+    handoff = translate_agent1_view_to_agent2(view)
+    assert handoff.genes == ()
+    assert handoff.proteins == ()
+
+
+def test_reaction_ec_number_translated():
+    view = _view()
+    view["reactions"][0]["ec_number"] = "2.3.1.86"
+    handoff = translate_agent1_view_to_agent2(view)
+    assert handoff.reactions[0].ec_number == "2.3.1.86"
+
+
+def test_reaction_ec_number_defaults_none_when_absent():
+    view = _view()
+    assert "ec_number" not in view["reactions"][0]
+    handoff = translate_agent1_view_to_agent2(view)
+    assert handoff.reactions[0].ec_number is None
+
+
+def test_genes_and_proteins_assemble_into_a_full_network():
+    view = _view(
+        genes=[{"id": "gene-fas2", "symbol": "FAS2"}],
+        proteins=[{"id": "fas2", "name": "Fatty acid synthase subunit alpha"}],
+    )
+    handoff = translate_agent1_view_to_agent2(view)
+    network = assemble_full_network(handoff)
+    assert [g.id for g in network.genes] == ["gene-fas2"]
+    assert [p.id for p in network.proteins] == ["fas2"]

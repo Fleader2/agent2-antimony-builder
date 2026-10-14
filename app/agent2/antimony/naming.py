@@ -12,6 +12,20 @@ user-uploaded Antimony symbols by default") -- see ``_display_basis_for_source``
 symbol's exact origin, regardless of which basis produced it, is separately recorded by
 ``build_symbol_provenance_map`` -- readability never costs traceability.
 
+**Biological Display Metadata increment.** Reactions (and, by inheritance, their own
+parameters) now prefer a curated gene symbol or protein name over the reaction's own curated
+name when one is available, via ``_catalyst_display_basis`` -- approximately: (1) gene
+symbol(s) of the reaction's associated protein(s); (2) protein/enzyme name(s), for an
+associated protein with no linked gene symbol; (3) the reaction's own EC number, when neither
+of the above resolves and the reaction's own curated name is also unusable; (4) the
+reaction's own curated name (the pre-existing ``_biological_display_basis(r.name)`` path);
+(5) the raw canonical id. This is a strict *preference order*, never a requirement: a
+reaction with no curated catalyst metadata at all falls straight through to tier 4/5 exactly
+as before this increment. Every gene/protein lookup reads only already-curated Agent 1 data
+(``FullNetwork.genes``/``.proteins``, joined to a reaction via its own
+``FullNetwork.enzyme_associations``) -- never inferred, matched, or resolved from free text.
+See ``docs/24_biological_display_metadata.md``.
+
 No Python ``hash()``, no random UUID. Every mapping is a pure function of
 the input ids/names themselves: stable across repeated generation, independent
 of collection order (every ordering-sensitive step sorts explicitly
@@ -208,6 +222,94 @@ def _display_basis_for_source(
     return _biological_display_basis(biological_name) or canonical_id
 
 
+def _ec_display_basis(ec_number: str | None) -> str | None:
+    """Tier 3 of the reaction naming hierarchy: a basis derived from a reaction's own
+    curated EC number (e.g. ``"6.4.1.2"`` -> ``"EC_6_4_1_2"``), or ``None`` when no EC number
+    is curated. Reached only when neither a catalyst-based basis (tier 1/2) nor the
+    reaction's own curated name (tier 4) resolves to anything usable."""
+    if not ec_number or not ec_number.strip():
+        return None
+    return f"EC_{_sanitize_base(ec_number)}"
+
+
+def _catalyst_display_basis(network: FullNetwork, *, reaction_id: str) -> str | None:
+    """Tier 1/2 of the reaction naming hierarchy: a display basis derived from the reaction's
+    own curated catalyst(s), or ``None`` when none of its associated proteins resolve to a
+    usable gene symbol or protein name -- the caller then falls through to this reaction's
+    own curated name/EC number/raw id (tier 3/4/5), exactly as before this increment (task
+    instructions, "do not require every reaction to have a gene symbol").
+
+    For each of this reaction's own ``FullNetwork.enzyme_associations`` (Biological Display
+    Metadata increment -- never an association's ``complex_id``/``enzyme_state_id``: Agent 1
+    does not yet expose enzyme-complex membership, a disclosed, not-yet-implemented
+    extension), prefers that catalyst's own curated gene symbol, falling back to its own
+    curated protein name, falling back to skipping that one catalyst entirely (never
+    skipping the whole reaction just because one of several catalysts lacks metadata).
+    Multiple distinct, resolved catalyst labels are sorted and joined with ``"_"`` --
+    deterministic, never an arbitrary "first one found" (task instructions, "do not require
+    every reaction to have a gene symbol" + "multiple catalysts").
+    """
+    proteins_by_id = {p.id: p for p in network.proteins}
+    genes_by_id = {g.id: g for g in network.genes}
+    labels: set[str] = set()
+    for association in network.enzyme_associations:
+        if association.reaction_id != reaction_id or association.protein_id is None:
+            continue
+        protein = proteins_by_id.get(association.protein_id)
+        if protein is None:
+            continue
+        gene = genes_by_id.get(protein.gene_id) if protein.gene_id else None
+        if gene is not None and gene.symbol:
+            labels.add(gene.symbol)
+        elif protein.name:
+            labels.add(protein.name)
+    if not labels:
+        return None
+    return "_".join(sorted(labels))
+
+
+def _protein_display_basis(network: FullNetwork, protein_id: str) -> str | None:
+    """Display basis for one explicit catalytic enzyme-concentration species (Explicit
+    Enzyme Concentration Representation increment): prefers that protein's own curated gene
+    symbol (e.g. ``"ACC1"``, the task's own named example), falling back to the protein's own
+    curated name, falling back to ``None`` when neither resolves. Mirrors
+    ``_catalyst_display_basis``'s identical per-protein gene-symbol-then-name preference, but
+    for exactly one already-known ``protein_id`` rather than every catalyst of a reaction."""
+    proteins_by_id = {p.id: p for p in network.proteins}
+    genes_by_id = {g.id: g for g in network.genes}
+    protein = proteins_by_id.get(protein_id)
+    if protein is None:
+        return None
+    gene = genes_by_id.get(protein.gene_id) if protein.gene_id else None
+    if gene is not None and gene.symbol:
+        return gene.symbol
+    return protein.name
+
+
+def _reaction_display_basis(model: ModelSpecification, network: FullNetwork, reaction) -> str:
+    """The full reaction naming hierarchy (Biological Display Metadata increment): catalyst
+    gene symbol/protein name (tier 1/2) > the reaction's own curated name (tier 4, via the
+    pre-existing ``_display_basis_for_source``) > the reaction's own EC number (tier 3,
+    reached only when the curated name itself is also unusable) > the raw canonical id
+    (tier 5). ``IMPORTED`` models are unaffected -- ``_display_basis_for_source`` already
+    returns the raw id unchanged for those, and this function never looks up catalyst
+    metadata for one (task instructions, "this increment primarily fixes the GENERATED model
+    path").
+    """
+    if model.source_type is ModelSourceType.IMPORTED:
+        return reaction.reaction_id
+    catalyst_basis = _catalyst_display_basis(network, reaction_id=reaction.reaction_id)
+    if catalyst_basis:
+        return catalyst_basis
+    name_basis = _biological_display_basis(reaction.name)
+    if name_basis:
+        return name_basis
+    ec_basis = _ec_display_basis(reaction.ec_number)
+    if ec_basis:
+        return ec_basis
+    return reaction.reaction_id
+
+
 def build_identifier_map(model: ModelSpecification) -> IdentifierMap:
     """Build the one shared ``IdentifierMap`` for ``model``. Pure -- reads only, never
     mutates ``model``."""
@@ -233,11 +335,21 @@ def build_identifier_map(model: ModelSpecification) -> IdentifierMap:
     # symbols (e.g. "Acetyl_CoA_cytosol" vs. "Acetyl_CoA_mitochondrial_matrix") rather than
     # colliding down to a single bare compound name with an opaque numeric suffix.
     def _species_basis(s) -> str:
-        own_basis = _display_basis_for_source(
-            model, canonical_id=s.species_id, biological_name=s.name
-        )
         if model.source_type is ModelSourceType.IMPORTED:
-            return own_basis
+            return s.species_id
+        if s.source_protein_id is not None:
+            # Explicit Enzyme Concentration Representation increment: an enzyme-concentration
+            # species prefers its own catalyst's gene symbol/protein name (task's own named
+            # example, "ACC1_c") over the generic compound/enzyme-state naming path below --
+            # ``s.name`` already holds the protein's curated name, but a gene symbol (when
+            # curated) is strictly more recognizable and is not otherwise reachable from a
+            # bare ``SpeciesSpecification``.
+            protein_basis = _protein_display_basis(network, s.source_protein_id)
+            own_basis = _biological_display_basis(protein_basis) or s.species_id
+        else:
+            own_basis = _display_basis_for_source(
+                model, canonical_id=s.species_id, biological_name=s.name
+            )
         compartment_suffix = compartment_basis.get(s.compartment_id)
         if compartment_suffix and own_basis != s.species_id:
             return f"{own_basis}_{compartment_suffix}"
@@ -248,17 +360,39 @@ def build_identifier_map(model: ModelSpecification) -> IdentifierMap:
     )
 
     reactions, reaction_basis = _resolve_category(
-        [
-            (
-                r.reaction_id,
-                _display_basis_for_source(
-                    model, canonical_id=r.reaction_id, biological_name=r.name
-                ),
-            )
-            for r in network.reactions
-        ],
+        [(r.reaction_id, _reaction_display_basis(model, network, r)) for r in network.reactions],
         prefix="J_",
     )
+
+    # Biological Display Metadata increment: compound_id -> readable compound-name basis,
+    # built from the already-assembled species (``SpeciesSpecification.source_compound_id``/
+    # ``.name``) -- never a new lookup, reusing data the species pass above already read.
+    # Sorted by species_id for determinism: the same compound usually names every one of its
+    # own species identically regardless of compartment (``app.agent2.network.builder
+    # .build_species`` sets ``name=compound.name`` for every compartment), so which one
+    # "wins" in a dict-overwrite sense never actually matters in practice, but sorting keeps
+    # this independent of ``network.species``'s own iteration order on principle.
+    compound_display_by_id: dict[str, str] = {}
+    for s in sorted(network.species, key=lambda s: s.species_id):
+        if s.source_compound_id and s.source_compound_id not in compound_display_by_id:
+            compound_basis = _biological_display_basis(s.name)
+            if compound_basis:
+                compound_display_by_id[s.source_compound_id] = compound_basis
+
+    def _substrate_suffix(substrate_id: str | None) -> str:
+        """Tier addition to parameter naming (Biological Display Metadata increment,
+        e.g. the task's own ``Km_ACC1_acetyl_CoA`` example): a parameter declared for one
+        specific substrate (``ParameterSpecification.substrate_id``, e.g. a Michaelis
+        constant) appends that compound's own readable name -- resolved from the model's
+        own already-curated species, never a new biological mapping. ``""`` (no suffix) for
+        a parameter with no ``substrate_id``, or whose ``substrate_id`` does not match a
+        known compound (task instructions, "do not require every reaction to have a gene
+        symbol" applies identically here: a missing/unresolvable substrate name is a silent
+        no-op, never an error)."""
+        if not substrate_id:
+            return ""
+        basis = compound_display_by_id.get(substrate_id)
+        return f"_{basis}" if basis else ""
 
     # Parameters: a parameter's own id/name already embeds its owning reaction's raw id
     # (``app.agent2.parameters.policy.build_parameter_slug``, e.g. ``"Km_<reaction_id>_..."``)
@@ -268,25 +402,25 @@ def build_identifier_map(model: ModelSpecification) -> IdentifierMap:
     # ``p.name`` before any word-splitting -- ``_biological_display_basis`` rejoins
     # hyphen-separated hex segments with "_", so a hyphenated UUID substring (as stored in
     # ``p.reaction_id``) can never be found inside an already-word-split basis string.
-    # The trailing protein/substrate-context segment is deliberately dropped from the
-    # visible symbol (Agent 2 has no gene/protein *symbol* data to render it with --
-    # see docs/23_human_readable_antimony_naming.md §7); any resulting collision between
-    # two parameters for the same reaction (e.g. isozyme-specific Km values) is resolved,
-    # same as every other category, by ``_resolve_category``'s numeric-suffix disambiguation
-    # -- the full original slug remains fully recoverable via the provenance map.
+    # The trailing protein-context segment is deliberately dropped from the visible symbol
+    # (Agent 2 has no gene/protein *symbol* data for the catalytic context -- see
+    # docs/23_human_readable_antimony_naming.md §7); any resulting collision between two
+    # parameters for the same reaction (e.g. isozyme-specific Km values) is resolved, same as
+    # every other category, by ``_resolve_category``'s numeric-suffix disambiguation -- the
+    # full original slug remains fully recoverable via the provenance map.
     def _parameter_basis(p) -> str:
         if model.source_type is ModelSourceType.IMPORTED:
             return p.parameter_id
         raw_name = p.name or p.parameter_id
+        suffix = _substrate_suffix(p.substrate_id)
         if p.reaction_id and p.reaction_id in raw_name:
             reaction_readable = reaction_basis.get(p.reaction_id)
             if reaction_readable:
                 prefix = raw_name.split(p.reaction_id, 1)[0].rstrip("_") or "p"
-                return (
-                    _biological_display_basis(f"{prefix}_{reaction_readable}", max_words=8)
-                    or p.parameter_id
-                )
-        return _biological_display_basis(raw_name) or p.parameter_id
+                basis = _biological_display_basis(f"{prefix}_{reaction_readable}", max_words=8)
+                return f"{basis}{suffix}" if basis else p.parameter_id
+        basis = _biological_display_basis(raw_name)
+        return f"{basis}{suffix}" if basis else p.parameter_id
 
     parameters, _parameter_basis_used = _resolve_category(
         [(p.parameter_id, _parameter_basis(p)) for p in model.parameters], prefix="p_"
@@ -352,7 +486,10 @@ def build_symbol_provenance_map(model: ModelSpecification) -> tuple[AntimonySymb
                 antimony_symbol=id_map.species[s.species_id],
                 component_type="SPECIES",
                 canonical_id=s.species_id,
-                agent1_entity_id=s.source_compound_id,
+                # Explicit Enzyme Concentration Representation increment: an enzyme-
+                # concentration species has no ``source_compound_id`` of its own -- its
+                # direct Agent-1 entity is the catalytic protein it represents.
+                agent1_entity_id=s.source_compound_id or s.source_protein_id,
                 provenance_refs=s.provenance_refs,
             )
         )

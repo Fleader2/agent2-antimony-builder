@@ -81,6 +81,16 @@ def assemble_model_specification(
     ``network`` must already be the *augmented* network (``EnzymeStateDynamicsResult
     .network``) whenever ``enzyme_state_pools`` is non-empty -- this function performs no
     augmentation of its own.
+
+    **Explicit Enzyme Concentration Representation increment.** ``network`` should likewise
+    already be the enzyme-concentration-species-augmented network
+    (``EnzymeConcentrationSpeciesResult.network``) whenever a ``MICHAELIS_MENTEN`` kinetic
+    law's own catalytic context is expected to resolve an explicit enzyme species -- this
+    function derives its own ``{(protein_id, compartment_id): species_id}`` lookup directly
+    from ``network.species`` (never a separately-threaded parameter) and passes it to
+    ``materialize_kinetic_law`` for every assignment. Omitted (no enzyme species in
+    ``network.species``), the lookup is simply empty and every kinetic law stays
+    ``LUMPED_EFFECTIVE_RATE`` -- identical to this function's own pre-increment behavior.
     """
     require_full_network(network)
     require_kinetic_law_assignment_set(kinetic_laws)
@@ -113,6 +123,20 @@ def assemble_model_specification(
         if spec.kinetic_law_assignment_id is not None:
             parameters_by_assignment_id.setdefault(spec.kinetic_law_assignment_id, []).append(spec)
 
+    # Explicit Enzyme Concentration Representation increment: derived directly from
+    # ``network.species`` -- never a second, separately-threaded parameter that could drift
+    # out of sync with it. ``network`` must already be the *enzyme-concentration-species-
+    # augmented* network (``EnzymeConcentrationSpeciesResult.network``) whenever an explicit
+    # enzyme species is expected to be injectable here; this function performs no
+    # augmentation of its own (mirrors the identical, pre-existing contract for
+    # ``enzyme_state_pools``/the enzyme-state-augmented network, above).
+    enzyme_species_lookup = {
+        (species.source_protein_id, species.compartment_id): species.species_id
+        for species in network.species
+        if species.source_protein_id is not None
+    }
+    species_by_id = {species.species_id: species for species in network.species}
+
     kinetic_law_specs: list[KineticLawSpecification] = []
     kinetic_law_assignments_by_kinetic_law_id: dict[str, KineticLawAssignment] = {}
     for assignment in sorted(kinetic_laws.assignments, key=lambda a: a.assignment_id):
@@ -123,7 +147,13 @@ def assemble_model_specification(
                 f"reaction {assignment.reaction_id!r}"
             )
         law_parameters = tuple(parameters_by_assignment_id.get(assignment.assignment_id, ()))
-        law = materialize_kinetic_law(assignment, reaction=reaction, law_parameters=law_parameters)
+        law = materialize_kinetic_law(
+            assignment,
+            reaction=reaction,
+            law_parameters=law_parameters,
+            enzyme_species_lookup=enzyme_species_lookup,
+            species_by_id=species_by_id,
+        )
         kinetic_law_specs.append(law)
         kinetic_law_assignments_by_kinetic_law_id[law.kinetic_law_id] = assignment
 

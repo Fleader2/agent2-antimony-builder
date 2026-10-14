@@ -96,12 +96,14 @@ from app.agent2.types import (
     EnzymeConcentration,
     EnzymeConcentrationBasis,
     EnzymeStatePool,
+    KineticLawRateScope,
     KineticLawSpecification,
     KineticLawType,
     ModelAssumption,
     ParameterSpecification,
     ParticipantRole,
     ReactionSpecification,
+    SpeciesSpecification,
 )
 
 #: Stable, machine-readable reason code (Agent 2 "Unresolved Kinetic
@@ -166,14 +168,60 @@ def _all_participant_species_ids(reaction: ReactionSpecification) -> tuple[str, 
     return tuple(sorted({p.species_id for p in reaction.participants}))
 
 
+def _reaction_compartment_id(
+    reaction: ReactionSpecification, species_by_id: dict[str, SpeciesSpecification]
+) -> str | None:
+    """The one compartment every one of ``reaction``'s own participants shares, or ``None``
+    when the reaction spans more than one compartment (e.g. transport) -- never a guessed or
+    preferred compartment for that ambiguous case. A participant names only its own
+    ``species_id`` (``ReactionParticipantSpecification`` has no ``compartment_id`` of its
+    own), so the compartment is resolved through ``species_by_id`` -- the same pattern
+    ``app.agent2.boundaries.assessor._reaction_compartments`` already uses. Deliberately
+    duplicated, verbatim, from ``app.agent2.enzyme_concentration_species.builder``'s own
+    identical helper (Explicit Enzyme Concentration Representation increment) -- a tiny, pure,
+    single-purpose function, not worth a new cross-package dependency between two
+    already-independent packages.
+    """
+    compartment_ids = {species_by_id[p.species_id].compartment_id for p in reaction.participants}
+    if len(compartment_ids) != 1:
+        return None
+    (compartment_id,) = compartment_ids
+    return compartment_id
+
+
+def _enzyme_species_for(
+    assignment: KineticLawAssignment,
+    reaction: ReactionSpecification,
+    enzyme_species_lookup: dict[tuple[str, str], str] | None,
+    species_by_id: dict[str, SpeciesSpecification],
+) -> str | None:
+    """The explicit enzyme-concentration species for ``assignment``'s own catalytic context
+    (Explicit Enzyme Concentration Representation increment), or ``None`` when no such
+    species is resolvable -- never a guess: requires ``assignment.protein_id`` (a complex- or
+    enzyme-state-scoped catalytic context has no protein-level enzyme species to inject; a
+    future increment may extend this), a single uniform reaction compartment, and a prior
+    ``app.agent2.enzyme_concentration_species.build_enzyme_concentration_species`` call that
+    actually resolved this exact (protein_id, compartment_id) pair.
+    """
+    if not enzyme_species_lookup or assignment.protein_id is None:
+        return None
+    compartment_id = _reaction_compartment_id(reaction, species_by_id)
+    if compartment_id is None:
+        return None
+    return enzyme_species_lookup.get((assignment.protein_id, compartment_id))
+
+
 def build_expression_and_species(
     assignment: KineticLawAssignment,
     reaction: ReactionSpecification,
     law_parameters: tuple[ParameterSpecification, ...],
-) -> tuple[str | None, tuple[str, ...]]:
+    *,
+    enzyme_species_lookup: dict[tuple[str, str], str] | None = None,
+    species_by_id: dict[str, SpeciesSpecification] | None = None,
+) -> tuple[str | None, tuple[str, ...], KineticLawRateScope]:
     """Canonical symbolic expression (species/parameter ids only, never a numeric literal, never
-    Antimony syntax -- Increment 8 instructions, Step 9) and the species this specific law
-    references, for one assignment.
+    Antimony syntax -- Increment 8 instructions, Step 9), the species this specific law
+    references, and this law's own ``KineticLawRateScope``, for one assignment.
 
     `law_parameters` must already be filtered to exactly this assignment's own declared
     parameters (`ParameterSpecification.kinetic_law_assignment_id == assignment.assignment_id`),
@@ -183,32 +231,63 @@ def build_expression_and_species(
     one per reactant participant, in participant order]; HILL -> [Vmax, Km, n]), so positional
     unpacking here is exactly as reliable as, and far simpler than, parsing each parameter's own
     slug text.
+
+    **``enzyme_species_lookup`` (Explicit Enzyme Concentration Representation increment)**:
+    ``{(protein_id, compartment_id): species_id}``, from
+    ``app.agent2.enzyme_concentration_species.build_enzyme_concentration_species``'s own
+    output -- optional, defaults to ``None`` (every pre-existing call site, and every
+    non-Michaelis-Menten law family, is completely unaffected). When a single-substrate
+    Michaelis-Menten law's own catalytic context resolves to an explicit enzyme species via
+    ``_enzyme_species_for``, that species is multiplied directly into the numerator
+    (``kcat * E * S``) and returned as a third referenced species, and the law is tagged
+    ``EXPLICIT_ENZYME_CONCENTRATION`` -- genuine decomposition of catalytic rate and enzyme
+    abundance into independently-variable factors (task's own core goal), never a claim about
+    a value this function did not actually inject. Every other case (no lookup supplied, no
+    resolvable catalytic context, every non-Michaelis-Menten law family, and the genuinely
+    multi-substrate/no-reactant Michaelis-Menten branches below) is tagged
+    ``LUMPED_EFFECTIVE_RATE`` -- a disclosed, scientifically-honest default, not a silent
+    downgrade: this codebase has no real decomposition basis for mass-action/reversible-
+    mass-action/Hill rate constants today (task's own §7), and a multi-substrate/no-reactant
+    Michaelis-Menten law already withholds a single combining algebra for the identical
+    reason. Single-substrate Michaelis-Menten is simply the first kinetic-law family for which
+    this decomposition is implemented -- a current implementation limitation, not a permanent
+    scientific restriction; see ``docs/25_explicit_enzyme_concentration_representation.md``
+    §9 for the multi-substrate/reversible/Hill/mechanistic-mass-action extensions this leaves
+    for later work.
     """
     law_type = assignment.kinetic_law_type
     reactants = _reactant_species_ids(reaction)
     products = _product_species_ids(reaction)
 
     if law_type is KineticLawType.UNASSIGNED:
-        return None, ()
+        return None, (), KineticLawRateScope.LUMPED_EFFECTIVE_RATE
 
     if law_type is KineticLawType.CUSTOM:
         # Step 9: preserve the reported text verbatim, never rewritten into Antimony or any
         # other symbolic form -- this package cannot safely reinterpret opaque curated text.
         expression = assignment.reported_rate_law_text
-        return expression, _all_participant_species_ids(reaction)
+        return (
+            expression,
+            _all_participant_species_ids(reaction),
+            KineticLawRateScope.LUMPED_EFFECTIVE_RATE,
+        )
 
     if law_type is KineticLawType.MASS_ACTION:
         _require_parameter_count(assignment, law_parameters, exactly=1)
         (k,) = (p.parameter_id for p in law_parameters)
         factors = " * ".join((k, *reactants)) if reactants else k
-        return factors, tuple(reactants)
+        return factors, tuple(reactants), KineticLawRateScope.LUMPED_EFFECTIVE_RATE
 
     if law_type is KineticLawType.REVERSIBLE_MASS_ACTION:
         _require_parameter_count(assignment, law_parameters, exactly=2)
         kf, kr = (p.parameter_id for p in law_parameters)
         forward = " * ".join((kf, *reactants)) if reactants else kf
         reverse = " * ".join((kr, *products)) if products else kr
-        return f"{forward} - {reverse}", tuple(sorted(set(reactants) | set(products)))
+        return (
+            f"{forward} - {reverse}",
+            tuple(sorted(set(reactants) | set(products))),
+            KineticLawRateScope.LUMPED_EFFECTIVE_RATE,
+        )
 
     if law_type is KineticLawType.MICHAELIS_MENTEN:
         _require_parameter_count(assignment, law_parameters, at_least=1)
@@ -218,7 +297,7 @@ def build_expression_and_species(
         if not reactants or not km_params:
             # No curated reactant/Km pairing at all -- an honest, minimal fallback rather than
             # a fabricated substrate term.
-            return kcat, tuple(reactants)
+            return kcat, tuple(reactants), KineticLawRateScope.LUMPED_EFFECTIVE_RATE
         terms = list(zip(reactants, km_params, strict=False))
         if len(terms) > 1:
             # Genuinely multi-substrate: no single combining algebra involving kcat/Km alone is
@@ -241,17 +320,32 @@ def build_expression_and_species(
             # never be misread as part of this fallback.
             fallback_count = 2 if effective_reversible(reaction.reversible) else 1
             fallback_start = 1 + len(reactants)
-            return _build_multi_substrate_mm_fallback_expression(
+            fallback_expression, fallback_species = _build_multi_substrate_mm_fallback_expression(
                 assignment,
                 reaction,
                 law_parameters[fallback_start : fallback_start + fallback_count],
                 reactants,
                 products,
             )
+            return (
+                fallback_expression,
+                fallback_species,
+                KineticLawRateScope.LUMPED_EFFECTIVE_RATE,
+            )
         (s, km) = terms[0]
-        numerator = f"{kcat} * {s}"
+        enzyme_species_id = _enzyme_species_for(
+            assignment, reaction, enzyme_species_lookup, species_by_id or {}
+        )
+        if enzyme_species_id is not None:
+            numerator = f"{kcat} * {enzyme_species_id} * {s}"
+            referenced_species = tuple(sorted({*reactants, enzyme_species_id}))
+            rate_law_scope = KineticLawRateScope.EXPLICIT_ENZYME_CONCENTRATION
+        else:
+            numerator = f"{kcat} * {s}"
+            referenced_species = tuple(reactants)
+            rate_law_scope = KineticLawRateScope.LUMPED_EFFECTIVE_RATE
         denominator = f"{km.parameter_id} + {s}"
-        return f"{numerator} / ({denominator})", tuple(reactants)
+        return f"{numerator} / ({denominator})", referenced_species, rate_law_scope
 
     if law_type is KineticLawType.HILL:
         _require_parameter_count(assignment, law_parameters, exactly=3)
@@ -259,7 +353,7 @@ def build_expression_and_species(
         vmax, km, n = vmax_param.parameter_id, km_param.parameter_id, n_param.parameter_id
         substrate = " * ".join(reactants) if reactants else "S"
         expression = f"{vmax} * {substrate}^{n} / ({km}^{n} + {substrate}^{n})"
-        return expression, tuple(reactants)
+        return expression, tuple(reactants), KineticLawRateScope.LUMPED_EFFECTIVE_RATE
 
     raise ValueError(
         f"build_expression_and_species has no expression policy for law_type={law_type!r} "
@@ -386,6 +480,8 @@ def materialize_kinetic_law(
     *,
     reaction: ReactionSpecification,
     law_parameters: tuple[ParameterSpecification, ...],
+    enzyme_species_lookup: dict[tuple[str, str], str] | None = None,
+    species_by_id: dict[str, SpeciesSpecification] | None = None,
 ) -> KineticLawSpecification:
     """One `KineticLawAssignment` -> exactly one `KineticLawSpecification`, 1:1, always
     (Increment 8 instructions, Step 9: never omitted, including `UNASSIGNED` -- see docs/11 §6
@@ -395,8 +491,21 @@ def materialize_kinetic_law(
     `assignment_source` and the catalytic-context target
     (`enzyme_state_id`/`protein_id`/`complex_id`) -- both first-class, verbatim copies since
     the pre-commit revision (see module docstring).
+
+    ``enzyme_species_lookup``/``species_by_id`` (Explicit Enzyme Concentration Representation
+    increment) are optional, default to ``None``, and are passed straight through to
+    ``build_expression_and_species`` -- see that function's own docstring. ``species_by_id``
+    (``{species_id: SpeciesSpecification}``, built from the same, already enzyme-concentration-
+    species-augmented network) is required whenever ``enzyme_species_lookup`` is non-empty, to
+    resolve each reaction's own uniform compartment through its participants' species.
     """
-    expression, species_ids = build_expression_and_species(assignment, reaction, law_parameters)
+    expression, species_ids, rate_law_scope = build_expression_and_species(
+        assignment,
+        reaction,
+        law_parameters,
+        enzyme_species_lookup=enzyme_species_lookup,
+        species_by_id=species_by_id,
+    )
     return KineticLawSpecification(
         kinetic_law_id=f"kinetic-law::{assignment.assignment_id}",
         reaction_id=assignment.reaction_id,
@@ -408,6 +517,7 @@ def materialize_kinetic_law(
         enzyme_state_id=assignment.enzyme_state_id,
         protein_id=assignment.protein_id,
         complex_id=assignment.complex_id,
+        rate_law_scope=rate_law_scope,
         assumptions=_assumptions_for(assignment, expression=expression, reaction=reaction),
         provenance_refs=_provenance_for(assignment),
     )

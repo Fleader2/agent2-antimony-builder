@@ -166,6 +166,40 @@ itself.
 > those sibling repositories' own `docs/02_*_contract.md` for the details on their side of
 > this change. See `docs/23_human_readable_antimony_naming.md` for the full naming hierarchy,
 > collision rules, and verification against the real yeast lipid-biosynthesis model.
+>
+> **Agent 1 → Agent 2 Biological Display Metadata Contract increment:** Agent 1's handoff
+> gained two new, additive fields — `genes`/`proteins` (raw, already-curated `Gene`/`Protein`
+> rows) — plus `ec_number` on `CuratedReaction`, bumping `AGENT1_HANDOFF_VERSION` `"1.5"` ->
+> `"1.7"`. A reaction's own Antimony symbol now prefers its curated catalyst's gene symbol or
+> protein name over its curated name when one is available (e.g. the real yeast acetyl-CoA
+> carboxylase reaction, catalyzed by both `ACC1` and `HFA1`, becomes `J_ACC1_HFA1`), falling
+> back through EC number / curated name / raw id exactly as before when no catalyst metadata
+> is curated. A substrate-specific parameter now also appends its substrate's readable
+> compound name (e.g. `Km_ACC1_acetyl_CoA`). `AGENT2_DOWNSTREAM_CONTRACT_VERSION` is
+> unchanged (`"agent2-downstream-v2"`) — only the symbol *values* improve, not the downstream
+> shape. See `docs/24_biological_display_metadata.md`.
+>
+> **Explicit Enzyme Concentration Representation increment:** a single-substrate
+> Michaelis-Menten rate law no longer silently lumps catalytic enzyme abundance into its own
+> `kcat` — a new `app.agent2.enzyme_concentration_species` package materializes one explicit
+> catalytic-enzyme species (`source_protein_id` set, named by gene symbol, e.g. `s_ACC1_cytosol`)
+> per distinct, resolvable (protein, compartment) catalytic context, drawing on the
+> already-resolved `EnzymeConcentration` data the Quantitative Context Resolution increment
+> produced but never previously consumed. That expression now renders
+> `kcat * E * S / (Km + S)` instead of `kcat * S / (Km + S)` whenever a catalyst resolves,
+> tagged `KineticLawRateScope.EXPLICIT_ENZYME_CONCENTRATION`; every other law family
+> (mass-action, reversible mass-action, Hill, multi-substrate Michaelis-Menten) stays
+> `LUMPED_EFFECTIVE_RATE` for now — single-substrate Michaelis-Menten is simply the first
+> kinetic-law family for which Agent 2 currently performs this decomposition, a current
+> implementation limitation rather than a permanent scientific restriction (this codebase has
+> no real decomposition basis for those other rate constants *today*; see
+> `docs/25_explicit_enzyme_concentration_representation.md` §9 for the extensions this leaves
+> for later work). An enzyme with known identity but unresolved concentration still gets an explicit
+> species, with no fabricated numeric value. `AGENT2_CONTRACT_VERSION` bumped `"0.13"` ->
+> `"0.14"`; `AGENT2_DOWNSTREAM_CONTRACT_VERSION` bumped `"agent2-downstream-v2"` ->
+> `"agent2-downstream-v3"` (two purely additive downstream fields — Agents 3/4/5 synced their
+> own identical version constants in step). See
+> `docs/25_explicit_enzyme_concentration_representation.md`.
 
 ## Roadmap
 
@@ -183,6 +217,8 @@ itself.
 - **Antimony Import** — real Antimony/SBML parsing into the canonical representation, with semantic round-trip (implemented)
 - **Model Modularization** — a derived, additive, multi-decomposition module layer on top of the canonical model (implemented)
 - **Human-Readable Antimony Naming and Provenance Separation** — curated-name-based Antimony symbols, deterministic collision resolution, and a structured symbol-provenance map (implemented)
+- **Agent 1 → Agent 2 Biological Display Metadata Contract** — curated gene symbol/protein name/EC number naming tiers for reactions and parameters (implemented)
+- **Explicit Enzyme Concentration Representation in Kinetic Models** — explicit catalytic-enzyme species, injected into single-substrate Michaelis-Menten rate expressions (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -208,6 +244,8 @@ separately and has not begun.
 - `docs/21_antimony_import_and_canonical_model.md` — Antimony Import increment: the canonical model schema additions, import/export flow, supported/unsupported constructs, and semantic round-trip guarantees, implemented
 - `docs/22_model_modularization.md` — Model Modularization increment: the modularization schema, shared-species/cross-module-connection behavior, multiple-decomposition support, and the Antimony/downstream-handoff compatibility guarantee, implemented
 - `docs/23_human_readable_antimony_naming.md` — Human-Readable Antimony Naming and Provenance Separation increment: the naming hierarchy, collision rules, provenance-map design, generated-vs-imported naming behavior, and fallback behavior, implemented
+- `docs/24_biological_display_metadata.md` — Agent 1 → Agent 2 Biological Display Metadata Contract increment: the new gene/protein/EC-number handoff fields, the ownership boundary, the extended reaction/parameter naming preference order, and fallback behavior, implemented
+- `docs/25_explicit_enzyme_concentration_representation.md` — Explicit Enzyme Concentration Representation increment: the new enzyme-concentration species package, the single-substrate Michaelis-Menten injection scope and its scientific justification, naming, contract/version changes, and the real-data regression, implemented
 
 ## Repository Structure
 

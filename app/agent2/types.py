@@ -160,15 +160,24 @@ class CuratedCompound:
 
 @dataclass(frozen=True, slots=True)
 class CuratedReaction:
-    """One reaction. ``reversible`` is ``None`` when Agent 1 did not record it -- never guessed."""
+    """One reaction. ``reversible`` is ``None`` when Agent 1 did not record it -- never guessed.
+
+    ``ec_number`` (Biological Display Metadata increment) is Agent 1's own curated
+    ``Reaction.ec_number`` column, passed through verbatim -- ``None`` when Agent 1 never
+    curated one. Display-naming fallback tier only; never used to look up or infer anything.
+    """
 
     id: str
     name: str
     reversible: bool | None = None
+    ec_number: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
         object.__setattr__(self, "name", _require_non_empty_str(self.name, field_name="name"))
+        object.__setattr__(
+            self, "ec_number", _clean_optional_str(self.ec_number, field_name="ec_number")
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +234,58 @@ class CuratedReactionEnzymeAssociation:
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "reaction_id", _require_non_empty_str(self.reaction_id, field_name="reaction_id")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedGene:
+    """One curated gene (Biological Display Metadata increment). Agent 1's own curated
+    identity/naming metadata -- never resolved, inferred, or mapped by Agent 2, which only
+    ever reads these fields to prefer a readable Antimony display basis over a raw id.
+
+    ``symbol``/``systematic_name`` are both optional: Agent 1 does not guarantee either is
+    curated for every gene (``app.models.gene.Gene`` places no uniqueness or presence
+    requirement on either column) -- a caller must tolerate both being ``None``.
+    """
+
+    id: str
+    symbol: str | None = None
+    systematic_name: str | None = None
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(self, "symbol", _clean_optional_str(self.symbol, field_name="symbol"))
+        object.__setattr__(
+            self,
+            "systematic_name",
+            _clean_optional_str(self.systematic_name, field_name="systematic_name"),
+        )
+        object.__setattr__(self, "name", _clean_optional_str(self.name, field_name="name"))
+
+
+@dataclass(frozen=True, slots=True)
+class CuratedProtein:
+    """One curated protein (Biological Display Metadata increment). Agent 1's own curated
+    identity/naming metadata, read-only from Agent 2's side -- see ``CuratedGene``'s own
+    docstring for the identical ownership discipline.
+
+    ``gene_id`` is optional -- Agent 1's own ``Protein.gene_id`` is nullable (a protein need
+    not correspond to exactly one gene). ``name`` is required (Agent 1's own ``Protein.name``
+    column is non-null).
+    """
+
+    id: str
+    name: str
+    gene_id: str | None = None
+    ec_number: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_non_empty_str(self.id, field_name="id"))
+        object.__setattr__(self, "name", _require_non_empty_str(self.name, field_name="name"))
+        object.__setattr__(self, "gene_id", _clean_optional_str(self.gene_id, field_name="gene_id"))
+        object.__setattr__(
+            self, "ec_number", _clean_optional_str(self.ec_number, field_name="ec_number")
         )
 
 
@@ -965,6 +1026,11 @@ class Agent1CuratedKnowledgeViewContract:
     reactions: tuple[CuratedReaction, ...] = ()
     reaction_participants: tuple[CuratedReactionParticipant, ...] = ()
     reaction_enzyme_associations: tuple[CuratedReactionEnzymeAssociation, ...] = ()
+    #: Biological Display Metadata increment, ``AGENT1_HANDOFF_VERSION`` "1.6" -> "1.7".
+    #: Agent 1's own curated gene/protein identity metadata, read-only input to Agent 2's
+    #: naming layer (``app.agent2.antimony.naming``) -- never resolved or inferred here.
+    genes: tuple[CuratedGene, ...] = ()
+    proteins: tuple[CuratedProtein, ...] = ()
     regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
     enzyme_states: tuple[CuratedEnzymeState, ...] = ()
@@ -1157,6 +1223,30 @@ class KineticLawType(StrEnum):
     IMPORTED = "IMPORTED"
 
 
+class KineticLawRateScope(StrEnum):
+    """Whether a kinetic law's own rendered ``expression`` represents catalytic rate and
+    enzyme concentration as separate, independently-variable factors, or as one lumped/
+    effective constant that implicitly includes whatever enzyme abundance happened to be
+    present when the underlying rate was measured or initialized (Explicit Enzyme
+    Concentration Representation increment).
+
+    A qualitative, structural disclosure -- never a confidence score, and never itself a
+    claim about which is scientifically "better": a genuinely lumped rate is the *correct*,
+    honestly-disclosed choice (task's own §7) whenever no real decomposition into enzyme
+    abundance and a true per-molecule catalytic constant is scientifically justified (today:
+    every ``MASS_ACTION``/``REVERSIBLE_MASS_ACTION``/``HILL`` law, and any
+    ``MICHAELIS_MENTEN`` law whose catalytic context has no resolvable explicit enzyme
+    species -- see ``app.agent2.model_specification.mapping.build_expression_and_species``).
+
+    ``LUMPED_EFFECTIVE_RATE`` is the default: every kinetic law this codebase has ever
+    constructed, before this increment, was implicitly this -- defaulting to it keeps every
+    pre-existing construction site (and every pre-existing test) unchanged.
+    """
+
+    EXPLICIT_ENZYME_CONCENTRATION = "EXPLICIT_ENZYME_CONCENTRATION"
+    LUMPED_EFFECTIVE_RATE = "LUMPED_EFFECTIVE_RATE"
+
+
 class KineticLawAssignmentSource(StrEnum):
     """Provenance of *the modeling decision itself* -- never a confidence score, and never a
     claim about a parameter's own numeric value.
@@ -1344,6 +1434,18 @@ class SpeciesSpecification:
     (``docs/04_core_domain_contracts.md`` §2/§4) -- narrowly scoped to
     exactly the enzyme states this later increment's own transition-based
     dynamics gate materializes, never to enzyme states in general.
+
+    **``source_protein_id``** (Explicit Enzyme Concentration Representation
+    increment): a fourth, mutually-exclusive origin alongside
+    ``source_compound_id``/``source_enzyme_state_id`` -- one curated protein's
+    own total (not state-specific) concentration, resolved by
+    ``app.agent2.quantitative_context.resolve_enzyme_concentrations`` and
+    materialized as an explicit species by
+    ``app.agent2.enzyme_concentration_species.build_enzyme_concentration_species``,
+    so catalytic enzyme abundance can be referenced directly in a rate
+    expression (``kcat * E * S / (Km + S)``) instead of being silently lumped
+    into an effective rate constant. At most one of ``source_compound_id``/
+    ``source_enzyme_state_id``/``source_protein_id`` may be set.
     """
 
     species_id: str
@@ -1351,6 +1453,7 @@ class SpeciesSpecification:
     compartment_id: str
     source_compound_id: str | None = None
     source_enzyme_state_id: str | None = None
+    source_protein_id: str | None = None
     initial_amount: Decimal | None = None
     initial_concentration: Decimal | None = None
     initialization_source: ParameterSource | None = None
@@ -1379,11 +1482,27 @@ class SpeciesSpecification:
             "source_enzyme_state_id",
             _clean_optional_str(self.source_enzyme_state_id, field_name="source_enzyme_state_id"),
         )
-        if self.source_compound_id is not None and self.source_enzyme_state_id is not None:
+        object.__setattr__(
+            self,
+            "source_protein_id",
+            _clean_optional_str(self.source_protein_id, field_name="source_protein_id"),
+        )
+        _origins_set = sum(
+            1
+            for origin in (
+                self.source_compound_id,
+                self.source_enzyme_state_id,
+                self.source_protein_id,
+            )
+            if origin is not None
+        )
+        if _origins_set > 1:
             raise ValueError(
                 "SpeciesSpecification allows at most one of source_compound_id/"
-                f"source_enzyme_state_id, got source_compound_id={self.source_compound_id!r}, "
-                f"source_enzyme_state_id={self.source_enzyme_state_id!r}"
+                "source_enzyme_state_id/source_protein_id, got "
+                f"source_compound_id={self.source_compound_id!r}, "
+                f"source_enzyme_state_id={self.source_enzyme_state_id!r}, "
+                f"source_protein_id={self.source_protein_id!r}"
             )
         object.__setattr__(
             self,
@@ -1476,6 +1595,10 @@ class ReactionSpecification:
     job). ``reversible`` is never inferred: ``None`` means Agent 1 did not
     record it. ``kinetic_law_id`` may be unresolved (``None``) at this
     stage -- kinetic-law assignment is a later increment.
+
+    ``ec_number`` (Biological Display Metadata increment) is Agent 1's own curated
+    ``CuratedReaction.ec_number``, copied verbatim -- display-naming fallback tier only
+    (``app.agent2.antimony.naming``), never used to look up or infer anything else.
     """
 
     reaction_id: str
@@ -1486,6 +1609,7 @@ class ReactionSpecification:
     enzyme_association_ids: tuple[str, ...] = ()
     regulatory_interaction_ids: tuple[str, ...] = ()
     kinetic_law_id: str | None = None
+    ec_number: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -1531,6 +1655,9 @@ class ReactionSpecification:
             self,
             "kinetic_law_id",
             _clean_optional_str(self.kinetic_law_id, field_name="kinetic_law_id"),
+        )
+        object.__setattr__(
+            self, "ec_number", _clean_optional_str(self.ec_number, field_name="ec_number")
         )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
@@ -1663,6 +1790,14 @@ class FullNetwork:
     species: tuple[SpeciesSpecification, ...] = ()
     reactions: tuple[ReactionSpecification, ...] = ()
     enzyme_associations: tuple[ReactionEnzymeAssociation, ...] = ()
+    #: Biological Display Metadata increment. Every curated gene/protein in the source
+    #: handoff, attached here as supporting data the structural graph carries forward --
+    #: never a structural graph element itself (mirrors ``enzyme_associations`` above).
+    #: Resolved against a reaction's own ``enzyme_associations`` (by ``protein_id``) by
+    #: ``app.agent2.antimony.naming`` to prefer a curated gene symbol/protein name over a
+    #: raw id when generating that reaction's Antimony display basis.
+    genes: tuple[CuratedGene, ...] = ()
+    proteins: tuple[CuratedProtein, ...] = ()
     regulatory_interactions: tuple[CuratedRegulatoryInteraction, ...] = ()
     kinetic_measurements: tuple[CuratedKineticMeasurement, ...] = ()
     enzyme_states: tuple[CuratedEnzymeState, ...] = ()
@@ -2147,6 +2282,7 @@ class KineticLawSpecification:
     enzyme_state_id: str | None = None
     protein_id: str | None = None
     complex_id: str | None = None
+    rate_law_scope: KineticLawRateScope = KineticLawRateScope.LUMPED_EFFECTIVE_RATE
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -2197,6 +2333,11 @@ class KineticLawSpecification:
                 f"complex_id to be set, got enzyme_state_id={self.enzyme_state_id!r}, "
                 f"protein_id={self.protein_id!r}, complex_id={self.complex_id!r}"
             )
+        if not isinstance(self.rate_law_scope, KineticLawRateScope):
+            raise TypeError(
+                "KineticLawSpecification.rate_law_scope must be a KineticLawRateScope, "
+                f"got {self.rate_law_scope!r}"
+            )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )
@@ -2241,6 +2382,17 @@ class ParameterSpecification:
     Increment 5 declares must trace back to exactly one
     ``app.agent2.kinetics.types.KineticLawAssignment``. See
     ``docs/08_parameter_declaration_initialization.md`` §5.
+
+    **``substrate_id`` added in the Biological Display Metadata increment**: the compound id
+    a substrate-specific parameter (e.g. a Michaelis constant) was declared for --
+    ``app.agent2.parameters.builder`` already knew this value at construction time (it was
+    being flattened into ``parameter_id``'s own slug via
+    ``app.agent2.parameters.policy.build_parameter_slug``'s ``substrate_id`` argument, never
+    otherwise retained); storing it as its own field lets the naming layer
+    (``app.agent2.antimony.naming``) resolve it to a readable compound name directly, rather
+    than ever re-parsing it out of the slug string. ``None`` whenever a parameter was not
+    declared for one specific substrate (e.g. a ``kcat``, or a law with no distinguished
+    substrate).
     """
 
     parameter_id: str
@@ -2251,6 +2403,7 @@ class ParameterSpecification:
     source_reference: str | None = None
     reaction_id: str | None = None
     kinetic_law_assignment_id: str | None = None
+    substrate_id: str | None = None
     module_ids: tuple[str, ...] = ()
     lower_bound: Decimal | None = None
     upper_bound: Decimal | None = None
@@ -2288,6 +2441,9 @@ class ParameterSpecification:
             _clean_optional_str(
                 self.kinetic_law_assignment_id, field_name="kinetic_law_assignment_id"
             ),
+        )
+        object.__setattr__(
+            self, "substrate_id", _clean_optional_str(self.substrate_id, field_name="substrate_id")
         )
         object.__setattr__(
             self, "module_ids", _require_str_tuple(self.module_ids, field_name="module_ids")
@@ -4581,7 +4737,9 @@ __all__ = [
     "CuratedEnzymeState",
     "CuratedEnzymeStateTransition",
     "CuratedEvidence",
+    "CuratedGene",
     "CuratedKineticMeasurement",
+    "CuratedProtein",
     "CuratedReaction",
     "CuratedReactionEnzymeAssociation",
     "CuratedReactionParticipant",

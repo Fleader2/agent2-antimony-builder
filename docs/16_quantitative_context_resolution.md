@@ -208,8 +208,14 @@ any kind), every protein resolves via tier 5:
 13/13 proteins resolved, 0 unresolved, all 13 via
 `REFERENCE_ABUNDANCE_AND_ASSUMED_VOLUME` (0.1 pL), derived range 7.19-1231.19 nM,
 median 66.80 nM, 26 total dependency records (2 per protein: one real abundance
-observation + one explicit assumption). Not yet fed into macro-to-micro kinetic
-reconstruction (out of this increment's scope, per its own explicit exclusion).
+observation + one explicit assumption). At the time of this increment, not yet fed into
+macro-to-micro kinetic reconstruction (out of this increment's scope, per its own explicit
+exclusion) -- the later Explicit Enzyme Concentration Representation increment
+(`docs/25_explicit_enzyme_concentration_representation.md`) closed this gap:
+`app.agent2.enzyme_concentration_species.build_enzyme_concentration_species` consumes this
+exact resolver's output to materialize one explicit catalytic-enzyme species per protein, and
+`app.agent2.model_specification.mapping.build_expression_and_species` multiplies it directly
+into a single-substrate Michaelis-Menten rate expression.
 
 ## 10. Scope exclusions honored
 

@@ -226,6 +226,7 @@ def build_reactions(
             regulatory_interaction_ids=regulatory_interaction_ids_by_reaction.get(
                 curated.id, ()
             ),
+            ec_number=curated.ec_number,
         )
         for curated in handoff.reactions
     )

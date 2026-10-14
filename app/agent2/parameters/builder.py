@@ -355,6 +355,7 @@ def _spec_from_initialization(
         source_reference=initialization.source_reference,
         reaction_id=assignment.reaction_id,
         kinetic_law_assignment_id=assignment.assignment_id,
+        substrate_id=substrate_id,
         uncertainty_text=initialization.uncertainty_text,
         provenance_refs=initialization.provenance_refs,
     )
@@ -381,6 +382,7 @@ def _placeholder_spec(
         source=ParameterSource.PLACEHOLDER,
         reaction_id=assignment.reaction_id,
         kinetic_law_assignment_id=assignment.assignment_id,
+        substrate_id=substrate_id,
         uncertainty_text=uncertainty_text,
     )
 

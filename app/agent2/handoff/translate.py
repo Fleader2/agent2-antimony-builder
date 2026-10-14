@@ -70,6 +70,16 @@ already supplied. ``Agent2CuratedKineticMeasurement.protein_ids``'s own
 regardless of input order (``app.agent2.types``), so this translator
 passes ``protein_ids`` through in whatever order Agent 1 supplies it,
 relying on that existing invariant rather than reimplementing it here.
+
+**Biological Display Metadata increment** (``AGENT1_HANDOFF_VERSION`` "1.6" -> "1.7"):
+``genes``/``proteins`` are new, additive, optional top-level keys -- ``_require_list``
+already defaults a missing key to ``[]``, so a payload declaring the older
+``"agent2-downstream-v1"``-era-adjacent ``AGENT1_HANDOFF_VERSION`` "1.6" (no ``genes``/
+``proteins`` keys at all) still translates successfully, with empty tuples. Each row is a
+pure field-for-field reshape (``CuratedGene``/``CuratedProtein``) -- no gene/protein identity
+resolved, matched, or inferred here; this translator only ever copies what Agent 1 already
+curated. ``CuratedReaction.ec_number`` is likewise copied verbatim from the same raw
+``Reaction`` row's own already-curated column.
 """
 
 from __future__ import annotations
@@ -91,7 +101,9 @@ from app.agent2.types import (
     CuratedEnzymeStateTransition,
     CuratedEvidence,
     CuratedExperimentalContext,
+    CuratedGene,
     CuratedKineticMeasurement,
+    CuratedProtein,
     CuratedPublication,
     CuratedQuantitativeObservation,
     CuratedQuantitativeObservationDependency,
@@ -169,6 +181,25 @@ def _translate_reaction(raw: Mapping[str, Any]) -> CuratedReaction:
         id=str(_require(raw, "id", entity="reaction")),
         name=str(_require(raw, "name", entity="reaction")),
         reversible=raw.get("reversible"),
+        ec_number=_str_or_none(raw.get("ec_number")),
+    )
+
+
+def _translate_gene(raw: Mapping[str, Any]) -> CuratedGene:
+    return CuratedGene(
+        id=str(_require(raw, "id", entity="gene")),
+        symbol=_str_or_none(raw.get("symbol")),
+        systematic_name=_str_or_none(raw.get("systematic_name")),
+        name=_str_or_none(raw.get("name")),
+    )
+
+
+def _translate_protein(raw: Mapping[str, Any]) -> CuratedProtein:
+    return CuratedProtein(
+        id=str(_require(raw, "id", entity="protein")),
+        name=str(_require(raw, "name", entity="protein")),
+        gene_id=_str_or_none(raw.get("gene_id")),
+        ec_number=_str_or_none(raw.get("ec_number")),
     )
 
 
@@ -349,9 +380,7 @@ def _translate_quantitative_observation(raw: Mapping[str, Any]) -> CuratedQuanti
     dependencies_raw = raw.get("dependencies") or ()
     return CuratedQuantitativeObservation(
         id=str(_require(raw, "quantitative_observation_id", entity="quantitative_observation")),
-        observation_type=str(
-            _require(raw, "observation_type", entity="quantitative_observation")
-        ),
+        observation_type=str(_require(raw, "observation_type", entity="quantitative_observation")),
         value=_require_decimal(
             _require(raw, "value", entity="quantitative_observation"),
             entity="quantitative_observation.value",
@@ -453,19 +482,18 @@ def translate_agent1_view_to_agent2(
     return Agent1CuratedKnowledgeViewContract(
         contract_version=str(_require(view, "contract_version", entity="handoff")),
         organism_id=_str_or_none(view.get("organism_id")),
-        compartments=tuple(
-            _translate_compartment(c) for c in _require_list(view, "compartments")
-        ),
+        compartments=tuple(_translate_compartment(c) for c in _require_list(view, "compartments")),
         compounds=tuple(_translate_compound(c) for c in _require_list(view, "compounds")),
         reactions=tuple(_translate_reaction(r) for r in _require_list(view, "reactions")),
         reaction_participants=tuple(
-            _translate_reaction_participant(p)
-            for p in _require_list(view, "reaction_participants")
+            _translate_reaction_participant(p) for p in _require_list(view, "reaction_participants")
         ),
         reaction_enzyme_associations=tuple(
             _translate_reaction_enzyme_association(a)
             for a in _require_list(view, "reaction_enzyme_associations")
         ),
+        genes=tuple(_translate_gene(g) for g in _require_list(view, "genes")),
+        proteins=tuple(_translate_protein(p) for p in _require_list(view, "proteins")),
         regulatory_interactions=tuple(
             _translate_regulatory_interaction(r)
             for r in _require_list(view, "regulatory_interactions")
@@ -488,16 +516,13 @@ def translate_agent1_view_to_agent2(
             for t in _require_list(view, "enzyme_state_transitions")
         ),
         experimental_contexts=tuple(
-            _translate_experimental_context(c)
-            for c in _require_list(view, "experimental_contexts")
+            _translate_experimental_context(c) for c in _require_list(view, "experimental_contexts")
         ),
         quantitative_observations=tuple(
             _translate_quantitative_observation(o)
             for o in _require_list(view, "quantitative_observations")
         ),
-        publications=tuple(
-            _translate_publication(p) for p in _require_list(view, "publications")
-        ),
+        publications=tuple(_translate_publication(p) for p in _require_list(view, "publications")),
         claims=tuple(_translate_claim(c) for c in _require_list(view, "claims")),
         evidence=tuple(_translate_evidence(e) for e in _require_list(view, "evidence")),
         confidence_summaries=tuple(
