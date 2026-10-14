@@ -106,7 +106,7 @@ value falls back to a heuristic default). `run_agent2_pipeline` calls `assign_ki
 `declare_parameters` exactly as every other stage's own test suite already does, and trusts
 their own already-tested internal behavior — never re-implementing or second-guessing it.
 
-## The canonical downstream contract (`agent2-downstream-v1`)
+## The canonical downstream contract (`agent2-downstream-v2`)
 
 `build_canonical_downstream_handoff(model, package)` serializes `ModelSpecification` +
 `Agent2OutputPackage` into the one plain dict shape Agents 3, 4, and 5 already parse (confirmed
@@ -115,9 +115,9 @@ expect, so no change was required to any of their own parsing logic — only to 
 `contract_version` string each one checks for):
 
 ```
-contract_version                 "agent2-downstream-v1" (AGENT2_DOWNSTREAM_CONTRACT_VERSION)
+contract_version                 "agent2-downstream-v2" (AGENT2_DOWNSTREAM_CONTRACT_VERSION)
 model_id, network_id             from ModelSpecification / FullNetwork
-antimony_text, antimony_generator_version, readiness,
+antimony_text, antimony_generator_version, antimony_symbol_map, readiness,
 unresolved_reaction_ids, unresolved_kinetic_law_ids
                                   from FullAntimonyArtifact
 compartments[], species[], reactions[]
@@ -132,3 +132,11 @@ This single name replaces the three previously-divergent per-consumer names. See
 downstream repository's own migration notes (`docs/02_*_contract.md` in
 `agent3-simulation-diagnostics`, `agent4-calibration-estimator`,
 `agent5-validation-experimental-design`) for the consumer side of this change.
+
+**Human-Readable Antimony Naming and Provenance Separation increment:** bumped again,
+`"agent2-downstream-v1"` → `"agent2-downstream-v2"`, adding `antimony_symbol_map` (Agent 2's
+own canonical-id → real-Antimony-symbol mapping for species/reactions/parameters, built from
+`FullAntimonyArtifact.symbol_provenance`) — the one new field in this contract's history since
+its introduction above. See `docs/23_human_readable_antimony_naming.md` §8 for why this bump
+was required (a cross-repository contract gap in Agents 3/4/5's own independent symbol
+re-derivation, not merely an additive convenience).

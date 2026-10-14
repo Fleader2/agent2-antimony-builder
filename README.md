@@ -144,6 +144,28 @@ itself.
 > `ModuleSpecification`/`ModuleDecomposition` system. Automatic module discovery
 > (topological/functional/dynamic/sensitivity-based) is reserved vocabulary only — not
 > implemented. See `docs/22_model_modularization.md` for the full design.
+>
+> **Human-Readable Antimony Naming and Provenance Separation increment:** generated Antimony
+> symbols (compartments/species/reactions/parameters/events/observables) now prefer each
+> component's own curated biological name over its raw internal id — a UUID-derived symbol is
+> a fallback only, used when no meaningful name is available. Deterministic, collision-safe,
+> compartment-aware species disambiguation; a new structured provenance map
+> (`AntimonySymbolProvenance`/`build_symbol_provenance_map`, carried on
+> `FullAntimonyArtifact.symbol_provenance`) replaces the verbose UUID chains that used to
+> crowd reaction-line comments. Imported-model symbols are never renamed. No executable
+> semantics or module behavior changed.
+>
+> This increment also discovered and fixed a real cross-repository contract gap: Agents 3,
+> 4, and 5 each independently re-implemented Agent 2's *old* id-only Antimony-symbol
+> derivation rule rather than reading it from Agent 2, and silently broke the moment that
+> rule changed. Fixed by making Antimony symbol assignment unambiguously Agent-2-owned data
+> — `AGENT2_DOWNSTREAM_CONTRACT_VERSION` bumped `"agent2-downstream-v1"` ->
+> `"agent2-downstream-v2"`, adding one new field, `antimony_symbol_map`, to
+> `build_canonical_downstream_handoff`; every other field is unchanged. Agents 3/4/5 each had
+> their own independent re-derivation module removed and now read this field directly — see
+> those sibling repositories' own `docs/02_*_contract.md` for the details on their side of
+> this change. See `docs/23_human_readable_antimony_naming.md` for the full naming hierarchy,
+> collision rules, and verification against the real yeast lipid-biosynthesis model.
 
 ## Roadmap
 
@@ -160,6 +182,7 @@ itself.
 - **Scoped-Build Support** — Workbench `ModelBuildRequest` → Agent 2 scoped builds (implemented)
 - **Antimony Import** — real Antimony/SBML parsing into the canonical representation, with semantic round-trip (implemented)
 - **Model Modularization** — a derived, additive, multi-decomposition module layer on top of the canonical model (implemented)
+- **Human-Readable Antimony Naming and Provenance Separation** — curated-name-based Antimony symbols, deterministic collision resolution, and a structured symbol-provenance map (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -184,6 +207,7 @@ separately and has not begun.
 - `docs/20_scoped_build_support.md` — Scoped-Build Support increment: the Workbench `ModelBuildRequest` → Agent 2 contract, ownership boundary, supported/unsupported constraints, and cross-repository wiring, implemented
 - `docs/21_antimony_import_and_canonical_model.md` — Antimony Import increment: the canonical model schema additions, import/export flow, supported/unsupported constructs, and semantic round-trip guarantees, implemented
 - `docs/22_model_modularization.md` — Model Modularization increment: the modularization schema, shared-species/cross-module-connection behavior, multiple-decomposition support, and the Antimony/downstream-handoff compatibility guarantee, implemented
+- `docs/23_human_readable_antimony_naming.md` — Human-Readable Antimony Naming and Provenance Separation increment: the naming hierarchy, collision rules, provenance-map design, generated-vs-imported naming behavior, and fallback behavior, implemented
 
 ## Repository Structure
 

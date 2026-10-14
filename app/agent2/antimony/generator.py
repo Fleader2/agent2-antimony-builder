@@ -55,6 +55,7 @@ from app.agent2.antimony.errors import UnsupportedAntimonySerializationError
 from app.agent2.antimony.naming import (
     IdentifierMap,
     build_identifier_map,
+    build_symbol_provenance_map,
     sanitize_model_name,
 )
 from app.agent2.antimony.serializer import (
@@ -362,6 +363,7 @@ def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
         readiness=full_readiness,
         unresolved_kinetic_law_ids=full_unresolved_laws,
         unresolved_reaction_ids=full_unresolved_reactions,
+        symbol_provenance=build_symbol_provenance_map(model),
     )
 
     module_artifacts = tuple(
@@ -521,32 +523,38 @@ def _reaction_line(
     reversible_comment = _reversible_comment(reaction)
 
     if resolution.status is _ReactionRateStatus.RESOLVED_SINGLE:
+        # Human-Readable Antimony Naming increment: the common-case comment deliberately
+        # omits ``kinetic_law_id`` -- an internal, often multi-segment composite id that
+        # contributes nothing a reader can act on and was the single largest source of
+        # "UUID chains dominating the reaction line" in real curated data. Full per-law
+        # provenance (including ``kinetic_law_id``) remains recoverable programmatically
+        # from the model itself; only this *inline comment's* brevity changes here, never
+        # the resolution logic or the executable math.
         (law,) = resolution.laws
         context = _law_context(law)
         context_comment = f" catalytic_context={context}" if context else ""
         return (
             f"{antimony_reaction_id}: {equation}; {resolution.expression};"
-            f"  // reaction_id={reaction.reaction_id} kinetic_law_id={law.kinetic_law_id} "
+            f"  // reaction_id={reaction.reaction_id} "
             f"law_type={law.law_type.value} reversible={reversible_comment}{context_comment}"
         )
 
     if resolution.status is _ReactionRateStatus.RESOLVED_COMPOSED:
         # Multi-Context Catalytic Rate Composition increment (Stage 1): two or more
         # simultaneously-applicable, independently-resolved catalytic contexts, composed
-        # additively -- every contributing law id/context is named explicitly, never
-        # collapsed into an anonymous total (§11a: "each contribution remains individually
-        # inspectable").
-        contexts = ", ".join(
-            f"{law.kinetic_law_id}[{_law_context(law) or 'no-context'}]" for law in resolution.laws
-        )
+        # additively. Human-Readable Antimony Naming increment: the comment names each
+        # contributing *context* (protein/complex/enzyme-state id) without also repeating
+        # every contributing law's own full ``kinetic_law_id`` -- the context ids alone are
+        # enough to distinguish the contributions inline, keeping this common isozyme/
+        # multi-context case short; full per-law detail (including ``kinetic_law_id``)
+        # remains recoverable programmatically from ``resolution.laws`` on the model itself.
+        contexts = ", ".join(_law_context(law) or "no-context" for law in resolution.laws)
         law_types = ",".join(sorted({law.law_type.value for law in resolution.laws}))
         return (
             f"{antimony_reaction_id}: {equation}; {resolution.expression};"
             f"  // reaction_id={reaction.reaction_id} COMPOSED from ({contexts}) "
-            f"law_types=({law_types}) reversible={reversible_comment} reason="
-            "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY -- simultaneously-applicable, "
-            "independently-resolved catalytic contexts summed additively, never merged into "
-            "one shared law or parameter set"
+            f"law_types=({law_types}) reversible={reversible_comment} "
+            "reason=MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY"
         )
 
     if resolution.status is _ReactionRateStatus.UNRESOLVED_MULTIPLE_CONTEXTS:
@@ -590,11 +598,15 @@ def _reaction_line(
 def _parameter_line(parameter: ParameterSpecification, antimony_id: str) -> str:
     if parameter.has_value:
         assert isinstance(parameter.value, Decimal)
+        # Human-Readable Antimony Naming increment: the full (often UUID-chain-heavy)
+        # ``parameter.parameter_id`` is deliberately omitted here -- ``antimony_id`` at the
+        # start of this very line is already that parameter's readable symbol, and the full
+        # canonical id remains recoverable via ``symbol_provenance``, so repeating it in the
+        # comment added length without adding information.
         unit_comment = f" unit={parameter.unit}" if parameter.unit else ""
         return (
             f"{antimony_id} = {format_decimal(parameter.value)};"
-            f"  // parameter_id={parameter.parameter_id} source={parameter.source.value}"
-            f"{unit_comment}"
+            f"  // source={parameter.source.value}{unit_comment}"
         )
     return (
         f"// {antimony_id} UNRESOLVED (parameter_id={parameter.parameter_id} "

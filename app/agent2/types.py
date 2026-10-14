@@ -4127,6 +4127,64 @@ class AntimonyArtifactReadiness(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class AntimonySymbolProvenance:
+    """Human-Readable Antimony Naming increment: one Antimony symbol's full traceability
+    record back to its exact canonical origin.
+
+    ``app.agent2.antimony.naming`` may now derive a human-readable Antimony symbol (e.g.
+    ``acetyl_CoA_cytosol``) from a component's curated biological name rather than its raw
+    canonical id -- this record is how that readability never costs any traceability: every
+    symbol the generator emits has exactly one of these, resolvable back to the real
+    canonical/Agent-1 id regardless of how the displayed symbol was derived.
+
+    ``agent1_entity_id`` is the same string as ``canonical_id`` for every component type whose
+    canonical id *is* a direct Agent-1 entity id (compartments, reactions, and -- the
+    compound-identity half of -- species); left ``None`` only when no single Agent-1 entity id
+    applies (e.g. a parameter synthesized by Agent 2's own kinetic-law assignment, which has no
+    Agent-1 counterpart of its own).
+    """
+
+    antimony_symbol: str
+    component_type: str
+    canonical_id: str
+    agent1_entity_id: str | None = None
+    source_reference: str | None = None
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "antimony_symbol",
+            _require_non_empty_str(self.antimony_symbol, field_name="antimony_symbol"),
+        )
+        object.__setattr__(
+            self,
+            "component_type",
+            _require_non_empty_str(self.component_type, field_name="component_type"),
+        )
+        object.__setattr__(
+            self,
+            "canonical_id",
+            _require_non_empty_str(self.canonical_id, field_name="canonical_id"),
+        )
+        object.__setattr__(
+            self,
+            "agent1_entity_id",
+            _clean_optional_str(self.agent1_entity_id, field_name="agent1_entity_id"),
+        )
+        object.__setattr__(
+            self,
+            "source_reference",
+            _clean_optional_str(self.source_reference, field_name="source_reference"),
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class FullAntimonyArtifact:
     """The full, canonical Antimony model text.
 
@@ -4163,6 +4221,9 @@ class FullAntimonyArtifact:
     readiness: AntimonyArtifactReadiness = AntimonyArtifactReadiness.EXECUTABLE
     unresolved_kinetic_law_ids: tuple[str, ...] = ()
     unresolved_reaction_ids: tuple[str, ...] = ()
+    #: Human-Readable Antimony Naming increment. One entry per Antimony symbol this artifact's
+    #: own ``antimony_text`` declares -- see ``AntimonySymbolProvenance``.
+    symbol_provenance: tuple[AntimonySymbolProvenance, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -4237,6 +4298,17 @@ class FullAntimonyArtifact:
                 "FullAntimonyArtifact.readiness=NON_EXECUTABLE_UNRESOLVED_KINETICS requires a "
                 "non-empty unresolved_kinetic_law_ids and a non-empty unresolved_reaction_ids"
             )
+        object.__setattr__(
+            self,
+            "symbol_provenance",
+            _require_tuple_of(
+                self.symbol_provenance, AntimonySymbolProvenance, field_name="symbol_provenance"
+            ),
+        )
+        _require_unique(
+            tuple(p.antimony_symbol for p in self.symbol_provenance),
+            field_name="FullAntimonyArtifact.symbol_provenance[].antimony_symbol",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -4494,6 +4566,7 @@ __all__ = [
     "Agent1CuratedKnowledgeViewContract",
     "Agent2OutputPackage",
     "AntimonyArtifactReadiness",
+    "AntimonySymbolProvenance",
     "BoundaryAssessment",
     "BoundaryLikelihood",
     "BoundaryParameterBasis",

@@ -66,7 +66,13 @@ def _compound(**overrides) -> CuratedCompound:
 
 
 def _reaction(**overrides) -> CuratedReaction:
-    merged = {"id": "r1", "name": "reaction 1"} | overrides
+    # ``name`` defaults to whatever ``id`` this call actually used (even when overridden) --
+    # otherwise ``_reaction(id="r2")`` would silently keep ``name="r1"``, which the
+    # Human-Readable Antimony Naming increment's own name-preferring logic turns into a real,
+    # test-breaking collision (harmless before that increment, since name was never read for
+    # Antimony-id purposes).
+    reaction_id = overrides.get("id", "r1")
+    merged = {"id": reaction_id, "name": reaction_id} | overrides
     return CuratedReaction(**merged)
 
 

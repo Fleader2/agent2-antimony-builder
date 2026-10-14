@@ -1335,6 +1335,30 @@ augmentation wiring) -- no scientific policy of any individual stage changed, so
 other constant in this file is unchanged. ``AGENT2_CONTRACT_VERSION`` is also
 unchanged -- ``ModelSpecification``'s own shape did not change; only a new, narrower,
 already-serialized downstream subset of it gained one canonical name.
+
+**Human-Readable Antimony Naming and Provenance Separation increment.**
+``ANTIMONY_GENERATION_POLICY_VERSION`` was bumped, ``"antimony-generation-v4"`` ->
+``"antimony-generation-v5"``: generated Antimony symbols now prefer a component's own
+curated biological name over its raw canonical id (a real behavioral change to the
+generated Antimony text's content, not merely its formatting), and reaction/parameter
+inline comments were shortened to no longer name every ``kinetic_law_id``. See
+``docs/23_human_readable_antimony_naming.md``.
+
+This increment also discovered a real, previously-latent cross-repository contract gap:
+Agent 3 (``agent3-simulation-diagnostics``) independently re-implements Agent 2's
+Antimony-symbol derivation rule (``app.agent3.antimony_ids``, its own documented copy of
+the *old* "symbol is a pure function of the raw id" rule) rather than reading the mapping
+from Agent 2 itself -- so changing that rule silently broke Agent 3's own resolution the
+moment Agent 2's own symbols stopped being that pure function. Fixed by making Antimony
+symbol assignment unambiguously Agent-2-owned data: ``AGENT2_DOWNSTREAM_CONTRACT_VERSION``
+was bumped, ``"agent2-downstream-v1"`` -> ``"agent2-downstream-v2"``, adding one new field,
+``antimony_symbol_map`` (the exact ``{species,reactions,parameters}`` canonical-id ->
+Antimony-symbol mapping ``app.agent2.antimony.naming.build_identifier_map`` already
+computed internally) to ``build_canonical_downstream_handoff``'s own shape. Every other
+field is unchanged. Agent 3's own independent re-derivation
+(``app.agent3.antimony_ids``) is removed entirely in the same change; Agent 3 now reads
+this field as its one source of truth for resolving a handoff entity id to its real,
+compiled Antimony identifier.
 """
 
 from __future__ import annotations
@@ -1348,7 +1372,7 @@ PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v8"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
 MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v11"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v4"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v5"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
@@ -1356,7 +1380,7 @@ MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION = "macro-to-micro-v1"
 EVIDENCE_CONSOLIDATION_POLICY_VERSION = "evidence-consolidation-v1"
 ENZYME_STATE_DYNAMICS_POLICY_VERSION = "enzyme-state-dynamics-v1"
 AGENT2_ORCHESTRATION_POLICY_VERSION = "agent2-orchestration-v1"
-AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v1"
+AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v2"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",

@@ -230,6 +230,7 @@ def test_canonical_downstream_handoff_has_every_required_top_level_field():
         "network_id",
         "antimony_text",
         "antimony_generator_version",
+        "antimony_symbol_map",
         "readiness",
         "unresolved_reaction_ids",
         "unresolved_kinetic_law_ids",
@@ -259,6 +260,28 @@ def test_canonical_downstream_handoff_parameters_include_bounds_and_fixed_keys()
     assert downstream["parameters"]
     for key in ("lower_bound", "upper_bound", "fixed"):
         assert key in downstream["parameters"][0]
+
+
+def test_canonical_downstream_handoff_antimony_symbol_map_resolves_every_species_and_reaction():
+    """Human-Readable Antimony Naming increment: ``antimony_symbol_map`` is Agent 2-owned
+    data a downstream consumer (Agent 3) now reads instead of independently re-deriving a
+    symbol from a bare id -- every species/reaction id in the handoff must resolve to a real
+    symbol that actually appears in ``antimony_text``."""
+    handoff = _simple_two_reaction_handoff()
+    downstream = run_agent2_pipeline(handoff).downstream_handoff
+    symbol_map = downstream["antimony_symbol_map"]
+    assert set(symbol_map.keys()) == {"species", "reactions", "parameters"}
+
+    for species in downstream["species"]:
+        symbol = symbol_map["species"][species["species_id"]]
+        assert symbol in downstream["antimony_text"]
+
+    for reaction in downstream["reactions"]:
+        symbol = symbol_map["reactions"][reaction["reaction_id"]]
+        assert symbol in downstream["antimony_text"]
+
+    for parameter in downstream["parameters"]:
+        assert parameter["parameter_id"] in symbol_map["parameters"]
 
 
 def test_enzyme_state_dynamics_two_pass_wiring_applies_inside_the_canonical_pipeline():

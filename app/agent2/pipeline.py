@@ -262,17 +262,47 @@ def _model_assumption_dict(assumption) -> dict[str, Any]:
     }
 
 
+def _antimony_symbol_map(antimony) -> dict[str, dict[str, str]]:
+    """Human-Readable Antimony Naming increment: the exact canonical-id -> real, compiled
+    Antimony-symbol mapping for every species/reaction/parameter, straight from
+    ``FullAntimonyArtifact.symbol_provenance`` -- never re-derived by a downstream consumer.
+
+    Antimony symbol assignment is Agent 2-owned data: a downstream agent (Agent 3's own
+    independent ``app.agent3.antimony_ids`` re-implementation of Agent 2's *old* id-only
+    naming rule, now removed) must never re-derive a symbol from a bare id, since the real
+    rule (``app.agent2.antimony.naming``) depends on curated biological names Agent 2 alone
+    has access to. Only the three categories a downstream consumer actually needs to resolve
+    a handoff entity id against a compiled model are included (compartments/events/
+    observables are never referenced by a diagnostic finding or a calibration target in the
+    Version 1 contract) -- "minimal and limited to identifier traceability."
+    """
+    by_type: dict[str, dict[str, str]] = {"species": {}, "reactions": {}, "parameters": {}}
+    component_type_to_key = {
+        "SPECIES": "species",
+        "REACTION": "reactions",
+        "PARAMETER": "parameters",
+    }
+    for record in antimony.symbol_provenance:
+        key = component_type_to_key.get(record.component_type)
+        if key is not None:
+            by_type[key][record.canonical_id] = record.antimony_symbol
+    return by_type
+
+
 def build_canonical_downstream_handoff(
     model: ModelSpecification, package: Agent2OutputPackage
 ) -> dict[str, Any]:
     """Serialize ``model``/``package`` into the one canonical downstream handoff dict Agents 3,
     4, and 5 all consume unchanged (``AGENT2_DOWNSTREAM_CONTRACT_VERSION``,
-    ``"agent2-downstream-v1"``).
+    ``"agent2-downstream-v2"``).
 
     Every value is read directly from ``model``/``package`` -- never recomputed, never
     defaulted, never omitted silently. This is the single producer-side function responsible
     for this contract's own shape; Agents 3/4/5 each parse exactly this shape (see
     ``docs/19_canonical_orchestration_entrypoint.md`` for the full field-by-field mapping).
+
+    **v2** (Human-Readable Antimony Naming increment) adds ``antimony_symbol_map`` -- see
+    ``_antimony_symbol_map`` above. Every pre-existing field is unchanged.
     """
     network = model.full_network
     antimony = package.full_antimony
@@ -282,6 +312,7 @@ def build_canonical_downstream_handoff(
         "network_id": network.network_id,
         "antimony_text": antimony.antimony_text,
         "antimony_generator_version": antimony.generator_version,
+        "antimony_symbol_map": _antimony_symbol_map(antimony),
         "readiness": antimony.readiness.value
         if hasattr(antimony.readiness, "value")
         else antimony.readiness,

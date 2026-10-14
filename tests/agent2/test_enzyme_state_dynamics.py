@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 
 from app.agent2.antimony import generate_antimony
+from app.agent2.antimony.naming import build_identifier_map
 from app.agent2.boundaries import assess_boundaries
 from app.agent2.characterization import characterize_full_network
 from app.agent2.enzyme_state_dynamics import (
@@ -416,7 +417,10 @@ def _compound(**overrides) -> CuratedCompound:
 
 
 def _curated_reaction(**overrides) -> CuratedReaction:
-    merged = {"id": "r1", "name": "reaction 1"} | overrides
+    # ``name`` defaults to whatever ``id`` this call actually used -- see
+    # ``test_model_specification.py``'s own identical ``_reaction`` helper comment for why.
+    reaction_id = overrides.get("id", "r1")
+    merged = {"id": reaction_id, "name": reaction_id} | overrides
     return CuratedReaction(**merged)
 
 
@@ -587,7 +591,21 @@ def test_phosphorylation_regression_end_to_end():
     reaction_r1_line = next(line for line in text.splitlines() if line.startswith("J_r1:"))
     assert " + (" in reaction_r1_line
     assert "MULTIPLE_CATALYTIC_CONTEXTS_COMPOSED_ADDITIVELY" in reaction_r1_line
+    # The two synthesized enzyme-state-transition reactions carry a real, descriptive name
+    # (``"<from_state> -> <to_state> (<transition_type>)"``, set by
+    # ``app.agent2.enzyme_state_dynamics.builder``) distinct from their own ``reaction_id`` --
+    # the Human-Readable Antimony Naming increment's own name-preferring logic means their
+    # Antimony symbol is no longer a bare id-derived string, so look it up dynamically rather
+    # than assuming the old id-based prefix.
+    id_map = build_identifier_map(model)
+    transition_reaction_ids = [
+        r.reaction_id for r in model.full_network.reactions if r.reaction_id != "r1"
+    ]
+    assert len(transition_reaction_ids) == 2
+    transition_antimony_ids = {id_map.reactions[rid] for rid in transition_reaction_ids}
     transition_reaction_lines = [
-        line for line in text.splitlines() if line.startswith("J_enzyme_state_transition")
+        line
+        for line in text.splitlines()
+        if line.split(":")[0] in transition_antimony_ids
     ]
     assert len(transition_reaction_lines) == 2

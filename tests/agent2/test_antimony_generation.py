@@ -47,9 +47,17 @@ _ANTIMONY_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _compartment(**overrides) -> CompartmentSpecification:
+    # ``name`` defaults to whatever ``compartment_id`` this call actually used (even when
+    # overridden, including hostile test input) -- this file's own tests are about kinetic-
+    # law/module/composition logic, not naming (see ``tests/agent2/test_antimony_naming.py``
+    # for dedicated, realistic-name naming tests); keeping the two equal by default means the
+    # Human-Readable Antimony Naming increment's own name-preferring logic produces the
+    # identical symbol a bare id would have, so every pre-existing assertion below stays
+    # meaningful unchanged -- see ``_parameter``'s own identical comment for why.
+    compartment_id = overrides.get("compartment_id", "cyto")
     merged = {
-        "compartment_id": "cyto",
-        "name": "cytosol",
+        "compartment_id": compartment_id,
+        "name": compartment_id,
         "source_scope": CompartmentSourceScope.AGENT1_CURATED,
         "source_entity_id": "agent1-c1",
     } | overrides
@@ -57,7 +65,10 @@ def _compartment(**overrides) -> CompartmentSpecification:
 
 
 def _species(**overrides) -> SpeciesSpecification:
-    merged = {"species_id": "a", "name": "A", "compartment_id": "cyto"} | overrides
+    # ``name`` defaults to whatever ``species_id`` this call actually used (even when
+    # overridden) -- see ``_parameter``'s own identical comment for why.
+    species_id = overrides.get("species_id", "a")
+    merged = {"species_id": species_id, "name": species_id, "compartment_id": "cyto"} | overrides
     return SpeciesSpecification(**merged)
 
 
@@ -71,9 +82,12 @@ def _participant(**overrides) -> ReactionParticipantSpecification:
 
 
 def _reaction(**overrides) -> ReactionSpecification:
+    # ``name`` defaults to whatever ``reaction_id`` this call actually used (even when
+    # overridden) -- see ``_parameter``'s own identical comment for why.
+    reaction_id = overrides.get("reaction_id", "r1")
     merged = {
-        "reaction_id": "r1",
-        "name": "reaction 1",
+        "reaction_id": reaction_id,
+        "name": reaction_id,
         "participants": (
             _participant(species_id="a", role=ParticipantRole.REACTANT),
             _participant(species_id="b", role=ParticipantRole.PRODUCT),
@@ -88,7 +102,7 @@ def _network(**overrides) -> FullNetwork:
         "network_id": "n1",
         "name": "test network",
         "compartments": (_compartment(),),
-        "species": (_species(species_id="a", name="A"), _species(species_id="b", name="B")),
+        "species": (_species(species_id="a"), _species(species_id="b", name="b")),
         "reactions": (_reaction(),),
     } | overrides
     return FullNetwork(**merged)
@@ -108,9 +122,16 @@ def _kinetic_law(**overrides) -> KineticLawSpecification:
 
 
 def _parameter(**overrides) -> ParameterSpecification:
+    # ``name`` defaults to whatever ``parameter_id`` this call actually used (even when
+    # overridden), never a hardcoded "k1" independent of it -- otherwise two calls like
+    # ``_parameter(parameter_id="k2")``/``_parameter(parameter_id="k3")`` would both silently
+    # keep ``name="k1"``, which the Human-Readable Antimony Naming increment's own
+    # name-preferring logic turns into a real, test-breaking collision (harmless before this
+    # increment, since name was never read for Antimony-id purposes).
+    parameter_id = overrides.get("parameter_id", "k1")
     merged = {
-        "parameter_id": "k1",
-        "name": "k1",
+        "parameter_id": parameter_id,
+        "name": parameter_id,
         "source": ParameterSource.CURATED,
         "value": Decimal("0.5"),
         "reaction_id": "r1",
@@ -200,6 +221,11 @@ def test_identifier_map_ids_are_valid_antimony_identifiers_for_hostile_input():
 
 
 def test_identifier_map_resolves_within_category_collisions_deterministically():
+    """Human-Readable Antimony Naming increment: two species with the identical curated name
+    ("A"), in the identical compartment, collide down to the identical display basis
+    ("A_cyto") exactly as two differently-named-but-id-colliding species always did -- the
+    pre-existing collision-resolution mechanism (sorted by the real, unique species_id, never
+    by display order) is unchanged, only what gets fed into it is."""
     model = _model(
         full_network=_network(
             species=(
@@ -218,8 +244,8 @@ def test_identifier_map_resolves_within_category_collisions_deterministically():
     assert first.species == second.species
     assert len(set(first.species.values())) == len(first.species)
     # deterministic: "a!" sorts before "a?", so "a!" keeps the bare candidate
-    assert first.species["a!"] == "s_a_"
-    assert first.species["a?"] == "s_a__2"
+    assert first.species["a!"] == "s_A_cyto"
+    assert first.species["a?"] == "s_A_cyto_2"
 
 
 def test_identifier_map_never_uses_hash_or_uuid_style_ids():
