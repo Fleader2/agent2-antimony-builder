@@ -114,6 +114,15 @@ itself.
 > Agent 5 — see the sibling `five-agent-integration-harness` repository's
 > `docs/00_five_agent_workflow_v1_architecture.md` for the full Version 1
 > system map (tagged `v1.0.0`).
+>
+> **Scoped-Build Support increment:** `run_agent2_pipeline` now accepts
+> an optional `build_request: app.agent2.build_request.ModelBuildRequest
+> | None` parameter — the Workbench's own user build intent, carried
+> through the integration harness, never duplicating Agent 1's own
+> curated-knowledge contract. Omitting it reproduces this function's
+> exact pre-existing behavior with no change whatsoever. See
+> `docs/20_scoped_build_support.md` for the full contract, supported/
+> unsupported constraints, and cross-repository wiring.
 
 ## Roadmap
 
@@ -127,6 +136,7 @@ itself.
 - **Increment 8** — ModelSpecification Assembly (implemented)
 - **Increment 9** — Antimony Generation (implemented)
 - **Increment 10** — End-to-End Agent 2 Build / Syntax Contract (implemented, as `run_agent2_pipeline`)
+- **Scoped-Build Support** — Workbench `ModelBuildRequest` → Agent 2 scoped builds (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -148,6 +158,7 @@ separately and has not begun.
 - `docs/11_model_specification_assembly.md` — Increment 8 (ModelSpecification Assembly), implemented
 - `docs/12_antimony_generation.md` — Increment 9 (Antimony Generation), implemented
 - `docs/19_canonical_orchestration_entrypoint.md` — Increment 10, the canonical `run_agent2_pipeline` entrypoint and downstream contract, implemented
+- `docs/20_scoped_build_support.md` — Scoped-Build Support increment: the Workbench `ModelBuildRequest` → Agent 2 contract, ownership boundary, supported/unsupported constraints, and cross-repository wiring, implemented
 
 ## Repository Structure
 

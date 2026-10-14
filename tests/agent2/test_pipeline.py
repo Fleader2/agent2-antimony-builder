@@ -283,3 +283,81 @@ def test_build_canonical_downstream_handoff_is_a_pure_function_of_its_inputs():
     result = run_agent2_pipeline(handoff)
     rebuilt = build_canonical_downstream_handoff(result.package.model_specification, result.package)
     assert rebuilt == result.downstream_handoff
+
+
+# --- Scoped-Build Support increment: build_request parameter -----------------------------------
+
+
+def test_no_build_request_reproduces_pre_existing_behavior_exactly():
+    handoff = _simple_two_reaction_handoff()
+    without = run_agent2_pipeline(handoff)
+    with_explicit_none = run_agent2_pipeline(handoff, build_request=None)
+    assert without.downstream_handoff == with_explicit_none.downstream_handoff
+    assert without.warnings == () == with_explicit_none.warnings
+
+
+def test_build_request_scopes_the_assembled_network_before_later_stages():
+    from app.agent2.build_request import AGENT2_BUILD_REQUEST_CONTRACT_VERSION, EntityReference
+    from app.agent2.build_request import ModelBuildRequest as Agent2ModelBuildRequest
+
+    handoff = _simple_two_reaction_handoff()  # r1: a->b, r2: b->c
+    build_request = Agent2ModelBuildRequest(
+        contract_version=AGENT2_BUILD_REQUEST_CONTRACT_VERSION,
+        model_build_request_id="mbr-1",
+        reactions=(EntityReference(role="REQUIRED", agent1_entity_id="r1"),),
+    )
+    result = run_agent2_pipeline(handoff, build_request=build_request)
+    assert len(result.downstream_handoff["reactions"]) == 1
+    assert result.downstream_handoff["reactions"][0]["reaction_id"] == "r1"
+
+
+def test_build_request_contradiction_raises_from_the_canonical_pipeline():
+    from app.agent2.build_request import AGENT2_BUILD_REQUEST_CONTRACT_VERSION, EntityReference
+    from app.agent2.build_request import ModelBuildRequest as Agent2ModelBuildRequest
+    from app.agent2.build_request.errors import BuildRequestContradictionError
+
+    handoff = _simple_two_reaction_handoff()
+    build_request = Agent2ModelBuildRequest(
+        contract_version=AGENT2_BUILD_REQUEST_CONTRACT_VERSION,
+        model_build_request_id="mbr-1",
+        reactions=(
+            EntityReference(role="REQUIRED", agent1_entity_id="r1"),
+            EntityReference(role="EXCLUDED", agent1_entity_id="r1"),
+        ),
+    )
+    with pytest.raises(BuildRequestContradictionError):
+        run_agent2_pipeline(handoff, build_request=build_request)
+
+
+def test_build_request_warnings_are_surfaced_but_never_enter_downstream_handoff():
+    from app.agent2.build_request import AGENT2_BUILD_REQUEST_CONTRACT_VERSION, EntityReference
+    from app.agent2.build_request import ModelBuildRequest as Agent2ModelBuildRequest
+
+    handoff = _simple_two_reaction_handoff()
+    build_request = Agent2ModelBuildRequest(
+        contract_version=AGENT2_BUILD_REQUEST_CONTRACT_VERSION,
+        model_build_request_id="mbr-1",
+        reactions=(EntityReference(role="REQUIRED", agent1_entity_id="does-not-exist"),),
+    )
+    unscoped = run_agent2_pipeline(handoff)
+    result = run_agent2_pipeline(handoff, build_request=build_request)
+    assert any("UNRESOLVED_REACTION_REFERENCE" in w for w in result.warnings)
+    assert "warnings" not in result.downstream_handoff
+    # Unresolved constraint -> no inclusion constraint actually took effect -> unscoped network.
+    assert result.downstream_handoff["reactions"] == unscoped.downstream_handoff["reactions"]
+
+
+def test_build_request_scoping_is_deterministic_across_repeated_runs():
+    from app.agent2.build_request import AGENT2_BUILD_REQUEST_CONTRACT_VERSION, EntityReference
+    from app.agent2.build_request import ModelBuildRequest as Agent2ModelBuildRequest
+
+    handoff = _simple_two_reaction_handoff()
+    build_request = Agent2ModelBuildRequest(
+        contract_version=AGENT2_BUILD_REQUEST_CONTRACT_VERSION,
+        model_build_request_id="mbr-1",
+        reactions=(EntityReference(role="REQUIRED", agent1_entity_id="r1"),),
+    )
+    first = run_agent2_pipeline(handoff, build_request=build_request)
+    second = run_agent2_pipeline(handoff, build_request=build_request)
+    assert first.downstream_handoff == second.downstream_handoff
+    assert first.warnings == second.warnings

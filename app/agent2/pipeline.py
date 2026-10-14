@@ -41,6 +41,7 @@ from typing import Any
 
 from app.agent2.antimony import generate_antimony
 from app.agent2.boundaries import assess_boundaries
+from app.agent2.build_request import ModelBuildRequest, apply_build_request_scope
 from app.agent2.characterization import characterize_full_network
 from app.agent2.enzyme_state_dynamics import (
     build_enzyme_state_dynamics,
@@ -73,14 +74,20 @@ class Agent2PipelineResult:
     ``FullAntimonyArtifact``) -- kept for a caller that needs it. ``downstream_handoff`` is the
     one canonical, already-serialized, plain-dict contract Agents 3, 4, and 5 actually consume
     (``AGENT2_DOWNSTREAM_CONTRACT_VERSION``) -- see ``build_canonical_downstream_handoff``.
+    ``warnings`` (Scoped-Build Support increment) is empty unless a ``build_request`` was
+    supplied -- see that parameter's own docstring. Never included in ``downstream_handoff``
+    itself: Agents 3/4/5 each consume that dict's own fixed shape unchanged, exactly as before
+    this increment.
     """
 
     package: Agent2OutputPackage
     downstream_handoff: dict[str, Any]
+    warnings: tuple[str, ...] = ()
 
 
 def run_agent2_pipeline(
     agent1_handoff: Mapping[str, Any] | Agent1CuratedKnowledgeViewContract,
+    build_request: ModelBuildRequest | None = None,
 ) -> Agent2PipelineResult:
     """Run Agent 2's complete, canonical pipeline end to end.
 
@@ -91,11 +98,21 @@ def run_agent2_pipeline(
     place anywhere in this chain (every stage function this module calls is itself already
     documented as non-mutating).
 
+    ``build_request`` (Scoped-Build Support increment), when supplied, restricts the network
+    assembled from ``agent1_handoff`` to that ``ModelBuildRequest``'s own scope
+    (``app.agent2.build_request.apply_build_request_scope``) *before* any later stage
+    (characterization, kinetic-law assignment, boundary assessment, module decomposition, ...)
+    ever runs -- every one of those stages operates on whatever ``FullNetwork`` it is handed,
+    unchanged. Omitting ``build_request`` (the default, ``None``) reproduces this function's
+    exact pre-existing behavior with no change whatsoever.
+
     Raises whatever typed error the first stage that cannot proceed raises (e.g.
-    ``MalformedHandoffPayloadError`` for a malformed input dict, or any stage's own reference-
-    integrity error) -- never silently recovers from or works around a real orchestration
-    defect. Deterministic: identical input always produces identical output (every stage this
-    calls is itself already documented and tested as deterministic).
+    ``MalformedHandoffPayloadError`` for a malformed input dict, any stage's own reference-
+    integrity error, or ``app.agent2.build_request.errors.BuildRequestContradictionError`` for a
+    build request naming the same reaction as both required and excluded) -- never silently
+    recovers from or works around a real orchestration defect. Deterministic: identical input
+    always produces identical output (every stage this calls is itself already documented and
+    tested as deterministic).
     """
     if isinstance(agent1_handoff, Agent1CuratedKnowledgeViewContract):
         handoff = agent1_handoff
@@ -103,6 +120,12 @@ def run_agent2_pipeline(
         handoff = translate_agent1_view_to_agent2(agent1_handoff)
 
     network = assemble_full_network(handoff)
+    build_request_warnings: tuple[str, ...] = ()
+    if build_request is not None:
+        scoped = apply_build_request_scope(network, build_request)
+        network = scoped.network
+        build_request_warnings = scoped.warnings
+
     resolutions = resolve_kinetic_measurement_reaction_context(network)
     network = apply_resolved_reaction_context(network, resolutions)
 
@@ -142,7 +165,9 @@ def run_agent2_pipeline(
     )
     package = generate_antimony(model)
     downstream_handoff = build_canonical_downstream_handoff(model, package)
-    return Agent2PipelineResult(package=package, downstream_handoff=downstream_handoff)
+    return Agent2PipelineResult(
+        package=package, downstream_handoff=downstream_handoff, warnings=build_request_warnings
+    )
 
 
 def _decimal_str(value: Decimal | None) -> str | None:
