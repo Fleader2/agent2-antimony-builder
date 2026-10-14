@@ -3276,6 +3276,293 @@ class ModelSourceProvenance:
 
 
 # =================================================================================================
+# 7a-2. Model modularization (Model Modularization increment): a derived layer
+# =================================================================================================
+#
+# **Architectural rule, stated once here and never violated below**: a modularization never
+# moves a species/reaction/parameter/rule/event/observable out of the canonical
+# ``FullNetwork``/``ModelSpecification`` -- every type in this section only *references*
+# already-existing canonical component ids by string. No new canonical state is ever created
+# here, and a canonical component may be referenced by any number of modules, across any
+# number of simultaneous, independent ``ModelModularization`` rows (never assumed unique --
+# task instructions, "do not assume one modularization is uniquely correct").
+#
+# **Relationship to the pre-existing ``ModuleSpecification``/``ModuleDecomposition`` (Increment
+# 7, "Module Decomposition")**: that is a *different*, narrower, already-shipped system -- one
+# heuristic, boundary-likelihood-driven partition per model (``ModelSpecification
+# .module_decomposition: ModuleDecomposition | None``, a single field, never a collection;
+# ``docs/10_module_decomposition.md`` §13 documents this as v1's own explicit scope limit).
+# This section does not modify, extend, or depend on any of it -- a wholly separate, additive
+# overlay living in its own fields below, coexisting with zero conflict (confirmed: nothing in
+# ``ModuleSpecification``'s own type ever forbade overlap or multiplicity in the first place;
+# only the *assembler*, for the *old* type, enforced exactly one).
+
+
+class ModularizationMethod(StrEnum):
+    """How one ``ModelModularization`` was produced -- provenance of the *decomposition
+    itself*, never a confidence score.
+
+    Only ``USER_DEFINED``/``IMPORTED`` are ever actually constructed by this increment's own
+    code (task instructions: "do not implement sophisticated automatic module discovery in
+    this increment"). The remaining four names are reserved vocabulary for a future
+    algorithmic increment to populate -- declaring them now lets ``ModelModularization.method``
+    be a closed, stable enum from the start, never requiring every existing modularization's
+    own stored ``method`` value to be revisited when such an increment eventually lands.
+    """
+
+    #: Supplied directly by a human/caller -- this increment's own primary construction path.
+    USER_DEFINED = "USER_DEFINED"
+    #: Obtained from an external source by the *caller's* own means (not parsed from Antimony
+    #: text by this repository -- see ``docs/22_model_modularization.md`` §6 for why).
+    IMPORTED = "IMPORTED"
+    #: Reserved for a future increment: derived from network topology/connectivity alone.
+    TOPOLOGICAL = "TOPOLOGICAL"
+    #: Reserved for a future increment: derived from shared biological function/pathway role.
+    FUNCTIONAL = "FUNCTIONAL"
+    #: Reserved for a future increment: derived from simulated dynamical behavior.
+    DYNAMIC = "DYNAMIC"
+    #: Reserved for a future increment: derived from parameter-sensitivity analysis.
+    SENSITIVITY_BASED = "SENSITIVITY_BASED"
+    #: Reserved for a future increment: combines two or more of the above methods.
+    HYBRID = "HYBRID"
+
+
+class ModuleComponentType(StrEnum):
+    """Which canonical registry a ``ModuleMembership.component_id`` must resolve against."""
+
+    SPECIES = "SPECIES"
+    REACTION = "REACTION"
+    PARAMETER = "PARAMETER"
+    RULE = "RULE"
+    EVENT = "EVENT"
+    OBSERVABLE = "OBSERVABLE"
+
+
+class ModulePortDirection(StrEnum):
+    """A module port's own signal direction. Deliberately a new, separate enum from the
+    pre-existing ``ModuleInterfaceRole`` (``INPUT``/``OUTPUT``/``BIDIRECTIONAL``, Increment 7's
+    own, narrower, single-decomposition concept) -- never reused here, so the two module
+    systems' own vocabularies can evolve independently with zero shared-enum coupling."""
+
+    INPUT = "INPUT"
+    OUTPUT = "OUTPUT"
+    INPUT_OUTPUT = "INPUT_OUTPUT"
+
+
+class ModulePortRole(StrEnum):
+    """An optional, qualitative description of *what kind of signal* a port carries --
+    never required, never a numeric score."""
+
+    SIGNAL = "SIGNAL"
+    SUBSTRATE = "SUBSTRATE"
+    PRODUCT = "PRODUCT"
+    REGULATOR = "REGULATOR"
+    SHARED_POOL = "SHARED_POOL"
+    EXTERNAL_INPUT = "EXTERNAL_INPUT"
+    REPORTER = "REPORTER"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelModule:
+    """One named module within exactly one ``ModelModularization`` (referenced by that
+    modularization's own ``module_ids`` -- this type carries no back-reference, mirroring
+    ``ModuleSpecification``'s own identical "parent names child, child names nothing back"
+    convention). Never itself a collection of canonical components -- that association is
+    ``ModuleMembership``'s own job."""
+
+    module_id: str
+    name: str
+    description: str | None = None
+    biological_function: str | None = None
+    display_order: int | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "module_id", _require_non_empty_str(self.module_id, field_name="module_id")
+        )
+        object.__setattr__(self, "name", _require_non_empty_str(self.name, field_name="name"))
+        object.__setattr__(
+            self, "description", _clean_optional_str(self.description, field_name="description")
+        )
+        object.__setattr__(
+            self,
+            "biological_function",
+            _clean_optional_str(self.biological_function, field_name="biological_function"),
+        )
+        if self.display_order is not None and not isinstance(self.display_order, int):
+            raise TypeError(
+                f"ModelModule.display_order must be an int or None, got {self.display_order!r}"
+            )
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ModelModularization:
+    """One complete, independently-identifiable decomposition of the canonical model into
+    modules. A ``ModelSpecification`` may carry any number of these simultaneously
+    (``ModelSpecification.modularizations``) -- never assumed unique, never ranked against
+    each other by this type itself."""
+
+    modularization_id: str
+    name: str
+    method: ModularizationMethod
+    module_ids: tuple[str, ...] = ()
+    description: str | None = None
+    #: Qualitative only (reuses the pre-existing ``BoundaryLikelihood`` vocabulary) -- never a
+    #: fabricated numeric probability, exactly like every other confidence-shaped field in
+    #: this project.
+    confidence: BoundaryLikelihood | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "modularization_id",
+            _require_non_empty_str(self.modularization_id, field_name="modularization_id"),
+        )
+        object.__setattr__(self, "name", _require_non_empty_str(self.name, field_name="name"))
+        if not isinstance(self.method, ModularizationMethod):
+            raise TypeError(
+                f"ModelModularization.method must be a ModularizationMethod, got {self.method!r}"
+            )
+        object.__setattr__(
+            self, "module_ids", _require_str_tuple(self.module_ids, field_name="module_ids")
+        )
+        _require_unique(self.module_ids, field_name="ModelModularization.module_ids")
+        object.__setattr__(
+            self, "description", _clean_optional_str(self.description, field_name="description")
+        )
+        if self.confidence is not None and not isinstance(self.confidence, BoundaryLikelihood):
+            raise TypeError(
+                "ModelModularization.confidence must be a BoundaryLikelihood or None, got "
+                f"{self.confidence!r}"
+            )
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleMembership:
+    """One canonical component's membership in one module of one modularization. A canonical
+    component may be named by any number of ``ModuleMembership`` rows -- across different
+    modules of the *same* modularization, or across different modularizations entirely --
+    never exclusive, never deduplicated away (task instructions: "a canonical component may
+    belong to multiple modules")."""
+
+    membership_id: str
+    modularization_id: str
+    module_id: str
+    component_type: ModuleComponentType
+    component_id: str
+    role: str | None = None
+    notes: str | None = None
+    confidence: BoundaryLikelihood | None = None
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "membership_id",
+            _require_non_empty_str(self.membership_id, field_name="membership_id"),
+        )
+        object.__setattr__(
+            self,
+            "modularization_id",
+            _require_non_empty_str(self.modularization_id, field_name="modularization_id"),
+        )
+        object.__setattr__(
+            self, "module_id", _require_non_empty_str(self.module_id, field_name="module_id")
+        )
+        if not isinstance(self.component_type, ModuleComponentType):
+            raise TypeError(
+                "ModuleMembership.component_type must be a ModuleComponentType, got "
+                f"{self.component_type!r}"
+            )
+        object.__setattr__(
+            self,
+            "component_id",
+            _require_non_empty_str(self.component_id, field_name="component_id"),
+        )
+        object.__setattr__(self, "role", _clean_optional_str(self.role, field_name="role"))
+        object.__setattr__(self, "notes", _clean_optional_str(self.notes, field_name="notes"))
+        if self.confidence is not None and not isinstance(self.confidence, BoundaryLikelihood):
+            raise TypeError(
+                "ModuleMembership.confidence must be a BoundaryLikelihood or None, got "
+                f"{self.confidence!r}"
+            )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ModulePort:
+    """One explicit module interface onto exactly one canonical species -- never a duplicated
+    species object (task instructions: "do not duplicate species to create ports"). Two ports
+    (one ``OUTPUT``/``INPUT_OUTPUT``, one ``INPUT``/``INPUT_OUTPUT``) naming the identical
+    ``species_id`` across two different modules of the same modularization is exactly how a
+    cross-module connection is derived -- see ``app.agent2.modularization.derivation
+    .derive_cross_module_connections``, never stored as its own persisted type."""
+
+    port_id: str
+    modularization_id: str
+    module_id: str
+    species_id: str
+    direction: ModulePortDirection
+    role: ModulePortRole | None = None
+    assumptions: tuple[str, ...] = ()
+    provenance_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "port_id", _require_non_empty_str(self.port_id, field_name="port_id")
+        )
+        object.__setattr__(
+            self,
+            "modularization_id",
+            _require_non_empty_str(self.modularization_id, field_name="modularization_id"),
+        )
+        object.__setattr__(
+            self, "module_id", _require_non_empty_str(self.module_id, field_name="module_id")
+        )
+        object.__setattr__(
+            self, "species_id", _require_non_empty_str(self.species_id, field_name="species_id")
+        )
+        if not isinstance(self.direction, ModulePortDirection):
+            raise TypeError(
+                f"ModulePort.direction must be a ModulePortDirection, got {self.direction!r}"
+            )
+        if self.role is not None and not isinstance(self.role, ModulePortRole):
+            raise TypeError(f"ModulePort.role must be a ModulePortRole or None, got {self.role!r}")
+        object.__setattr__(
+            self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
+        )
+        object.__setattr__(
+            self,
+            "provenance_refs",
+            _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
+        )
+
+
+# =================================================================================================
 # 7b. ModelSpecification -- the top-level, authoritative contract
 # =================================================================================================
 
@@ -3341,6 +3628,14 @@ class ModelSpecification:
     #: -- enforced one-to-one with ``source_provenance`` below in ``__post_init__``.
     source_type: ModelSourceType = ModelSourceType.GENERATED
     source_provenance: ModelSourceProvenance | None = None
+    #: Model Modularization increment. Zero or more independent, simultaneous decompositions
+    #: of this same canonical model -- never assumed unique, never required. See §7a-2 above
+    #: for the full design and this field's own relationship to the pre-existing, unrelated
+    #: ``module_decomposition``/``module_specifications`` fields.
+    modularizations: tuple[ModelModularization, ...] = ()
+    model_modules: tuple[ModelModule, ...] = ()
+    module_memberships: tuple[ModuleMembership, ...] = ()
+    module_ports: tuple[ModulePort, ...] = ()
     provenance_refs: tuple[str, ...] = ()
     contract_version: str = AGENT2_CONTRACT_VERSION
 
@@ -3459,6 +3754,30 @@ class ModelSpecification:
             )
         object.__setattr__(
             self,
+            "modularizations",
+            _require_tuple_of(
+                self.modularizations, ModelModularization, field_name="modularizations"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "model_modules",
+            _require_tuple_of(self.model_modules, ModelModule, field_name="model_modules"),
+        )
+        object.__setattr__(
+            self,
+            "module_memberships",
+            _require_tuple_of(
+                self.module_memberships, ModuleMembership, field_name="module_memberships"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "module_ports",
+            _require_tuple_of(self.module_ports, ModulePort, field_name="module_ports"),
+        )
+        object.__setattr__(
+            self,
             "provenance_refs",
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
@@ -3508,6 +3827,22 @@ class ModelSpecification:
             tuple(observable.observable_id for observable in self.observables),
             field_name="ModelSpecification.observables[].observable_id",
         )
+        _require_unique(
+            tuple(m.modularization_id for m in self.modularizations),
+            field_name="ModelSpecification.modularizations[].modularization_id",
+        )
+        _require_unique(
+            tuple(m.module_id for m in self.model_modules),
+            field_name="ModelSpecification.model_modules[].module_id",
+        )
+        _require_unique(
+            tuple(m.membership_id for m in self.module_memberships),
+            field_name="ModelSpecification.module_memberships[].membership_id",
+        )
+        _require_unique(
+            tuple(p.port_id for p in self.module_ports),
+            field_name="ModelSpecification.module_ports[].port_id",
+        )
 
         _validate_model_specification_references(self)
 
@@ -3539,6 +3874,9 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
     parameter_ids = {param.parameter_id for param in spec.parameters}
     module_ids = {module.module_id for module in spec.module_specifications}
     boundary_ids = {boundary.boundary_id for boundary in spec.boundary_assessments}
+    rule_ids = {rule.rule_id for rule in spec.rules}
+    event_ids = {event.event_id for event in spec.events}
+    observable_ids = {observable.observable_id for observable in spec.observables}
 
     for law in spec.kinetic_laws:
         _require_known(
@@ -3692,6 +4030,70 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
             (ec.enzyme_state_id,),
             enzyme_state_ids,
             field_name=f"enzyme_state_concentration {ec.enzyme_state_id}.enzyme_state_id",
+        )
+
+    # --- Model Modularization increment: §7a-2 above. ---------------------------------------
+    modularizations_by_id = {m.modularization_id: m for m in spec.modularizations}
+    model_module_ids = {m.module_id for m in spec.model_modules}
+    component_registry_by_type: dict[ModuleComponentType, set[str]] = {
+        ModuleComponentType.SPECIES: species_ids,
+        ModuleComponentType.REACTION: reaction_ids,
+        ModuleComponentType.PARAMETER: parameter_ids,
+        ModuleComponentType.RULE: rule_ids,
+        ModuleComponentType.EVENT: event_ids,
+        ModuleComponentType.OBSERVABLE: observable_ids,
+    }
+
+    for modularization in spec.modularizations:
+        _require_known(
+            modularization.module_ids,
+            model_module_ids,
+            field_name=f"modularization {modularization.modularization_id}.module_ids",
+        )
+
+    def _require_module_belongs_to_modularization(
+        *, modularization_id: str, module_id: str, field_name: str
+    ) -> None:
+        _require_known(
+            (modularization_id,),
+            set(modularizations_by_id),
+            field_name=f"{field_name}.modularization_id",
+        )
+        _require_known((module_id,), model_module_ids, field_name=f"{field_name}.module_id")
+        modularization = modularizations_by_id.get(modularization_id)
+        if modularization is not None and module_id not in modularization.module_ids:
+            raise ValueError(
+                f"{field_name} names module_id {module_id!r}, which is not a member of "
+                f"modularization {modularization_id!r}'s own module_ids "
+                f"{modularization.module_ids!r}"
+            )
+
+    for membership in spec.module_memberships:
+        _require_module_belongs_to_modularization(
+            modularization_id=membership.modularization_id,
+            module_id=membership.module_id,
+            field_name=f"module_membership {membership.membership_id}",
+        )
+        registry = component_registry_by_type.get(membership.component_type, set())
+        _require_known(
+            (membership.component_id,),
+            registry,
+            field_name=(
+                f"module_membership {membership.membership_id}"
+                f".component_id ({membership.component_type.value})"
+            ),
+        )
+
+    for port in spec.module_ports:
+        _require_module_belongs_to_modularization(
+            modularization_id=port.modularization_id,
+            module_id=port.module_id,
+            field_name=f"module_port {port.port_id}",
+        )
+        _require_known(
+            (port.species_id,),
+            species_ids,
+            field_name=f"module_port {port.port_id}.species_id",
         )
 
 
@@ -4118,13 +4520,21 @@ __all__ = [
     "KineticLawSpecification",
     "KineticLawType",
     "ModelAssumption",
+    "ModelModularization",
+    "ModelModule",
     "ModelSourceProvenance",
     "ModelSourceType",
     "ModelSpecification",
+    "ModularizationMethod",
     "ModuleAntimonyArtifact",
     "ModuleBoundaryInterface",
+    "ModuleComponentType",
     "ModuleDecomposition",
     "ModuleInterfaceRole",
+    "ModuleMembership",
+    "ModulePort",
+    "ModulePortDirection",
+    "ModulePortRole",
     "ModuleSpecification",
     "ObservableSpecification",
     "ParameterSource",

@@ -134,6 +134,16 @@ itself.
 > building the semantic round trip. `agent2-downstream-v1` is unchanged. See
 > `docs/21_antimony_import_and_canonical_model.md` for the full design, supported/unsupported
 > constructs, and round-trip guarantees.
+>
+> **Model Modularization increment:** a new, additive, derived layer
+> (`ModelModularization`/`ModelModule`/`ModuleMembership`/`ModulePort`) lets any number of
+> independent module decompositions coexist on top of the same canonical model — never
+> mandatory, never moving a species/reaction/parameter/rule/event/observable out of
+> `FullNetwork`/`ModelSpecification`, never altering Antimony export or the downstream
+> handoff. Separate from, and never touching, the pre-existing, single-decomposition
+> `ModuleSpecification`/`ModuleDecomposition` system. Automatic module discovery
+> (topological/functional/dynamic/sensitivity-based) is reserved vocabulary only — not
+> implemented. See `docs/22_model_modularization.md` for the full design.
 
 ## Roadmap
 
@@ -149,6 +159,7 @@ itself.
 - **Increment 10** — End-to-End Agent 2 Build / Syntax Contract (implemented, as `run_agent2_pipeline`)
 - **Scoped-Build Support** — Workbench `ModelBuildRequest` → Agent 2 scoped builds (implemented)
 - **Antimony Import** — real Antimony/SBML parsing into the canonical representation, with semantic round-trip (implemented)
+- **Model Modularization** — a derived, additive, multi-decomposition module layer on top of the canonical model (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -172,6 +183,7 @@ separately and has not begun.
 - `docs/19_canonical_orchestration_entrypoint.md` — Increment 10, the canonical `run_agent2_pipeline` entrypoint and downstream contract, implemented
 - `docs/20_scoped_build_support.md` — Scoped-Build Support increment: the Workbench `ModelBuildRequest` → Agent 2 contract, ownership boundary, supported/unsupported constraints, and cross-repository wiring, implemented
 - `docs/21_antimony_import_and_canonical_model.md` — Antimony Import increment: the canonical model schema additions, import/export flow, supported/unsupported constructs, and semantic round-trip guarantees, implemented
+- `docs/22_model_modularization.md` — Model Modularization increment: the modularization schema, shared-species/cross-module-connection behavior, multiple-decomposition support, and the Antimony/downstream-handoff compatibility guarantee, implemented
 
 ## Repository Structure
 
