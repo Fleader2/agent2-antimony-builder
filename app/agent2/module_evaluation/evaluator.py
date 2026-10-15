@@ -136,7 +136,7 @@ def evaluate_modularization(
     if calibration_evidence is not None:
         criteria_to_score.append(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
         raw_results[ModularizationCriterion.CALIBRATION_INDEPENDENCE] = (
-            score_calibration_independence(calibration_evidence)
+            score_calibration_independence(modularization.module_ids, calibration_evidence)
         )
 
     criterion_scores: list[ModularizationCriterionScore] = []
@@ -209,14 +209,18 @@ def evaluate_modularization_under_weights(
     weight_vectors: tuple[CriteriaWeights, ...],
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
+    calibration_evidence: Mapping[str, ModuleCalibrationEvaluation] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> tuple[ModularizationEvaluation, ...]:
     """Score the identical modularization once per supplied ``CriteriaWeights`` vector (task
     instructions §5, weight-space exploration) -- a thin, deterministic loop over
     ``evaluate_modularization``, never a UI, never a search over weight space on its own
-    (a caller/future Workbench UI supplies every vector to try). ``topology_filtering`` (if
-    given) is held fixed across every weight vector -- weight-space exploration and topology
-    filtering are independent axes.
+    (a caller/future Workbench UI supplies every vector to try). ``topology_filtering``/
+    ``calibration_evidence`` (if given) are each held fixed across every weight vector --
+    weight-space exploration and this evidence are independent axes: a module's own
+    calibration-independence evidence does not change depending on which weight vector is
+    being scored, only its *contribution* to ``overall_score`` does (Calibration Evidence
+    Integration into Weight-Space Exploration increment).
 
     Returns evaluations in the identical order ``weight_vectors`` was given, one-to-one --
     never reordered, never deduplicated, never ranked.
@@ -232,6 +236,7 @@ def evaluate_modularization_under_weights(
             modularization_id,
             weights,
             topology_filtering=topology_filtering,
+            calibration_evidence=calibration_evidence,
             policy_version=policy_version,
         )
         for weights in weight_vectors
@@ -244,12 +249,19 @@ def compare_modularizations(
     weights: CriteriaWeights,
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
+    calibration_evidence: Mapping[str, Mapping[str, ModuleCalibrationEvaluation]] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> tuple[ModularizationEvaluation, ...]:
     """Score several alternative modularizations -- of possibly different module counts --
     under the identical ``weights`` (task instructions §6). Never assumes more or fewer
     modules is intrinsically better, and never picks a winner: returns one evaluation per
     requested id, in the identical order given, for the caller to compare.
+
+    ``calibration_evidence`` (Calibration Evidence Integration into Weight-Space Exploration
+    increment), when given, is keyed by ``modularization_id`` -> ``{module_id:
+    ModuleCalibrationEvaluation}`` -- each modularization's own evidence (if any) is looked up
+    by its own id and passed to its own ``evaluate_modularization`` call alone, never shared
+    across different modularizations' own, structurally distinct modules.
     """
     if not isinstance(modularization_ids, tuple) or not modularization_ids:
         raise ModuleEvaluationReferenceError(
@@ -262,6 +274,11 @@ def compare_modularizations(
             modularization_id,
             weights,
             topology_filtering=topology_filtering,
+            calibration_evidence=(
+                calibration_evidence.get(modularization_id)
+                if calibration_evidence is not None
+                else None
+            ),
             policy_version=policy_version,
         )
         for modularization_id in modularization_ids

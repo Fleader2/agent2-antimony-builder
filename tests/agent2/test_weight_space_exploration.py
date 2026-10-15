@@ -17,7 +17,14 @@ from decimal import Decimal
 import pytest
 
 from app.agent2.antimony_import import import_antimony
-from app.agent2.module_evaluation import CriteriaWeights, CriterionWeight, ModularizationCriterion
+from app.agent2.module_calibration import ModuleCalibrationEvaluation, ModuleCalibrationStatus
+from app.agent2.module_evaluation import (
+    CriteriaWeights,
+    CriterionWeight,
+    ModularizationCriterion,
+    compare_modularizations,
+    evaluate_modularization,
+)
 from app.agent2.module_evaluation.criteria import IMPLEMENTED_CRITERIA
 from app.agent2.module_evaluation.types import (
     TopologyFilteringPolicy,
@@ -618,3 +625,217 @@ def test_exploration_works_identically_for_generated_and_imported_models():
     assert _signature(generated_result.boundary_stability) == _signature(
         imported_result.boundary_stability
     )
+
+
+# --- Calibration Evidence Integration into Weight-Space Exploration increment ------------------
+#
+# Reuses _two_candidate_model() unchanged: "topo" (modules topoA={r1,r2}, topoB={r3,r4}) scores
+# TOPOLOGICAL_SEPARATION = 2/3, "ec" (modules ecA={r1,r3}, ecB={r2,r4}) scores 0 under that
+# criterion alone. Calibration evidence below deliberately reverses that preference: "ec"'s
+# own modules are both CALIBRATION_SUPPORTED (score 1 each, min = 1); "topo"'s own modules
+# include one CALIBRATION_FAILED (score 0, min = 0) -- so weighting CALIBRATION_INDEPENDENCE
+# alone makes "ec" win instead of "topo", a real ranking change driven entirely by calibration
+# evidence, never by re-deriving anything from the network itself.
+
+
+def _calibration_evaluation(
+    *, modularization_id: str, module_id: str, status: ModuleCalibrationStatus, **overrides
+) -> ModuleCalibrationEvaluation:
+    merged = {
+        "evaluation_id": f"eval::{modularization_id}::{module_id}",
+        "request_id": f"req::{modularization_id}::{module_id}",
+        "correlation_id": "corr-1",
+        "run_id": "run-1",
+        "parent_model_id": "m1",
+        "modularization_id": modularization_id,
+        "module_id": module_id,
+        "status": status,
+        "policy_version": "test-calibration-v1",
+    } | overrides
+    return ModuleCalibrationEvaluation(**merged)
+
+
+def _topo_losing_evidence() -> dict[str, ModuleCalibrationEvaluation]:
+    """topoA supported, topoB failed -- min score 0."""
+    return {
+        "topoA": _calibration_evaluation(
+            modularization_id="topo",
+            module_id="topoA",
+            status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+        ),
+        "topoB": _calibration_evaluation(
+            modularization_id="topo",
+            module_id="topoB",
+            status=ModuleCalibrationStatus.CALIBRATION_FAILED,
+        ),
+    }
+
+
+def _ec_winning_evidence() -> dict[str, ModuleCalibrationEvaluation]:
+    """Both ecA/ecB supported -- min score 1."""
+    return {
+        "ecA": _calibration_evaluation(
+            modularization_id="ec",
+            module_id="ecA",
+            status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+        ),
+        "ecB": _calibration_evaluation(
+            modularization_id="ec",
+            module_id="ecB",
+            status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+        ),
+    }
+
+
+def test_calibration_evidence_changes_candidate_ranking():
+    model = _two_candidate_model()
+    topology_only = _single_weight(ModularizationCriterion.TOPOLOGICAL_SEPARATION)
+    without_evidence = compare_modularizations(model, ("topo", "ec"), topology_only)
+    scores_by_id = {e.modularization_id: e.overall_score for e in without_evidence}
+    assert scores_by_id["topo"] > scores_by_id["ec"]  # topology alone favors "topo"
+
+    calibration_only = _single_weight(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
+    evidence = {"topo": _topo_losing_evidence(), "ec": _ec_winning_evidence()}
+    with_evidence = compare_modularizations(
+        model, ("topo", "ec"), calibration_only, calibration_evidence=evidence
+    )
+    calibration_scores = {e.modularization_id: e.overall_score for e in with_evidence}
+    assert calibration_scores["ec"] > calibration_scores["topo"]  # ranking reversed
+
+
+def test_calibration_weight_zero_reproduces_prior_results():
+    model = _two_candidate_model()
+    weights_without = _single_weight(ModularizationCriterion.TOPOLOGICAL_SEPARATION)
+    baseline = evaluate_modularization(model, "topo", weights_without)
+
+    weights_with_zero = CriteriaWeights(
+        weights=(
+            CriterionWeight(ModularizationCriterion.TOPOLOGICAL_SEPARATION, Decimal("1")),
+            CriterionWeight(ModularizationCriterion.CALIBRATION_INDEPENDENCE, Decimal("0")),
+        ),
+        policy_version="test-v1",
+    )
+    with_disabled_calibration = evaluate_modularization(
+        model, "topo", weights_with_zero, calibration_evidence=_topo_losing_evidence()
+    )
+    assert with_disabled_calibration.overall_score == baseline.overall_score
+    assert with_disabled_calibration.evaluated_weight_fraction == baseline.evaluated_weight_fraction
+
+
+def test_explore_weight_space_with_calibration_evidence_across_multiple_weight_vectors():
+    model = _two_candidate_model()
+    evidence = {"topo": _topo_losing_evidence(), "ec": _ec_winning_evidence()}
+    criteria = (
+        ModularizationCriterion.TOPOLOGICAL_SEPARATION,
+        ModularizationCriterion.CALIBRATION_INDEPENDENCE,
+    )
+    spec = uniform_weight_grid(criteria, steps=2, policy_version="v1")
+    weights = generate_weight_vectors(spec)
+    result = explore_weight_space(
+        model,
+        ("topo", "ec"),
+        weights,
+        _top_n(2),
+        calibration_evidence=evidence,
+        policy_version="v1",
+    )
+    scores_by_mod_and_tag = {}
+    for e in result.evaluations:
+        calib = next(
+            (
+                cs
+                for cs in e.criterion_scores
+                if cs.criterion is ModularizationCriterion.CALIBRATION_INDEPENDENCE
+            ),
+            None,
+        )
+        if calib is not None and calib.raw_weight > 0:
+            scores_by_mod_and_tag.setdefault(e.modularization_id, []).append(e.overall_score)
+    # Every evaluation that actually weights CALIBRATION_INDEPENDENCE must reflect real
+    # evidence -- "ec" (min score 1) must never score lower than "topo" (min score 0) when
+    # calibration is the only or dominant signal.
+    assert scores_by_mod_and_tag  # the grid did include at least one such vector
+    assert max(scores_by_mod_and_tag["ec"]) >= max(scores_by_mod_and_tag.get("topo", [0]))
+
+
+def test_explore_weight_space_unavailable_calibration_evidence_handled_honestly():
+    model = _two_candidate_model()
+    # "ec" has evidence for only one of its two modules -- weakest-link unavailable.
+    partial_evidence = {"ec": {"ecA": _ec_winning_evidence()["ecA"]}}
+    weights = _single_weight(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
+    result = explore_weight_space(
+        model, ("topo", "ec"), (weights,), _top_n(2), calibration_evidence=partial_evidence
+    )
+    ec_eval = next(e for e in result.evaluations if e.modularization_id == "ec")
+    calib_score = next(
+        cs
+        for cs in ec_eval.criterion_scores
+        if cs.criterion is ModularizationCriterion.CALIBRATION_INDEPENDENCE
+    )
+    assert calib_score.available is False
+    assert calib_score.raw_score is None
+    assert ec_eval.overall_score is None  # the only weighted criterion was unavailable
+
+    topo_eval = next(e for e in result.evaluations if e.modularization_id == "topo")
+    assert not any(
+        cs.criterion is ModularizationCriterion.CALIBRATION_INDEPENDENCE
+        for cs in topo_eval.criterion_scores
+    )  # "topo" was never given any evidence at all -- the criterion simply never appears
+
+
+def test_calibration_failed_and_unidentifiable_are_negative_evidence_not_missing():
+    model = _two_candidate_model()
+    weights = _single_weight(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
+    for status in (
+        ModuleCalibrationStatus.CALIBRATION_FAILED,
+        ModuleCalibrationStatus.UNIDENTIFIABLE,
+    ):
+        evidence = {
+            "topoA": _calibration_evaluation(
+                modularization_id="topo", module_id="topoA", status=status
+            ),
+            "topoB": _calibration_evaluation(
+                modularization_id="topo",
+                module_id="topoB",
+                status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+            ),
+        }
+        evaluation = evaluate_modularization(
+            model, "topo", weights, calibration_evidence=evidence
+        )
+        calib_score = next(
+            cs
+            for cs in evaluation.criterion_scores
+            if cs.criterion is ModularizationCriterion.CALIBRATION_INDEPENDENCE
+        )
+        assert calib_score.available is True  # real evidence, never "missing"
+        assert calib_score.raw_score == Decimal("0")  # the weakest-link module scored 0
+
+
+def test_stable_boundary_analysis_with_calibration_weighted_solutions():
+    model = _two_candidate_model()
+    evidence = {"topo": _topo_losing_evidence(), "ec": _ec_winning_evidence()}
+    weights = (_single_weight(ModularizationCriterion.CALIBRATION_INDEPENDENCE),)
+    result = explore_weight_space(
+        model, ("topo", "ec"), weights, _top_n(1), calibration_evidence=evidence
+    )
+    # "ec" (score 1) is strictly preferred over "topo" (score 0) -- only "ec"'s own boundaries
+    # should end up in the high-scoring set, never crashing or silently merging the two
+    # structurally distinct candidates' own boundaries together.
+    assert result.high_scoring_evaluation_ids
+    high_scoring = [
+        e for e in result.evaluations if e.evaluation_id in result.high_scoring_evaluation_ids
+    ]
+    assert all(e.modularization_id == "ec" for e in high_scoring)
+    assert result.boundary_stability  # stability computation ran without error
+    assert all(b.cut_frequency in (Decimal("0"), Decimal("1")) for b in result.boundary_stability)
+
+
+def test_no_regression_when_calibration_evidence_omitted():
+    model = _two_candidate_model()
+    weights = _single_weight(ModularizationCriterion.TOPOLOGICAL_SEPARATION)
+    without_param = explore_weight_space(model, ("topo", "ec"), (weights,), _top_n(2))
+    with_explicit_none = explore_weight_space(
+        model, ("topo", "ec"), (weights,), _top_n(2), calibration_evidence=None
+    )
+    assert without_param.evaluations == with_explicit_none.evaluations

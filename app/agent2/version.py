@@ -1582,6 +1582,25 @@ so Agent 3 requires zero code change to simulate a module exactly as it would an
 New ``MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v1"``; no other version constant
 changes -- nothing here is ever stored on ``ModelSpecification``/``Agent2OutputPackage`` either.
 See ``docs/31_recursive_module_evaluation_orchestration.md``.
+
+**Calibration Evidence Integration into Weight-Space Exploration increment.**
+``MODULE_CALIBRATION_POLICY_VERSION`` bumped ``"module-calibration-v1"`` ->
+``"module-calibration-v2"`` -- a real aggregation-policy correction:
+``calibration_adapter.score_calibration_independence`` now takes the modularization's own
+complete ``module_ids`` tuple as a required argument (not just whatever keys happened to be in
+the caller's own evidence mapping), so a module with *no entry at all* is now correctly treated
+identically to one with an explicitly unavailable status, never silently skipped as though it
+were never asked about. ``evaluate_modularization``/``evaluate_modularization_under_weights``/
+``compare_modularizations`` (``module_evaluation``) and ``explore_weight_space``
+(``weight_space_exploration``) all thread ``calibration_evidence`` through unchanged from the
+previous increment's own single-modularization support -- ``compare_modularizations``/
+``explore_weight_space`` additionally accept it keyed by ``modularization_id`` (each
+modularization's own, structurally distinct modules never share one caller-supplied mapping).
+Omitting ``calibration_evidence`` anywhere reproduces each function's exact pre-existing
+behavior with no change whatsoever. No other version constant changes --
+``WEIGHT_SPACE_EXPLORATION_POLICY_VERSION``'s own grid-sampling/high-scoring-selection/
+stability-computation policy is untouched; these functions are already fully criterion-
+agnostic. See ``docs/32_calibration_evidence_integration_into_weight_space_exploration.md``.
 """
 
 from __future__ import annotations
@@ -1628,8 +1647,10 @@ WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"
 #: Recursive Module Evaluation Orchestration increment -- the version of
 #: ``app.agent2.module_calibration``'s own request/result contract shape and of
 #: ``app.agent2.module_evaluation.calibration_adapter``'s own scoring policy (status ->
-#: available/raw-score mapping, weakest-link multi-module aggregation).
-MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v1"
+#: available/raw-score mapping, weakest-link multi-module aggregation). Bumped to v2 by the
+#: Calibration Evidence Integration into Weight-Space Exploration increment (a module with no
+#: evidence entry at all is now correctly treated as unavailable, not silently skipped).
+MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v2"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",

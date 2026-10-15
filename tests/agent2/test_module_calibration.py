@@ -437,8 +437,8 @@ def test_evaluation_rejects_evidence_alongside_unavailable_status():
 # --- score_calibration_independence (calibration_adapter) ----------------------------------------
 
 
-def test_score_calibration_independence_empty_mapping_is_unavailable_not_error():
-    result = score_calibration_independence({})
+def test_score_calibration_independence_empty_module_ids_is_unavailable_not_error():
+    result = score_calibration_independence((), {})
     assert result.available is False
     assert result.raw_score is None
 
@@ -452,12 +452,25 @@ def test_score_calibration_independence_unavailable_when_any_module_missing_evid
             module_id="mod-b", status=ModuleCalibrationStatus.INSUFFICIENT_DATA
         ),
     }
-    result = score_calibration_independence(evaluations)
+    result = score_calibration_independence(("mod-a", "mod-b"), evaluations)
     assert result.available is False
     assert result.raw_score is None
     assert "mod-b" in result.explanation
     assert result.detail.module_ids_missing_evidence == ("mod-b",)
     assert result.detail.module_ids_with_evidence == ("mod-a",)
+
+
+def test_score_calibration_independence_unavailable_when_module_has_no_entry_at_all():
+    """A module named in module_ids with *no key at all* in evaluations must be treated
+    identically to one with an explicitly unavailable status -- never silently skipped."""
+    evaluations = {
+        "mod-a": _evaluation(
+            module_id="mod-a", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+    }
+    result = score_calibration_independence(("mod-a", "mod-b"), evaluations)
+    assert result.available is False
+    assert result.detail.module_ids_missing_evidence == ("mod-b",)
 
 
 def test_score_calibration_independence_available_min_aggregation_across_modules():
@@ -475,7 +488,7 @@ def test_score_calibration_independence_available_min_aggregation_across_modules
             ),
         ),
     )
-    result = score_calibration_independence({"mod-a": high, "mod-b": low})
+    result = score_calibration_independence(("mod-a", "mod-b"), {"mod-a": high, "mod-b": low})
     assert result.available is True
     assert result.raw_score == Decimal("0.5")  # min(1, 1 - 0.5)
     assert result.detail.module_ids_with_evidence == ("mod-a", "mod-b")
@@ -488,14 +501,14 @@ def test_score_calibration_independence_zero_for_failed_and_unidentifiable():
     )
     for status in statuses:
         evaluation = _evaluation(status=status)
-        result = score_calibration_independence({"mod-1": evaluation})
+        result = score_calibration_independence(("mod-1",), {"mod-1": evaluation})
         assert result.available is True
         assert result.raw_score == Decimal("0")
 
 
 def test_score_calibration_independence_full_score_with_no_findings():
     evaluation = _evaluation(status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED)
-    result = score_calibration_independence({"mod-1": evaluation})
+    result = score_calibration_independence(("mod-1",), {"mod-1": evaluation})
     assert result.available is True
     assert result.raw_score == Decimal("1")
 
@@ -512,7 +525,7 @@ def test_score_calibration_independence_penalty_is_deterministic():
             ),
         ),
     )
-    result = score_calibration_independence({"mod-1": evaluation})
+    result = score_calibration_independence(("mod-1",), {"mod-1": evaluation})
     assert result.raw_score == Decimal("0.6")  # 1 - 0.1 - 0.3
 
 

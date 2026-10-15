@@ -10,8 +10,10 @@ canonical model semantics, and never declares one solution "correct" (task instr
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 
+from app.agent2.module_calibration.types import ModuleCalibrationEvaluation
 from app.agent2.module_evaluation import CriteriaWeights, evaluate_modularization
 from app.agent2.module_evaluation.types import TopologyFilteringPolicy
 from app.agent2.types import ModelSpecification, ModuleComponentType
@@ -43,6 +45,7 @@ def explore_weight_space(
     high_scoring_policy: HighScoringSolutionPolicy,
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
+    calibration_evidence: Mapping[str, Mapping[str, ModuleCalibrationEvaluation]] | None = None,
     ambiguous_band_low: Decimal = _DEFAULT_AMBIGUOUS_BAND_LOW,
     ambiguous_band_high: Decimal = _DEFAULT_AMBIGUOUS_BAND_HIGH,
     policy_version: str = WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
@@ -59,6 +62,18 @@ def explore_weight_space(
     actually supplied, is preserved in ``.evaluations``, and ``.by_module_count`` reports
     stability separately per distinct module count in addition to the combined, overall
     measures.
+
+    ``calibration_evidence`` (Calibration Evidence Integration into Weight-Space Exploration
+    increment, optional, defaults to ``None``) is keyed by ``modularization_id`` ->
+    ``{module_id: ModuleCalibrationEvaluation}`` -- each modularization's own evidence (if
+    supplied) is held fixed across every weight vector it is evaluated under (the evidence
+    itself never changes per weight vector, only its weighted *contribution* does), and is
+    never computed here: it must already have been obtained by routing a
+    ``ModuleCalibrationRequest`` per module through the Harness/Agent 3/Agent 4
+    (``app.agent2.module_calibration``) before calling this function. Omitting it (the
+    default) reproduces this function's exact pre-existing behavior with no change
+    whatsoever -- ``CALIBRATION_INDEPENDENCE`` simply never appears in any evaluation's own
+    ``criterion_scores``, exactly as before this increment.
 
     ``ambiguous_band_low``/``ambiguous_band_high`` name the open interval a boundary/
     co-membership frequency must fall strictly inside to be reported among
@@ -90,6 +105,11 @@ def explore_weight_space(
             modularization_id,
             weights,
             topology_filtering=topology_filtering,
+            calibration_evidence=(
+                calibration_evidence.get(modularization_id)
+                if calibration_evidence is not None
+                else None
+            ),
         )
         for modularization_id in modularization_ids
         for weights in weight_vectors

@@ -10,9 +10,9 @@ fitting, no network access -- see that module's own docstring); this one, by con
 still never calls Agent 3 or Agent 4 directly anywhere in this repository.
 
 **Never fabricates a score.** ``score_calibration_independence`` returns ``available=False``
-whenever any supplied module's own evidence is unavailable (``INSUFFICIENT_DATA``/
-``BOUNDARY_INADEQUATE``) -- a weakest-link policy, never a fabricated partial average over
-fewer modules than were actually asked about.
+whenever any of the modularization's own modules has unavailable evidence (``INSUFFICIENT_
+DATA``/``BOUNDARY_INADEQUATE``, *or no entry supplied for it at all*) -- a weakest-link policy,
+never a fabricated partial average over fewer modules than the modularization actually has.
 """
 
 from __future__ import annotations
@@ -67,30 +67,38 @@ def _module_raw_score(evaluation: ModuleCalibrationEvaluation) -> Decimal | None
 
 
 def score_calibration_independence(
+    module_ids: tuple[str, ...],
     evaluations: Mapping[str, ModuleCalibrationEvaluation],
 ) -> CriterionResult:
-    """Aggregate every supplied module's own ``ModuleCalibrationEvaluation`` (keyed by
-    ``module_id``) into one ``CALIBRATION_INDEPENDENCE`` result for a modularization.
+    """Aggregate ``module_ids``' own ``ModuleCalibrationEvaluation``s (looked up in
+    ``evaluations`` by ``module_id``) into one ``CALIBRATION_INDEPENDENCE`` result for a
+    modularization.
 
-    Weakest-link policy: ``available=True`` only when *every* supplied evaluation itself has
-    available evidence; otherwise ``available=False`` (never a fabricated score, never a
+    ``module_ids`` is always the *modularization's own, complete* module-id tuple (task
+    instructions §2: "if any **required** module has unavailable calibration evidence,
+    preserve the current unavailable-evidence semantics") -- a module named in ``module_ids``
+    with **no entry at all** in ``evaluations`` is treated identically to one whose own
+    evidence is explicitly unavailable, never silently skipped as though it were never asked
+    about. This is why ``module_ids`` is a required, separate argument rather than simply
+    iterating ``evaluations.keys()`` -- a mapping missing a key says nothing on its own about
+    whether that module was *supposed* to have evidence.
+
+    Weakest-link policy: ``available=True`` only when *every* module in ``module_ids`` itself
+    has available evidence; otherwise ``available=False`` (never a fabricated score, never a
     partial average silently dropping an unevidenced module). When available, ``raw_score`` is
     the *minimum* per-module contribution -- a modularization's own calibration independence is
     only as trustworthy as its least-evidenced module.
 
     ``evaluations`` is caller-supplied (always produced by routing one
-    ``ModuleCalibrationRequest`` per module through the Harness, never computed here) -- an
-    empty mapping (no evidence supplied for any module) is itself just one more "unavailable"
-    case, never an error.
+    ``ModuleCalibrationRequest`` per module through the Harness, never computed here).
     """
-    if not evaluations:
+    if not module_ids:
         return CriterionResult(
             available=False,
             raw_score=None,
             explanation=(
-                "no calibration evidence supplied for any module of this modularization -- "
-                "CALIBRATION_INDEPENDENCE requires at least one module's own "
-                "ModuleCalibrationEvaluation"
+                "modularization has no modules at all -- CALIBRATION_INDEPENDENCE requires "
+                "at least one"
             ),
             detail=CalibrationIndependenceDetail(),
         )
@@ -98,7 +106,11 @@ def score_calibration_independence(
     with_evidence: list[tuple[str, Decimal]] = []
     missing: list[str] = []
     statuses: list[tuple[str, str]] = []
-    for module_id, evaluation in evaluations.items():
+    for module_id in module_ids:
+        evaluation = evaluations.get(module_id)
+        if evaluation is None:
+            missing.append(module_id)
+            continue
         statuses.append((module_id, evaluation.status.value))
         score = _module_raw_score(evaluation)
         if score is None:
@@ -123,7 +135,12 @@ def score_calibration_independence(
                 "score over fewer modules than were asked about"
             ),
             warnings=tuple(
-                f"module {module_id!r}: {evaluations[module_id].status.value}"
+                f"module {module_id!r}: "
+                + (
+                    evaluations[module_id].status.value
+                    if module_id in evaluations
+                    else "no evidence supplied"
+                )
                 for module_id in missing
             ),
             detail=detail,
