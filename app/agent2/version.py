@@ -1538,6 +1538,27 @@ increment implementing it needs no further conceptual rename. No version constan
 this criterion's own types were never stored on ``ModelSpecification``/
 ``Agent2OutputPackage`` or exposed across the downstream handoff either before or after this
 rename. See ``docs/29_ec_class_coherence_naming_correction.md``.
+
+**Weight-Space Exploration and Stable Boundary Discovery increment.** New package
+``app.agent2.weight_space_exploration`` builds on the unchanged Module Boundary Evaluation
+Framework to systematically explore combinations of modularization-criterion weights and
+identify module boundaries/modularizations that remain stable across reasonable weighting
+assumptions. ``generate_weight_vectors``/``uniform_weight_grid`` (``.sampling``)
+deterministically expand a ``WeightGridSpec`` (one ``WeightRange`` per criterion) into every
+legal ``CriteriaWeights`` combination, optionally capped by deterministic, evenly-spaced
+down-sampling. ``explore_weight_space`` (``.exploration``) evaluates every
+``(modularization_id, weight_vector)`` pair (reusing ``evaluate_modularization`` unchanged),
+selects the high-scoring subset under an explicit ``HighScoringSolutionPolicy``
+(``TOP_N``/``PERCENTILE``/``WITHIN_DELTA_OF_BEST``), and derives ``BoundaryStability``/
+``ComponentCoMembershipStability``/``ModularizationRecurrence`` over that subset (``.stability``)
+-- never forcing an unstable solution into a single consensus, never declaring one solution
+"correct." Results are preserved separately per modularization and module count
+(``WeightSpaceExplorationResult.by_module_count``); nothing here alters canonical model
+semantics, and no existing type's stored shape changes. New
+``WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"``; no other version
+constant changes -- this package's own types are never stored on ``ModelSpecification``/
+``Agent2OutputPackage`` either. See
+``docs/30_weight_space_exploration_and_stable_boundary_discovery.md``.
 """
 
 from __future__ import annotations
@@ -1576,6 +1597,11 @@ AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
 #: ``app.agent2.module_evaluation``'s own scoring policy (which criteria exist, how each one
 #: is computed, how weights are normalized and combined into an overall score).
 MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v1"
+#: Weight-Space Exploration and Stable Boundary Discovery increment -- the version of
+#: ``app.agent2.weight_space_exploration``'s own policy (deterministic weight-grid sampling,
+#: high-scoring-solution selection, boundary/co-membership/modularization-recurrence stability
+#: computation).
+WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1599,4 +1625,5 @@ __all__ = [
     "QUANTITATIVE_CONTEXT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
     "REACTION_CONTEXT_RESOLUTION_POLICY_VERSION",
+    "WEIGHT_SPACE_EXPLORATION_POLICY_VERSION",
 ]

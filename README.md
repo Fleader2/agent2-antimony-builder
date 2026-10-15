@@ -264,6 +264,22 @@ itself.
 > (Agent 1's own curated KEGG `CuratedNetwork`/pathway data, still not wired into Agent 2), so
 > a future increment implementing it needs no further conceptual rename. No version constant
 > changes. See `docs/29_ec_class_coherence_naming_correction.md`.
+>
+> **Weight-Space Exploration and Stable Boundary Discovery increment:** builds on the
+> unchanged Module Boundary Evaluation Framework to systematically explore combinations of
+> modularization-criterion weights and identify module boundaries/modularizations that remain
+> stable across reasonable weighting assumptions. New package
+> `app.agent2.weight_space_exploration` deterministically expands a `WeightGridSpec` into every
+> legal `CriteriaWeights` combination (`generate_weight_vectors`/`uniform_weight_grid`),
+> evaluates every `(modularization_id, weight_vector)` pair (`explore_weight_space`, reusing
+> `evaluate_modularization` unchanged), selects the high-scoring subset under an explicit
+> `HighScoringSolutionPolicy` (`TOP_N`/`PERCENTILE`/`WITHIN_DELTA_OF_BEST`), and derives
+> boundary-recurrence, module-co-membership, and modularization-recurrence stability measures
+> over that subset — never forcing an unstable solution into a single consensus, never
+> declaring one solution "correct." Results are preserved separately per modularization and
+> module count. No existing type's stored shape changes; no version constant changes other than
+> the new `WEIGHT_SPACE_EXPLORATION_POLICY_VERSION`. See
+> `docs/30_weight_space_exploration_and_stable_boundary_discovery.md`.
 
 ## Roadmap
 
@@ -287,6 +303,7 @@ itself.
 - **Module Boundary Evaluation Framework** — multi-criteria, explicitly-weighted scoring of a candidate modularization, with extension points for future Agent 3/4/5-driven criteria (implemented)
 - **Topology Hub/Currency Component Filtering** — curated-role-based, context-overridable filtering of ubiquitous currency/cofactor species out of the topology-separation criterion (implemented)
 - **`EC_CLASS_COHERENCE` Naming Correction** — renamed the misnamed `PATHWAY_ANNOTATION_COHERENCE` criterion to accurately reflect its EC-number-class basis, and reserved the original name for genuine future pathway-membership scoring (implemented)
+- **Weight-Space Exploration and Stable Boundary Discovery** — deterministic weight-grid sampling, multi-candidate-modularization evaluation, and boundary/co-membership/modularization-recurrence stability measures over the high-scoring solution set (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -318,6 +335,7 @@ separately and has not begun.
 - `docs/27_module_boundary_evaluation_framework.md` — Module Boundary Evaluation Framework increment: the scientific principle, the four implemented criteria, missing-evidence/weighting policy, weight-space exploration, GENERATED/IMPORTED symmetry, and extension points for future Agent 3/4/5 criteria, implemented
 - `docs/28_topology_hub_currency_component_filtering.md` — Topology Hub/Currency Component Filtering increment: the TopologyRole vocabulary, default filtering policy, curated/context override precedence, hub-flagging-never-auto-excludes behavior, raw-vs-filtered reporting, and the real-data before/after example, implemented
 - `docs/29_ec_class_coherence_naming_correction.md` — `EC_CLASS_COHERENCE` Naming Correction increment: why `PATHWAY_ANNOTATION_COHERENCE` was renamed, confirmation that scoring behavior/weighting/symmetry/downstream contracts are all unchanged, and how genuine pathway coherence is now reserved for future implementation, implemented
+- `docs/30_weight_space_exploration_and_stable_boundary_discovery.md` — Weight-Space Exploration and Stable Boundary Discovery increment: the weight-grid/high-scoring-solution-policy API, boundary/co-membership/modularization-recurrence stability definitions, module-count handling, recursive-readiness design, and example results, implemented
 
 ## Repository Structure
 
