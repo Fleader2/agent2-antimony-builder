@@ -1422,11 +1422,53 @@ additive, needed so Agents 3/4/5 can eventually distinguish an explicit enzyme-c
 species/rate law from a compound species/lumped rate for their own future calibration and
 regulation work (not implemented by this increment itself). See
 ``docs/25_explicit_enzyme_concentration_representation.md``.
+
+**Module Decomposition/Modularization Reconciliation increment.** Reconciles the old,
+GENERATED-only, build-time ``ModuleSpecification``/``ModuleDecomposition``/
+``BoundaryAssessment`` system (Increment 1/6/7) with the newer, origin-agnostic Model
+Modularization layer (``ModelModularization``/``ModelModule``/``ModuleMembership``/
+``ModulePort``) into one, unified, stored representation for a model of either
+``ModelSourceType``.
+
+``ModelSpecification``/``Agent2OutputPackage`` lost ``module_decomposition``/
+``module_specifications``/``boundary_assessments`` entirely (confirmed zero downstream
+consumers -- ``build_canonical_downstream_handoff`` never exposed any of the three).
+``ModulePort`` gained ``externally_controlled``/``initial_value``/``unit``, absorbing the
+entire useful content of the now-removed, never-populated-in-production
+``ModuleBoundaryInterface``/``ModuleInterfaceRole``. ``ModuleSpecification`` lost its own
+identically-dead ``boundary_interfaces``/``has_explicit_boundary_interfaces`` (its genuinely
+live ``boundary_interface_ids`` is untouched). ``ModuleAntimonyArtifact`` gained
+``modularization_id`` (every module artifact now belongs to exactly one, explicitly-selected
+modularization) and ``boundary_ports`` (``ModulePort``, replacing ``boundary_interfaces``).
+
+New ``app.agent2.modularization.adapter.modularizations_from_decomposition_set``
+(``MODULARIZATION_POLICY_VERSION`` ``"modularization-v1"``) converts the heuristic
+algorithm's pre-existing output into the unified representation (one ``ModelModularization``,
+``method=TOPOLOGICAL``, per ``ModuleDecomposition``) -- the algorithm itself
+(``app.agent2.boundaries.assess_boundaries``/``app.agent2.modules.decompose_network``) is
+unchanged. ``assemble_model_specification``'s own hard ``_require_exactly_one_decomposition``
+check is removed: ``boundaries``/``modules`` are now optional (default ``None``), and zero,
+one, or many decompositions are all valid -- modularization is genuinely optional for a
+GENERATED model, never hardwired to exactly one. New
+``app.agent2.antimony.generate_module_artifacts(model, modularization_id, module_ids=None)``
+is the one, explicit, opt-in entry point for standalone-submodel/module-view Antimony
+generation -- reuses ``generate_antimony``'s own rendering helpers (refactored to take
+membership/port-derived inputs rather than a ``ModuleSpecification``), never duplicated into
+a second exporter. ``generate_antimony`` itself no longer automatically loops over
+``model.module_specifications`` (that field no longer exists) -- module-artifact generation
+is now always an explicit, separate call naming one modularization, per task instructions
+§5 ("require an explicit selected modularization id").
+
+``AGENT2_CONTRACT_VERSION`` bumped ``"0.14"`` -> ``"0.15"``;
+``MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION`` bumped ``"v12"`` -> ``"v13"``;
+``ANTIMONY_GENERATION_POLICY_VERSION`` bumped ``"v6"`` -> ``"v7"``.
+``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` is unchanged -- modules/boundaries were never part of
+that contract. See ``docs/26_module_decomposition_modularization_reconciliation.md``.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.14"
+AGENT2_CONTRACT_VERSION = "0.15"
 AGENT1_HANDOFF_VERSION = "1.7"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
@@ -1434,8 +1476,15 @@ KINETIC_LAW_ASSIGNMENT_POLICY_VERSION = "kinetic-law-v6"
 PARAMETER_DECLARATION_POLICY_VERSION = "parameter-declaration-v8"
 HEURISTIC_INITIALIZATION_POLICY_VERSION = "heuristic-initialization-v1"
 MODULE_DECOMPOSITION_POLICY_VERSION = "module-decomposition-v1"
-MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v12"
-ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v6"
+#: Module Decomposition/Modularization Reconciliation increment. The version of
+#: ``app.agent2.modularization.adapter.modularizations_from_decomposition_set``'s own
+#: conversion policy (how one heuristic ``ModuleDecomposition`` is reshaped into a
+#: ``ModelModularization``/``ModelModule``/``ModuleMembership``/``ModulePort`` bundle) --
+#: never the modularization *schema*'s own version (that schema has none of its own; see
+#: ``docs/22_model_modularization.md``).
+MODULARIZATION_POLICY_VERSION = "modularization-v1"
+MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION = "model-specification-v13"
+ANTIMONY_GENERATION_POLICY_VERSION = "antimony-generation-v7"
 REACTION_CONTEXT_RESOLUTION_POLICY_VERSION = "reaction-context-resolution-v1"
 AGENT1_TRANSLATION_POLICY_VERSION = "agent1-translation-v1"
 QUANTITATIVE_CONTEXT_POLICY_VERSION = "quantitative-context-v1"
@@ -1465,6 +1514,7 @@ __all__ = [
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
+    "MODULARIZATION_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "QUANTITATIVE_CONTEXT_POLICY_VERSION",

@@ -1,16 +1,18 @@
 """Tests for the module-decomposition domain (Increment 1).
 
-Covers ``BoundaryAssessment``, ``BoundaryParameterBasis``,
-``ModuleBoundaryInterface``, ``ModuleInterfaceRole``,
-``ModuleSpecification``, and ``ModuleDecomposition``. No boundary
-heuristic or partitioning algorithm exists yet -- every object here is
-constructed directly.
+Covers ``BoundaryAssessment``, ``BoundaryParameterBasis``, ``ModuleSpecification``, and
+``ModuleDecomposition``. No boundary heuristic or partitioning algorithm exists yet -- every
+object here is constructed directly.
+
+**Module Decomposition/Modularization Reconciliation increment**: the per-species boundary-
+condition concept (previously ``ModuleBoundaryInterface``/``ModuleInterfaceRole``, both
+removed -- never populated in production) now lives on ``ModulePort`` instead; see
+``tests/agent2/test_modularization.py`` for its own coverage.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from decimal import Decimal
 
 import pytest
 
@@ -18,9 +20,7 @@ from app.agent2.types import (
     BoundaryAssessment,
     BoundaryLikelihood,
     BoundaryParameterBasis,
-    ModuleBoundaryInterface,
     ModuleDecomposition,
-    ModuleInterfaceRole,
     ModuleSpecification,
 )
 
@@ -35,17 +35,6 @@ def _boundary(**overrides) -> BoundaryAssessment:
         "policy_version": "boundary-v1",
     } | overrides
     return BoundaryAssessment(**merged)
-
-
-def _interface(**overrides) -> ModuleBoundaryInterface:
-    merged = {
-        "species_id": "s1",
-        "role": ModuleInterfaceRole.INPUT,
-        "direction": "inbound",
-        "assumption": "constant external concentration",
-        "externally_controlled": True,
-    } | overrides
-    return ModuleBoundaryInterface(**merged)
 
 
 def _module(**overrides) -> ModuleSpecification:
@@ -67,21 +56,12 @@ def test_boundary_parameter_basis_has_exactly_six_values():
     }
 
 
-def test_module_interface_role_has_exactly_four_values():
-    assert {member.value for member in ModuleInterfaceRole} == {
-        "INPUT",
-        "OUTPUT",
-        "BIDIRECTIONAL",
-        "SHARED",
-    }
-
-
 # --- Immutability -----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "cls",
-    [BoundaryAssessment, ModuleBoundaryInterface, ModuleSpecification, ModuleDecomposition],
+    [BoundaryAssessment, ModuleSpecification, ModuleDecomposition],
 )
 def test_module_types_are_frozen_dataclasses(cls):
     assert dataclasses.is_dataclass(cls)
@@ -136,42 +116,12 @@ def test_boundary_assessment_requires_policy_version():
         )
 
 
-# --- ModuleBoundaryInterface --------------------------------------------------------------------
-
-
-def test_module_boundary_interface_role_requires_real_enum():
-    with pytest.raises(TypeError):
-        _interface(role="INPUT")
-
-
-def test_module_boundary_interface_externally_controlled_must_be_bool():
-    with pytest.raises(TypeError):
-        _interface(externally_controlled="yes")
-
-
-def test_module_boundary_interface_initial_value_must_be_decimal():
-    with pytest.raises(TypeError):
-        _interface(initial_value=1.0)
-    interface = _interface(initial_value=Decimal("1.0"), unit="mM")
-    assert interface.initial_value == Decimal("1.0")
-
-
 # --- ModuleSpecification -----------------------------------------------------------------------
 
 
 def test_module_requires_at_least_one_reaction():
     with pytest.raises(ValueError):
         ModuleSpecification(module_id="mod-1", name="empty module", reaction_ids=())
-
-
-def test_module_with_explicit_boundary_interfaces():
-    module = _module(boundary_interfaces=(_interface(),))
-    assert module.has_explicit_boundary_interfaces is True
-
-
-def test_module_without_boundary_interfaces():
-    module = _module()
-    assert module.has_explicit_boundary_interfaces is False
 
 
 def test_module_rejects_duplicate_ids_within_a_category():
@@ -183,11 +133,6 @@ def test_module_rejects_duplicate_ids_within_a_category():
         _module(parameter_ids=("p1", "p1"))
     with pytest.raises(ValueError):
         _module(kinetic_law_ids=("k1", "k1"))
-
-
-def test_module_rejects_non_interface_items():
-    with pytest.raises(TypeError):
-        _module(boundary_interfaces=("bad",))
 
 
 def test_module_traceable_to_source_boundaries():

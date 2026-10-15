@@ -31,7 +31,6 @@ def validate_serializer_integrity(model: ModelSpecification, id_map: IdentifierM
     """
     _require_no_duplicate_identifiers(id_map)
     _require_kinetic_law_references_resolve(model, id_map)
-    _require_module_references_resolve(model, id_map)
 
 
 def _require_no_duplicate_identifiers(id_map: IdentifierMap) -> None:
@@ -67,22 +66,6 @@ def _require_kinetic_law_references_resolve(
                 raise AntimonyReferenceError(
                     f"kinetic law {law.kinetic_law_id!r} references parameter {parameter_id!r}, "
                     "which has no assigned Antimony identifier"
-                )
-
-
-def _require_module_references_resolve(model: ModelSpecification, id_map: IdentifierMap) -> None:
-    for module in model.module_specifications:
-        for species_id in module.species_ids:
-            if species_id not in id_map.species:
-                raise AntimonyReferenceError(
-                    f"module {module.module_id!r} references species {species_id!r}, which has "
-                    "no assigned Antimony identifier"
-                )
-        for reaction_id in module.reaction_ids:
-            if reaction_id not in {r.reaction_id for r in model.full_network.reactions}:
-                raise AntimonyReferenceError(
-                    f"module {module.module_id!r} references reaction {reaction_id!r}, which "
-                    "does not exist in the full network"
                 )
 
 

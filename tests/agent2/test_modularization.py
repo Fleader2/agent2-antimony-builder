@@ -15,7 +15,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.agent2.antimony import generate_antimony
+from app.agent2.antimony import generate_antimony, generate_module_artifacts
 from app.agent2.antimony_import import import_antimony
 from app.agent2.modularization import derive_cross_module_connections
 from app.agent2.pipeline import build_canonical_downstream_handoff
@@ -642,3 +642,120 @@ def test_downstream_handoff_is_unchanged_by_modularization_metadata():
     assert set(handoff.keys()) == set(plain_handoff.keys())
     assert handoff["reactions"] == plain_handoff["reactions"]
     assert handoff["species"] == plain_handoff["species"]
+
+
+# --- Module Decomposition/Modularization Reconciliation increment: GENERATED/IMPORTED ----------
+# symmetry and standalone-submodel export, exercised directly on an IMPORTED model (the
+# GENERATED side is already thoroughly covered by tests/agent2/test_antimony_generation.py).
+
+
+def _imported_linear_model():
+    """The identical A -> B -> C structure as ``_linear_network()`` above, obtained through
+    ``import_antimony`` instead of direct construction -- same reaction/species ids, so the
+    identical modularization bundle below can be applied to both without modification."""
+    text = """
+    model m
+      compartment c1 = 1.0;
+      species A in c1 = 10.0;
+      species B in c1 = 0.0;
+      species C in c1 = 0.0;
+      r1: A => B; k1 * A;
+      r2: B => C; k2 * B;
+      k1 = 0.5;
+      k2 = 0.5;
+    end
+    """
+    return import_antimony(text)
+
+
+def test_same_user_defined_modularization_works_identically_for_generated_and_imported_models():
+    """Task instructions §4: a generated and an imported canonical model are equally
+    eligible for the identical user-defined modularization -- the one, origin-agnostic
+    representation, never a GENERATED-only concept."""
+    generated = _user_defined_split()
+    imported = replace(
+        _imported_linear_model(),
+        modularizations=generated.modularizations,
+        model_modules=generated.model_modules,
+        module_memberships=generated.module_memberships,
+        module_ports=generated.module_ports,
+    )
+
+    generated_artifacts = {
+        a.module_id: a for a in generate_module_artifacts(generated, "mod1")
+    }
+    imported_artifacts = {a.module_id: a for a in generate_module_artifacts(imported, "mod1")}
+
+    assert set(generated_artifacts) == set(imported_artifacts) == {"modA", "modB"}
+    for module_id in ("modA", "modB"):
+        # Same membership -> same reaction content in each module's own view, for either
+        # origin -- checked via the generator's own origin-independent "reaction_id=..."
+        # provenance comment (never the rendered symbol itself, which deliberately differs:
+        # GENERATED prefers a readable basis, IMPORTED always keeps the raw id verbatim).
+        assert ("reaction_id=r1" in generated_artifacts[module_id].antimony_view) == (
+            "reaction_id=r1" in imported_artifacts[module_id].antimony_view
+        )
+        assert generated_artifacts[module_id].readiness == imported_artifacts[module_id].readiness
+
+
+def test_standalone_submodel_export_works_for_an_imported_model_with_explicit_boundary_port():
+    """Task instructions §3/§6: standalone submodel derivation (explicit boundary treatment)
+    is not a GENERATED-only capability -- the identical ``generate_module_artifacts`` entry
+    point, with the identical ``ModulePort.externally_controlled`` eligibility rule, produces
+    a real ``EXECUTABLE`` standalone Antimony model from an IMPORTED canonical model too."""
+    imported = _imported_linear_model()
+    modularization = ModelModularization(
+        modularization_id="mod1",
+        name="imported module A",
+        method=ModularizationMethod.USER_DEFINED,
+        module_ids=("modA",),
+    )
+    module = ModelModule(module_id="modA", name="Module A")
+    memberships = (
+        ModuleMembership(
+            membership_id="mem_r1",
+            modularization_id="mod1",
+            module_id="modA",
+            component_type=ModuleComponentType.REACTION,
+            component_id="r1",
+        ),
+        ModuleMembership(
+            membership_id="mem_a",
+            modularization_id="mod1",
+            module_id="modA",
+            component_type=ModuleComponentType.SPECIES,
+            component_id="A",
+        ),
+        ModuleMembership(
+            membership_id="mem_b",
+            modularization_id="mod1",
+            module_id="modA",
+            component_type=ModuleComponentType.SPECIES,
+            component_id="B",
+        ),
+    )
+    # "A" never has an in-module producer (it is this module's own external input) -- the
+    # real, already-curated initial concentration (never fabricated) seeds the clamp.
+    imported_species_a = next(s for s in imported.full_network.species if s.species_id == "A")
+    port = ModulePort(
+        port_id="port_a_in",
+        modularization_id="mod1",
+        module_id="modA",
+        species_id="A",
+        direction=ModulePortDirection.INPUT,
+        role=ModulePortRole.EXTERNAL_INPUT,
+        externally_controlled=True,
+        initial_value=imported_species_a.initial_concentration,
+    )
+    with_modularization = replace(
+        imported,
+        modularizations=(modularization,),
+        model_modules=(module,),
+        module_memberships=memberships,
+        module_ports=(port,),
+    )
+
+    (artifact,) = generate_module_artifacts(with_modularization, "mod1")
+    assert artifact.readiness.value == "EXECUTABLE"
+    assert artifact.standalone_antimony is not None
+    assert "const" in artifact.standalone_antimony

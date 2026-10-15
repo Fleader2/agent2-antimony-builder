@@ -22,13 +22,25 @@ canonical component id by string. Modules are never mandatory: a `ModelSpecifica
 `modularizations=()` behaves exactly as it always has.
 
 **Relationship to the pre-existing `ModuleSpecification`/`ModuleDecomposition`** (Increment
-7, "Module Decomposition"): that is a different, narrower, already-shipped system -- one
-heuristic, boundary-likelihood-driven partition per model
-(`ModelSpecification.module_decomposition: ModuleDecomposition | None`, a single field, never
-a collection). This increment does not modify, extend, or depend on any of it. The two systems
-coexist with zero conflict; nothing in `ModuleSpecification`'s own type ever forbade overlap
-or multiplicity in the first place, only the *assembler*, for the *old* type, enforced exactly
-one.
+7, "Module Decomposition"): at the time this increment was first written, that was a
+different, narrower, already-shipped system -- one heuristic, boundary-likelihood-driven
+partition per model (`ModelSpecification.module_decomposition: ModuleDecomposition | None`,
+a single field, never a collection), coexisting with this one with zero conflict (nothing in
+`ModuleSpecification`'s own type ever forbade overlap or multiplicity in the first place,
+only the *assembler*, for the *old* type, enforced exactly one).
+
+**This is no longer the case.** The Module Decomposition/Modularization Reconciliation
+increment (`docs/26_module_decomposition_modularization_reconciliation.md`) made this type
+family the *sole* stored module-related representation: `ModelSpecification.
+boundary_assessments`/`.module_decomposition`/`.module_specifications` were removed entirely,
+and the heuristic algorithm's own output (still produced by the unchanged
+`app.agent2.boundaries.assess_boundaries`/`app.agent2.modules.decompose_network`) is now
+converted into a `ModelModularization` (`method=ModularizationMethod.TOPOLOGICAL`) via
+`app.agent2.modularization.modularizations_from_decomposition_set` before assembly. Read that
+document for the current, authoritative picture of how the two systems relate; this document
+remains accurate for everything below (the schema, cross-module connections, multiple
+modularizations, GENERATED/IMPORTED symmetry) -- only the "two independent systems" framing
+above is now historical.
 
 ## 2. Schema
 

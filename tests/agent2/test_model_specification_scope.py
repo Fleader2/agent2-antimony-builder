@@ -219,6 +219,12 @@ def test_boundaries_and_modules_are_never_recomputed_from_a_real_run():
     boundaries = assess_boundaries(network, characterization, assignments, parameters)
     modules = decompose_network(network, assignments, parameters, boundaries)
     model = assemble_model_specification(network, assignments, parameters, boundaries, modules)
-    assert model.boundary_assessments == boundaries.assessments
-    assert model.module_decomposition == modules.decompositions[0]
-    assert model.module_specifications == modules.module_specifications
+    # Module Decomposition/Modularization Reconciliation increment: boundaries/modules are
+    # still read verbatim, never independently re-derived -- now surfaced via the unified
+    # modularizations/model_modules representation rather than the old, removed
+    # boundary_assessments/module_decomposition/module_specifications fields.
+    (modularization,) = model.modularizations
+    assert modularization.modularization_id == (
+        f"modularization::{modules.decompositions[0].decomposition_id}"
+    )
+    assert len(model.model_modules) == len(modules.module_specifications)

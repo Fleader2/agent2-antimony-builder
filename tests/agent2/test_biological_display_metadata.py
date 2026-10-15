@@ -149,7 +149,6 @@ def _model(**overrides):
         "full_network": _network(),
         "kinetic_laws": (_kinetic_law(),),
         "parameters": (_parameter(),),
-        "module_specifications": (),
     } | overrides
     return ModelSpecification(**merged)
 

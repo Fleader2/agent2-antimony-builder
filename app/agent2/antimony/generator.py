@@ -51,7 +51,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from app.agent2.antimony.errors import UnsupportedAntimonySerializationError
+from app.agent2.antimony.errors import AntimonyReferenceError, UnsupportedAntimonySerializationError
 from app.agent2.antimony.naming import (
     IdentifierMap,
     build_identifier_map,
@@ -76,7 +76,8 @@ from app.agent2.types import (
     KineticLawType,
     ModelSpecification,
     ModuleAntimonyArtifact,
-    ModuleSpecification,
+    ModuleComponentType,
+    ModulePort,
     ObservableSpecification,
     ParameterSpecification,
     ParticipantRole,
@@ -290,18 +291,22 @@ def resolve_reaction_rate_expression(
     )
 
 
-def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
-    """Deterministically serialize ``model`` into one ``Agent2OutputPackage``.
+@dataclass(frozen=True)
+class _ModelRenderingContext:
+    """Everything derived from ``model`` that both ``generate_antimony`` and
+    ``generate_module_artifacts`` need -- computed once per call, never duplicated between
+    the two (Module Decomposition/Modularization Reconciliation increment, task instructions
+    §3: "reuse old logic where practical... do not duplicate it into a second exporter")."""
 
-    Never reassesses kinetic laws, parameters, boundaries, or module
-    decomposition -- every scientific/modeling decision is read verbatim
-    from ``model``. Never mutates ``model``.
-    """
-    if not isinstance(model, ModelSpecification):
-        raise UnsupportedAntimonySerializationError(
-            f"generate_antimony requires a ModelSpecification, got {model!r}"
-        )
+    id_map: IdentifierMap
+    reactions_by_id: dict[str, ReactionSpecification]
+    parameters_by_id: dict[str, ParameterSpecification]
+    compartments_by_id: dict[str, CompartmentSpecification]
+    species_by_id: dict[str, SpeciesSpecification]
+    reaction_resolutions: dict[str, _ReactionRateResolution]
 
+
+def _build_rendering_context(model: ModelSpecification) -> _ModelRenderingContext:
     id_map = build_identifier_map(model)
     validate_serializer_integrity(model, id_map)
 
@@ -341,15 +346,47 @@ def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
         for reaction_id, reaction in reactions_by_id.items()
     }
 
+    return _ModelRenderingContext(
+        id_map=id_map,
+        reactions_by_id=reactions_by_id,
+        parameters_by_id=parameters_by_id,
+        compartments_by_id=compartments_by_id,
+        species_by_id=species_by_id,
+        reaction_resolutions=reaction_resolutions,
+    )
+
+
+def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
+    """Deterministically serialize ``model`` into one ``Agent2OutputPackage``.
+
+    Never reassesses kinetic laws, parameters, boundaries, or module
+    decomposition -- every scientific/modeling decision is read verbatim
+    from ``model``. Never mutates ``model``.
+
+    **Module Decomposition/Modularization Reconciliation increment**: no longer generates any
+    ``module_artifacts`` automatically (``model.module_specifications``, the old field that
+    drove this, no longer exists). Module/standalone-submodel Antimony generation is now
+    always an explicit, separate, opt-in call naming one selected modularization --
+    ``app.agent2.antimony.generate_module_artifacts`` -- never implicit here (task
+    instructions §5: "if executable submodels are requested, require an explicit selected
+    modularization id").
+    """
+    if not isinstance(model, ModelSpecification):
+        raise UnsupportedAntimonySerializationError(
+            f"generate_antimony requires a ModelSpecification, got {model!r}"
+        )
+
+    context = _build_rendering_context(model)
+
     full_text, full_readiness, full_unresolved_laws, full_unresolved_reactions = _render_model(
         model_name=model.model_id,
         compartments=model.full_network.compartments,
         species=model.full_network.species,
         kinetic_laws=model.kinetic_laws,
-        reactions_by_id=reactions_by_id,
-        reaction_resolutions=reaction_resolutions,
+        reactions_by_id=context.reactions_by_id,
+        reaction_resolutions=context.reaction_resolutions,
         parameters=model.parameters,
-        id_map=id_map,
+        id_map=context.id_map,
         rules=model.rules,
         events=model.events,
         observables=model.observables,
@@ -366,28 +403,102 @@ def generate_antimony(model: ModelSpecification) -> Agent2OutputPackage:
         symbol_provenance=build_symbol_provenance_map(model),
     )
 
-    module_artifacts = tuple(
-        _generate_module_artifact(
-            module,
-            model=model,
-            id_map=id_map,
-            reaction_resolutions=reaction_resolutions,
-            reactions_by_id=reactions_by_id,
-            parameters_by_id=parameters_by_id,
-            compartments_by_id=compartments_by_id,
-            species_by_id=species_by_id,
-        )
-        for module in sorted(model.module_specifications, key=lambda m: m.module_id)
-    )
-
     return Agent2OutputPackage(
         contract_version=AGENT2_CONTRACT_VERSION,
         model_specification=model,
         full_antimony=full_antimony,
-        module_artifacts=module_artifacts,
-        boundary_assessments=model.boundary_assessments,
-        module_decomposition=model.module_decomposition,
     )
+
+
+def generate_module_artifacts(
+    model: ModelSpecification,
+    modularization_id: str,
+    module_ids: tuple[str, ...] | None = None,
+) -> tuple[ModuleAntimonyArtifact, ...]:
+    """Generate one ``ModuleAntimonyArtifact`` (a view, plus a standalone model when eligible)
+    per module of exactly one, explicitly-selected ``ModelModularization`` -- the sole,
+    explicit, opt-in entry point for module/standalone-submodel Antimony generation (Module
+    Decomposition/Modularization Reconciliation increment; task instructions §5). Never
+    called automatically by ``generate_antimony``.
+
+    ``modularization_id`` must name a real entry in ``model.modularizations``. ``module_ids``
+    (optional, defaults to ``None`` -- every module of that modularization) restricts output
+    to a subset.
+
+    Works identically for a ``GENERATED`` or an ``IMPORTED`` model -- the source of every
+    reaction_id/species_id/parameter_id a module's own ``ModuleMembership`` rows name, and of
+    every ``ModulePort``'s own boundary treatment, is ``model.module_memberships``/
+    ``.module_ports`` alone, never anything origin-specific.
+    """
+    if not isinstance(model, ModelSpecification):
+        raise UnsupportedAntimonySerializationError(
+            f"generate_module_artifacts requires a ModelSpecification, got {model!r}"
+        )
+    modularizations_by_id = {m.modularization_id: m for m in model.modularizations}
+    modularization = modularizations_by_id.get(modularization_id)
+    if modularization is None:
+        raise AntimonyReferenceError(
+            f"generate_module_artifacts: modularization_id {modularization_id!r} does not "
+            f"exist in model.modularizations (known: {sorted(modularizations_by_id)})"
+        )
+    selected_module_ids = (
+        tuple(module_ids) if module_ids is not None else modularization.module_ids
+    )
+    unknown = sorted(set(selected_module_ids) - set(modularization.module_ids))
+    if unknown:
+        raise AntimonyReferenceError(
+            f"generate_module_artifacts: module_ids {unknown} do not belong to modularization "
+            f"{modularization_id!r}'s own module_ids {modularization.module_ids!r}"
+        )
+
+    context = _build_rendering_context(model)
+
+    memberships_by_module: dict[str, list] = {}
+    for membership in model.module_memberships:
+        if membership.modularization_id == modularization_id:
+            memberships_by_module.setdefault(membership.module_id, []).append(membership)
+    ports_by_module: dict[str, list[ModulePort]] = {}
+    for port in model.module_ports:
+        if port.modularization_id == modularization_id:
+            ports_by_module.setdefault(port.module_id, []).append(port)
+
+    artifacts = []
+    for module_id in sorted(selected_module_ids):
+        memberships = memberships_by_module.get(module_id, ())
+        reaction_ids = tuple(
+            sorted(
+                m.component_id
+                for m in memberships
+                if m.component_type is ModuleComponentType.REACTION
+            )
+        )
+        species_ids = tuple(
+            sorted(
+                m.component_id
+                for m in memberships
+                if m.component_type is ModuleComponentType.SPECIES
+            )
+        )
+        parameter_ids = tuple(
+            sorted(
+                m.component_id
+                for m in memberships
+                if m.component_type is ModuleComponentType.PARAMETER
+            )
+        )
+        artifacts.append(
+            _generate_module_artifact(
+                modularization_id=modularization_id,
+                module_id=module_id,
+                reaction_ids=reaction_ids,
+                species_ids=species_ids,
+                parameter_ids=parameter_ids,
+                ports=tuple(ports_by_module.get(module_id, ())),
+                model=model,
+                context=context,
+            )
+        )
+    return tuple(artifacts)
 
 
 # --- Per-law readiness (Step 15-19 of the original Increment 9 instructions) -------------------
@@ -803,57 +914,59 @@ def _render_model(
 
 
 def _generate_module_artifact(
-    module: ModuleSpecification,
     *,
+    modularization_id: str,
+    module_id: str,
+    reaction_ids: tuple[str, ...],
+    species_ids: tuple[str, ...],
+    parameter_ids: tuple[str, ...],
+    ports: tuple[ModulePort, ...],
     model: ModelSpecification,
-    id_map: IdentifierMap,
-    reaction_resolutions: dict[str, _ReactionRateResolution],
-    reactions_by_id: dict[str, ReactionSpecification],
-    parameters_by_id: dict[str, ParameterSpecification],
-    compartments_by_id: dict[str, CompartmentSpecification],
-    species_by_id: dict[str, SpeciesSpecification],
+    context: _ModelRenderingContext,
 ) -> ModuleAntimonyArtifact:
-    module_reaction_ids = set(module.reaction_ids)
+    module_reaction_ids = set(reaction_ids)
     module_laws = tuple(law for law in model.kinetic_laws if law.reaction_id in module_reaction_ids)
-    module_species = tuple(species_by_id[sid] for sid in module.species_ids if sid in species_by_id)
-
-    module_compartments = tuple(
-        compartments_by_id[cid] for cid in module.compartment_ids if cid in compartments_by_id
+    module_species = tuple(
+        context.species_by_id[sid] for sid in species_ids if sid in context.species_by_id
     )
-    if not module_compartments:
-        derived_compartment_ids = sorted({s.compartment_id for s in module_species})
-        module_compartments = tuple(
-            compartments_by_id[cid] for cid in derived_compartment_ids if cid in compartments_by_id
-        )
+
+    derived_compartment_ids = sorted({s.compartment_id for s in module_species})
+    module_compartments = tuple(
+        context.compartments_by_id[cid]
+        for cid in derived_compartment_ids
+        if cid in context.compartments_by_id
+    )
 
     module_parameters = tuple(
-        parameters_by_id[pid] for pid in module.parameter_ids if pid in parameters_by_id
+        context.parameters_by_id[pid] for pid in parameter_ids if pid in context.parameters_by_id
     )
     if not module_parameters and module_laws:
         referenced = sorted({pid for law in module_laws for pid in law.parameter_ids})
         module_parameters = tuple(
-            parameters_by_id[pid] for pid in referenced if pid in parameters_by_id
+            context.parameters_by_id[pid] for pid in referenced if pid in context.parameters_by_id
         )
 
     module_reaction_resolutions = {
-        reaction_id: reaction_resolutions[reaction_id] for reaction_id in module.reaction_ids
+        reaction_id: context.reaction_resolutions[reaction_id] for reaction_id in reaction_ids
     }
 
     view_text, _, view_unresolved_laws, view_unresolved_reactions = _render_model(
-        model_name=f"{model.model_id}::module::{module.module_id}::view",
+        model_name=f"{model.model_id}::module::{module_id}::view",
         compartments=module_compartments,
         species=module_species,
         kinetic_laws=module_laws,
-        reactions_by_id=reactions_by_id,
+        reactions_by_id=context.reactions_by_id,
         reaction_resolutions=module_reaction_resolutions,
         parameters=module_parameters,
-        id_map=id_map,
+        id_map=context.id_map,
     )
 
-    if not module.has_explicit_boundary_interfaces:
-        # Standalone models require explicit interface semantics -- never invent one.
+    has_explicit_boundary_treatment = any(p.externally_controlled for p in ports)
+    if not has_explicit_boundary_treatment:
+        # Standalone models require explicit boundary treatment -- never invent one.
         return ModuleAntimonyArtifact(
-            module_id=module.module_id,
+            module_id=module_id,
+            modularization_id=modularization_id,
             model_specification_id=model.model_id,
             generator_version=ANTIMONY_GENERATION_POLICY_VERSION,
             antimony_view=view_text,
@@ -862,44 +975,48 @@ def _generate_module_artifact(
 
     if view_unresolved_reactions:
         # A reaction-level unresolved rate (including unresolved catalytic-context
-        # composition) blocks standalone eligibility even when boundary interfaces are
+        # composition) blocks standalone eligibility even when boundary treatment is
         # otherwise fully explicit -- never emit a standalone model that looks runnable but
         # is missing a real rate for one of its own reactions.
         return ModuleAntimonyArtifact(
-            module_id=module.module_id,
+            module_id=module_id,
+            modularization_id=modularization_id,
             model_specification_id=model.model_id,
             generator_version=ANTIMONY_GENERATION_POLICY_VERSION,
             antimony_view=view_text,
-            boundary_interfaces=module.boundary_interfaces,
+            boundary_ports=ports,
             readiness=AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS,
             unresolved_kinetic_law_ids=view_unresolved_laws,
             unresolved_reaction_ids=view_unresolved_reactions,
         )
 
     standalone_text = _render_standalone_module(
-        module,
+        module_id,
+        ports,
         model=model,
         compartments=module_compartments,
         species=module_species,
         kinetic_laws=module_laws,
-        reactions_by_id=reactions_by_id,
+        reactions_by_id=context.reactions_by_id,
         reaction_resolutions=module_reaction_resolutions,
         parameters=module_parameters,
-        id_map=id_map,
+        id_map=context.id_map,
     )
     return ModuleAntimonyArtifact(
-        module_id=module.module_id,
+        module_id=module_id,
+        modularization_id=modularization_id,
         model_specification_id=model.model_id,
         generator_version=ANTIMONY_GENERATION_POLICY_VERSION,
         antimony_view=view_text,
         standalone_antimony=standalone_text,
-        boundary_interfaces=module.boundary_interfaces,
+        boundary_ports=ports,
         readiness=AntimonyArtifactReadiness.EXECUTABLE,
     )
 
 
 def _render_standalone_module(
-    module: ModuleSpecification,
+    module_id: str,
+    ports: tuple[ModulePort, ...],
     *,
     model: ModelSpecification,
     compartments: tuple[CompartmentSpecification, ...],
@@ -911,11 +1028,12 @@ def _render_standalone_module(
     id_map: IdentifierMap,
 ) -> str:
     """A standalone module model is the same body as its view, plus explicit handling of
-    every declared ``ModuleBoundaryInterface`` -- never a fabricated boundary condition
-    (only what the interface itself already states). Only ever called once every included
-    reaction's rate is already confirmed resolved (see ``_generate_module_artifact``)."""
+    every ``ModulePort`` with ``externally_controlled=True`` -- never a fabricated boundary
+    condition (only what the port itself already states). Only ever called once every
+    included reaction's rate is already confirmed resolved (see
+    ``_generate_module_artifact``)."""
     base_text, _, _, _ = _render_model(
-        model_name=f"{model.model_id}::module::{module.module_id}::standalone",
+        model_name=f"{model.model_id}::module::{module_id}::standalone",
         compartments=compartments,
         species=species,
         kinetic_laws=kinetic_laws,
@@ -926,23 +1044,24 @@ def _render_standalone_module(
     )
     body_lines = base_text.rstrip("\n").removesuffix("end").rstrip("\n").splitlines()
     body_lines.append("")
-    body_lines.append("// boundary interfaces (explicit -- never inferred)")
-    for interface in sorted(module.boundary_interfaces, key=lambda i: i.species_id):
-        antimony_id = id_map.species.get(interface.species_id, interface.species_id)
-        if interface.externally_controlled:
-            body_lines.append(f"const {antimony_id};")
-            if interface.initial_value is not None:
-                body_lines.append(f"{antimony_id} = {format_decimal(interface.initial_value)};")
-        unit_comment = f" unit={interface.unit}" if interface.unit else ""
+    body_lines.append("// boundary ports (explicit -- never inferred)")
+    controlled_ports = tuple(p for p in ports if p.externally_controlled)
+    for port in sorted(controlled_ports, key=lambda p: p.species_id):
+        antimony_id = id_map.species.get(port.species_id, port.species_id)
+        body_lines.append(f"const {antimony_id};")
+        if port.initial_value is not None:
+            body_lines.append(f"{antimony_id} = {format_decimal(port.initial_value)};")
+        role = port.role.value if port.role is not None else "unspecified"
+        unit_comment = f" unit={port.unit}" if port.unit else ""
+        assumption_comment = f" assumptions={list(port.assumptions)!r}" if port.assumptions else ""
         body_lines.append(
-            f"// interface species_id={interface.species_id} role={interface.role.value} "
-            f"direction={interface.direction} "
-            f"externally_controlled={interface.externally_controlled}"
-            f"{unit_comment} assumption={interface.assumption!r}"
+            f"// port species_id={port.species_id} role={role} "
+            f"direction={port.direction.value} externally_controlled=True"
+            f"{unit_comment}{assumption_comment}"
         )
     body_lines.append("")
     body_lines.append("end")
     return "\n".join(body_lines) + "\n"
 
 
-__all__ = ["generate_antimony"]
+__all__ = ["generate_antimony", "generate_module_artifacts"]

@@ -1,5 +1,17 @@
 # Agent 2 ModelSpecification Assembly Contract
 
+> **Superseded in part by the Module Decomposition/Modularization Reconciliation increment**
+> (`docs/26_module_decomposition_modularization_reconciliation.md`) -- read that document
+> first for the current, authoritative picture. In short: `boundaries`/`modules` below are
+> now **optional** (default `None`, and -- when supplied -- no longer required to carry
+> exactly one `ModuleDecomposition`); `ModelSpecification` no longer carries
+> `boundary_assessments`/`module_decomposition`/`module_specifications` at all, replaced by
+> the unified, origin-agnostic `modularizations`/`model_modules`/`module_memberships`/
+> `module_ports` (populated, when `modules` is supplied, via `app.agent2.modularization
+> .modularizations_from_decomposition_set`). Everything else below (kinetic-law
+> materialization, parameter/assumption handling, reference validation, determinism) is
+> unchanged.
+
 ## 1. Purpose
 
 Increment 8 assembles every prior increment's validated output --

@@ -1,5 +1,18 @@
 # Agent 2 Antimony Generation Contract
 
+> **Superseded in part by the Module Decomposition/Modularization Reconciliation increment**
+> (`docs/26_module_decomposition_modularization_reconciliation.md`) -- read that document
+> first. In short: `generate_antimony` no longer generates any `module_artifacts`
+> automatically (`model.module_specifications`, the field that used to drive this, no longer
+> exists); module-view/standalone-submodel Antimony generation is now always an explicit,
+> separate, opt-in call naming one selected modularization --
+> `app.agent2.antimony.generate_module_artifacts(model, modularization_id, module_ids=None)`.
+> `ModuleBoundaryInterface`/`ModuleSpecification.has_explicit_boundary_interfaces` were
+> removed; the identical per-species boundary-treatment fields
+> (`externally_controlled`/`initial_value`/`unit`) now live directly on `ModulePort`. Full
+> whole-network Antimony generation (`generate_antimony`, §2 onward below) is otherwise
+> completely unchanged.
+
 ## 1. Purpose
 
 Increment 9 serializes the authoritative `ModelSpecification` (Increment

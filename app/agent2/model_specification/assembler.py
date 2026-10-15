@@ -2,15 +2,15 @@
 
 ``assemble_model_specification`` is this package's one public API: given
 the validated outputs of every prior increment (``FullNetwork``,
-``KineticLawAssignmentSet``, ``ParameterDeclarationSet``,
-``BoundaryAssessmentSet``, ``ModuleDecompositionSet``), assembles one
+``KineticLawAssignmentSet``, ``ParameterDeclarationSet``, optionally
+``BoundaryAssessmentSet``/``ModuleDecompositionSet``), assembles one
 authoritative ``ModelSpecification`` -- the complete, single source of
 truth Increment 9 will serialize into Antimony. Pure and deterministic:
 no database, no filesystem, no network access, no LLM, no simulation, no
 fitting, no Antimony anywhere in its call graph. Never mutates any of its
-five inputs -- only reads them, and never recomputes a kinetic-law
-decision, a parameter source, a boundary likelihood, or a module cut
-(Increment 8 instructions, §2: "assemble, not reinterpret").
+inputs -- only reads them, and never recomputes a kinetic-law decision, a
+parameter source, a boundary likelihood, or a module cut (Increment 8
+instructions, §2: "assemble, not reinterpret").
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from app.agent2.model_specification.validation import (
     require_module_decomposition_set,
     require_parameter_declaration_set,
 )
+from app.agent2.modularization.adapter import modularizations_from_decomposition_set
 from app.agent2.modules.types import ModuleDecompositionSet
 from app.agent2.parameters.types import ParameterDeclarationSet
 from app.agent2.quantitative_context.types import QuantitativeContextResolutionSet
@@ -47,8 +48,8 @@ def assemble_model_specification(
     network: FullNetwork,
     kinetic_laws: KineticLawAssignmentSet,
     parameters: ParameterDeclarationSet,
-    boundaries: BoundaryAssessmentSet,
-    modules: ModuleDecompositionSet,
+    boundaries: BoundaryAssessmentSet | None = None,
+    modules: ModuleDecompositionSet | None = None,
     enzyme_concentrations: QuantitativeContextResolutionSet | None = None,
     enzyme_state_pools: tuple[EnzymeStatePool, ...] = (),
     enzyme_state_concentrations: tuple[EnzymeConcentration, ...] = (),
@@ -60,6 +61,21 @@ def assemble_model_specification(
     Agent 2 has decided on so far" -- never "is this model biologically
     correct, numerically stable, or ready to simulate" (Agent 3/4/5's
     job). See ``docs/11_model_specification_assembly.md`` §2.
+
+    **Module Decomposition/Modularization Reconciliation increment.** ``boundaries``/
+    ``modules`` are now optional (default ``None``) -- modularization is never mandatory for
+    a model of either ``source_type`` (task instructions §1). When supplied, ``modules`` may
+    carry zero, one, or many ``ModuleDecomposition`` records (the pre-existing
+    ``_require_exactly_one_decomposition`` hard check is removed); each is converted via
+    ``app.agent2.modularization.adapter.modularizations_from_decomposition_set`` into its own
+    ``ModelModularization`` (plus that modularization's own modules/memberships/ports) and
+    attached to ``ModelSpecification.modularizations``/``.model_modules``/
+    ``.module_memberships``/``.module_ports`` -- the one, unified, stored module-related
+    representation; the old ``ModuleDecomposition``/``ModuleSpecification`` objects
+    themselves are never stored directly (``ModelSpecification`` no longer carries
+    ``module_decomposition``/``module_specifications``/``boundary_assessments`` at all).
+    Supplying ``modules`` without ``boundaries`` (or vice versa) is rejected -- the heuristic
+    algorithm's own cross-artifact policy-version check (§ below) requires both together.
 
     ``enzyme_concentrations`` (Quantitative Context Resolution and Derived Enzyme
     Concentration increment) is optional and defaults to ``None`` -- every existing
@@ -95,8 +111,15 @@ def assemble_model_specification(
     require_full_network(network)
     require_kinetic_law_assignment_set(kinetic_laws)
     require_parameter_declaration_set(parameters)
-    require_boundary_assessment_set(boundaries)
-    require_module_decomposition_set(modules)
+    if (boundaries is None) != (modules is None):
+        raise ModelSpecificationReferenceError(
+            "assemble_model_specification requires boundaries and modules together, or "
+            f"neither -- got boundaries={boundaries!r}, modules={modules!r}"
+        )
+    if boundaries is not None:
+        require_boundary_assessment_set(boundaries)
+    if modules is not None:
+        require_module_decomposition_set(modules)
     if enzyme_concentrations is not None and not isinstance(
         enzyme_concentrations, QuantitativeContextResolutionSet
     ):
@@ -113,9 +136,12 @@ def assemble_model_specification(
             f"not match network.network_id ({network.network_id!r})"
         )
 
-    _require_matching_networks(network, kinetic_laws, parameters, boundaries, modules)
-    _require_compatible_policy_versions(kinetic_laws, parameters, boundaries, modules)
-    decomposition = _require_exactly_one_decomposition(modules)
+    if modules is not None:
+        _require_matching_networks(network, kinetic_laws, parameters, boundaries, modules)
+        _require_compatible_policy_versions(kinetic_laws, parameters, boundaries, modules)
+        decompositions = modules.decompositions
+    else:
+        decompositions = ()
 
     reactions_by_id = {r.reaction_id: r for r in network.reactions}
     parameters_by_assignment_id: dict[str, list[ParameterSpecification]] = {}
@@ -160,11 +186,16 @@ def assemble_model_specification(
     resolved_enzyme_concentrations = (
         enzyme_concentrations.enzyme_concentrations if enzyme_concentrations is not None else ()
     )
+    # Union across every decomposition supplied (0, 1, or many -- never assuming exactly one):
+    # every MEDIUM boundary any of them preserved, rather than cut, as a candidate.
+    candidate_boundary_ids = tuple(
+        sorted({bid for d in decompositions for bid in d.candidate_boundary_ids})
+    )
     model_assumptions = build_model_assumptions(
         kinetic_laws=tuple(kinetic_law_specs),
         kinetic_law_assignments_by_kinetic_law_id=kinetic_law_assignments_by_kinetic_law_id,
         parameters=parameters.parameter_specifications,
-        candidate_boundary_ids=decomposition.candidate_boundary_ids,
+        candidate_boundary_ids=candidate_boundary_ids,
         kinetic_measurements=network.kinetic_measurements,
         reactions=network.reactions,
         enzyme_concentrations=resolved_enzyme_concentrations,
@@ -172,18 +203,22 @@ def assemble_model_specification(
         enzyme_state_pools=enzyme_state_pools,
     )
 
-    model_id = f"model::{network.network_id}::{decomposition.decomposition_id}"
+    model_id = f"model::{network.network_id}"
     provenance_refs = (
         *network.provenance_refs,
-        f"module-decomposition::{decomposition.decomposition_id}",
+        *(f"module-decomposition::{d.decomposition_id}" for d in decompositions),
         f"model-specification-policy::{MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION}",
     )
     assumptions = (
-        "Increment 8 assembly policy: kinetic-law assignments, parameter declarations, "
-        "boundary assessments, and the module decomposition are assembled verbatim -- no "
-        "kinetic-law type, parameter source, boundary likelihood, or module cut is "
-        "recomputed or reinterpreted here.",
+        "Increment 8 assembly policy: kinetic-law assignments and parameter declarations are "
+        "assembled verbatim -- no kinetic-law type or parameter source is recomputed or "
+        "reinterpreted here. Module Decomposition/Modularization Reconciliation increment: "
+        "when supplied, every module decomposition's own boundary likelihood/module cut is "
+        "likewise assembled verbatim, converted into the unified ModelModularization "
+        "representation, never reinterpreted.",
     )
+
+    bundle = modularizations_from_decomposition_set(modules) if modules is not None else None
 
     model_specification = ModelSpecification(
         model_id=model_id,
@@ -192,20 +227,21 @@ def assemble_model_specification(
         organism_id=network.organism_id,
         kinetic_laws=tuple(kinetic_law_specs),
         parameters=parameters.parameter_specifications,
-        boundary_assessments=boundaries.assessments,
-        module_decomposition=decomposition,
-        module_specifications=modules.module_specifications,
         assumptions=assumptions,
         model_assumptions=model_assumptions,
         enzyme_concentrations=resolved_enzyme_concentrations,
         enzyme_state_pools=enzyme_state_pools,
         enzyme_state_concentrations=enzyme_state_concentrations,
+        modularizations=bundle.modularizations if bundle is not None else (),
+        model_modules=bundle.model_modules if bundle is not None else (),
+        module_memberships=bundle.module_memberships if bundle is not None else (),
+        module_ports=bundle.module_ports if bundle is not None else (),
         provenance_refs=provenance_refs,
     )
 
-    _validate_cross_artifact_references(
-        model_specification, kinetic_laws=kinetic_laws, modules=modules
-    )
+    _validate_cross_artifact_references(model_specification, kinetic_laws=kinetic_laws)
+    if modules is not None:
+        _validate_module_kinetic_law_assignment_references(modules, kinetic_laws=kinetic_laws)
     return model_specification
 
 
@@ -265,29 +301,19 @@ def _require_compatible_policy_versions(
         )
 
 
-def _require_exactly_one_decomposition(modules: ModuleDecompositionSet):
-    if len(modules.decompositions) != 1:
-        raise ModelSpecificationReferenceError(
-            "assemble_model_specification requires exactly one ModuleDecomposition under the "
-            f"current v1 decomposition policy, got {len(modules.decompositions)}"
-        )
-    return modules.decompositions[0]
-
-
 def _validate_cross_artifact_references(
     model_specification: ModelSpecification,
     *,
     kinetic_laws: KineticLawAssignmentSet,
-    modules: ModuleDecompositionSet,
 ) -> None:
-    """Defensive backstop for the two cross-references ``ModelSpecification``'s own
+    """Defensive backstop for the one cross-reference ``ModelSpecification``'s own
     construction-time validation cannot check (it carries no ``KineticLawAssignment`` registry
     to check the ``assignment_id`` namespace against -- see that type's own docstring note and
     ``docs/11_model_specification_assembly.md`` §19): every declared parameter's
-    ``kinetic_law_assignment_id``, and every module's ``kinetic_law_assignment_ids``, must
-    resolve against the real, original ``KineticLawAssignmentSet``. Should never trigger given
-    a correct implementation -- mirrors the identical post-construction pattern already
-    established in ``app.agent2.boundaries``/``app.agent2.kinetics``/``app.agent2.parameters``/
+    ``kinetic_law_assignment_id`` must resolve against the real, original
+    ``KineticLawAssignmentSet``. Should never trigger given a correct implementation -- mirrors
+    the identical post-construction pattern already established in
+    ``app.agent2.boundaries``/``app.agent2.kinetics``/``app.agent2.parameters``/
     ``app.agent2.modules``.
     """
     assignment_ids = {a.assignment_id for a in kinetic_laws.assignments}
@@ -302,14 +328,6 @@ def _validate_cross_artifact_references(
                 f"{spec.kinetic_law_assignment_id!r}"
             )
 
-    for module in modules.module_specifications:
-        unknown = sorted(set(module.kinetic_law_assignment_ids) - assignment_ids)
-        if unknown:
-            raise ModelSpecificationReferenceError(
-                f"module {module.module_id!r}.kinetic_law_assignment_ids references unknown "
-                f"id(s): {unknown}"
-            )
-
     # Step 22's "every final kinetic law maps to the expected assignment": trivially true by
     # construction (materialize_kinetic_law derives kinetic_law_id deterministically from the
     # assignment it was built from), re-checked here for the same defensive-backstop reasons.
@@ -319,6 +337,25 @@ def _validate_cross_artifact_references(
             raise ModelSpecificationReferenceError(
                 f"kinetic law {law.kinetic_law_id!r} does not map to any known "
                 "KineticLawAssignment"
+            )
+
+
+def _validate_module_kinetic_law_assignment_references(
+    modules: ModuleDecompositionSet,
+    *,
+    kinetic_laws: KineticLawAssignmentSet,
+) -> None:
+    """Every ``ModuleSpecification.kinetic_law_assignment_ids`` (the heuristic decomposition
+    algorithm's own intermediate output -- never stored on ``ModelSpecification`` itself,
+    see that type's own docstring) must resolve against the real, original
+    ``KineticLawAssignmentSet``. Should never trigger given a correct implementation."""
+    assignment_ids = {a.assignment_id for a in kinetic_laws.assignments}
+    for module in modules.module_specifications:
+        unknown = sorted(set(module.kinetic_law_assignment_ids) - assignment_ids)
+        if unknown:
+            raise ModelSpecificationReferenceError(
+                f"module {module.module_id!r}.kinetic_law_assignment_ids references unknown "
+                f"id(s): {unknown}"
             )
 
 

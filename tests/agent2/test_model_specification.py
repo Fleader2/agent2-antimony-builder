@@ -43,6 +43,8 @@ from app.agent2.types import (
     KineticLawAssignmentSource,
     KineticLawType,
     ModelSpecification,
+    ModuleComponentType,
+    ModulePortDirection,
     ParameterSource,
 )
 from app.agent2.version import AGENT2_CONTRACT_VERSION
@@ -291,9 +293,14 @@ def test_empty_network_assembles_to_a_valid_model_with_no_reactions():
     assert model.full_network.reactions == ()
     assert model.kinetic_laws == ()
     assert model.parameters == ()
-    assert model.module_specifications == ()
-    assert model.module_decomposition is not None
-    assert model.module_decomposition.module_ids == ()
+    # Module Decomposition/Modularization Reconciliation increment: the heuristic
+    # decomposition still runs by default and still converts into exactly one
+    # ModelModularization (TOPOLOGICAL) -- an empty network simply has zero modules under it,
+    # never an error (modularization is optional, but when the heuristic does run, it still
+    # always converts cleanly, even for a trivial zero-module decomposition).
+    assert len(model.modularizations) == 1
+    assert model.modularizations[0].module_ids == ()
+    assert model.model_modules == ()
 
 
 def test_one_reaction_one_kinetic_law_one_parameter_one_module():
@@ -302,7 +309,7 @@ def test_one_reaction_one_kinetic_law_one_parameter_one_module():
     assert len(model.kinetic_laws) == 1
     assert model.kinetic_laws[0].law_type is KineticLawType.MICHAELIS_MENTEN
     assert len(model.parameters) >= 1
-    assert len(model.module_specifications) == 1
+    assert len(model.model_modules) == 1
 
 
 def test_model_id_is_deterministic_and_stable():
@@ -582,56 +589,112 @@ def test_divergent_catalytic_contexts_remain_separate():
 # --- Module integration (Step 39) -----------------------------------------------------------
 
 
-def test_exactly_one_decomposition_required():
+def test_multiple_decompositions_each_become_their_own_modularization():
+    """Module Decomposition/Modularization Reconciliation increment: modularization is never
+    hard-required to be exactly one (task instructions §1/§5) -- supplying more than one
+    ``ModuleDecomposition`` is a perfectly valid input, and each becomes its own,
+    independent, equally-unranked ``ModelModularization``, never rejected."""
     network, assignments, parameters, boundaries, modules, _ = _assemble_full(
         _simple_two_reaction_handoff()
     )
     # Constructing a ModuleDecompositionSet with duplicate decomposition ids is itself
-    # rejected at the type level -- build a second, distinctly-id'd decomposition to actually
-    # reach assembly's own "exactly one" check.
+    # rejected at the type level -- build a second, distinctly-id'd decomposition.
     second = dataclasses.replace(modules.decompositions[0], decomposition_id="decomposition-2")
     two_decompositions = dataclasses.replace(
         modules, decompositions=(modules.decompositions[0], second)
     )
-    with pytest.raises(ModelSpecificationReferenceError):
-        assemble_model_specification(
-            network, assignments, parameters, boundaries, two_decompositions
-        )
+    model = assemble_model_specification(
+        network, assignments, parameters, boundaries, two_decompositions
+    )
+    assert len(model.modularizations) == 2
+    assert {m.modularization_id for m in model.modularizations} == {
+        f"modularization::{modules.decompositions[0].decomposition_id}",
+        "modularization::decomposition-2",
+    }
+    # Both decompositions share the heuristic's own identical bare module_NNN naming (anchored
+    # independently within each decomposition) -- module_ids must still come out globally
+    # unique, qualified by their own owning modularization_id.
+    assert len({m.module_id for m in model.model_modules}) == len(model.model_modules)
 
 
 def test_module_ids_and_references_preserved_verbatim():
-    network, assignments, parameters, boundaries, modules, model = _assemble_full(
+    _network, _assignments, _parameters, _boundaries, modules, model = _assemble_full(
         _simple_two_reaction_handoff()
     )
-    assert model.module_specifications == modules.module_specifications
-    assert model.module_decomposition == modules.decompositions[0]
+    decomposition = modules.decompositions[0]
+    (modularization,) = model.modularizations
+    qualify = lambda raw: f"{modularization.modularization_id}::{raw}"  # noqa: E731
+    assert modularization.module_ids == tuple(qualify(mid) for mid in decomposition.module_ids)
+    assert {m.module_id for m in model.model_modules} == {
+        qualify(mid) for mid in decomposition.module_ids
+    }
+    for spec in modules.module_specifications:
+        qualified_id = qualify(spec.module_id)
+        membership_reaction_ids = {
+            m.component_id
+            for m in model.module_memberships
+            if m.module_id == qualified_id and m.component_type is ModuleComponentType.REACTION
+        }
+        assert membership_reaction_ids == set(spec.reaction_ids)
+        membership_species_ids = {
+            m.component_id
+            for m in model.module_memberships
+            if m.module_id == qualified_id and m.component_type is ModuleComponentType.SPECIES
+        }
+        assert membership_species_ids == set(spec.species_ids)
 
 
 def test_candidate_boundaries_preserved_in_assembled_model():
-    network, assignments, parameters, boundaries, modules, model = _assemble_full(
+    _network, _assignments, _parameters, _boundaries, modules, model = _assemble_full(
         _branch_point_handoff()
     )
     decomposition = modules.decompositions[0]
     assert decomposition.candidate_boundary_ids
-    assert model.module_decomposition.candidate_boundary_ids == decomposition.candidate_boundary_ids
     candidate_assumptions = {
         a.assumption_id for a in model.model_assumptions if "candidate-boundary" in a.assumption_id
     }
     assert len(candidate_assumptions) == len(decomposition.candidate_boundary_ids)
+    # The candidate boundary is also disclosed on the owning module's own assumptions (Module
+    # Decomposition/Modularization Reconciliation increment: carried through verbatim from
+    # ModuleSpecification.assumptions onto ModelModule.assumptions).
+    assert any(
+        any("candidate" in a.lower() for a in module.assumptions)
+        for module in model.model_modules
+    )
 
 
 def test_selected_boundaries_and_interfaces_preserved():
-    network, assignments, parameters, boundaries, modules, model = _assemble_full(
+    """A selected (HIGH/VERY_HIGH) boundary that separates the network into two modules is
+    surfaced in the unified representation as a pair of ``ModulePort`` rows (one OUTPUT on
+    the upstream module, one INPUT on the downstream module) naming the identical shared
+    species -- Module Decomposition/Modularization Reconciliation increment."""
+    _network, _assignments, _parameters, _boundaries, modules, model = _assemble_full(
         _irreversible_two_module_handoff()
     )
     decomposition = modules.decompositions[0]
     assert decomposition.boundary_assessment_ids
-    assert len(decomposition.interfaces) == 1
-    assert (
-        model.module_decomposition.boundary_assessment_ids
-        == decomposition.boundary_assessment_ids
-    )
-    assert model.module_decomposition.interfaces == decomposition.interfaces
+    (interface,) = decomposition.interfaces
+    (shared_species_id,) = interface.shared_species_ids
+    (modularization,) = model.modularizations
+    qualified_upstream = f"{modularization.modularization_id}::{interface.upstream_module_id}"
+    qualified_downstream = f"{modularization.modularization_id}::{interface.downstream_module_id}"
+
+    output_ports = [
+        p
+        for p in model.module_ports
+        if p.module_id == qualified_upstream
+        and p.species_id == shared_species_id
+        and p.direction is ModulePortDirection.OUTPUT
+    ]
+    input_ports = [
+        p
+        for p in model.module_ports
+        if p.module_id == qualified_downstream
+        and p.species_id == shared_species_id
+        and p.direction is ModulePortDirection.INPUT
+    ]
+    assert len(output_ports) == 1
+    assert len(input_ports) == 1
 
 
 # --- Assumptions (Step 40) -------------------------------------------------------------------
@@ -790,24 +853,45 @@ def test_dangling_kinetic_law_enzyme_state_reference_rejected():
         assemble_model_specification(network, bad_assignments, parameters, boundaries, modules)
 
 
-def test_zero_decompositions_rejected():
+def test_zero_decompositions_accepted_modularization_is_optional():
+    """Module Decomposition/Modularization Reconciliation increment: modularization is never
+    mandatory (task instructions §1) -- zero ``ModuleDecomposition`` records is a perfectly
+    valid input, producing zero ``ModelModularization`` records, never an error."""
     network, assignments, parameters, boundaries, modules, _ = _assemble_full(
         _michaelis_menten_handoff()
     )
-    bad_modules = dataclasses.replace(modules, decompositions=())
-    with pytest.raises(ModelSpecificationReferenceError):
-        assemble_model_specification(network, assignments, parameters, boundaries, bad_modules)
+    zero_modules = dataclasses.replace(modules, decompositions=())
+    model = assemble_model_specification(
+        network, assignments, parameters, boundaries, zero_modules
+    )
+    assert model.modularizations == ()
+    assert model.model_modules == ()
+    assert model.module_memberships == ()
+    assert model.module_ports == ()
+
+
+def test_boundaries_and_modules_omitted_entirely_is_also_accepted():
+    """Modularization is optional at the call-site level too -- omitting ``boundaries``/
+    ``modules`` entirely (never even running the heuristic decomposition) is equally valid,
+    for a GENERATED model exactly as for an IMPORTED one (task instructions §4)."""
+    network, assignments, parameters, _, _, _ = _assemble_full(_michaelis_menten_handoff())
+    model = assemble_model_specification(network, assignments, parameters)
+    assert model.modularizations == ()
+    assert len(model.kinetic_laws) == 1
 
 
 # --- No numeric/probabilistic assembly, no anonymous provenance ------------------------------
 
 
 def test_model_specification_carries_full_provenance():
-    network, assignments, parameters, boundaries, modules, model = _assemble_full(
+    network, _assignments, _parameters, _boundaries, _modules, model = _assemble_full(
         _michaelis_menten_handoff()
     )
     assert model.full_network is network
-    assert model.boundary_assessments == boundaries.assessments
+    (modularization,) = model.modularizations
+    assert any(
+        ref.startswith("module-decomposition::") for ref in modularization.provenance_refs
+    )
     for law in model.kinetic_laws:
         assert any(ref.startswith("kinetic-law-assignment::") for ref in law.provenance_refs)
 
@@ -1397,12 +1481,13 @@ def test_reversibility_assumption_generation_is_deterministic():
 def test_module_decomposition_never_manufactures_a_boundary_from_assumed_reversibility():
     """Scenario 8: ``app.agent2.modules`` never references ``reversible`` at all (confirmed by
     inspection) -- an assumed-reversible reaction (reversible=None) contributes no boundary
-    candidate and no module-boundary interface on its own."""
+    candidate and no cross-module port on its own."""
     model = _assemble(_malonyl_coa_like_handoff())
-    assert model.boundary_assessments == ()
-    assert model.module_decomposition.candidate_boundary_ids == ()
-    for module in model.module_specifications:
-        assert module.boundary_interface_ids == ()
+    assert not any(
+        a.assumption_id.startswith("assumption::candidate-boundary::")
+        for a in model.model_assumptions
+    )
+    assert model.module_ports == ()
 
 
 # --- Heuristic Simulation Parameter Initialization: Antimony executability consequence ----------

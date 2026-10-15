@@ -22,7 +22,7 @@ Sections, in the order data flows through the (future) pipeline:
    ``KineticLawAssignmentSource`` (relocated here from
    ``app.agent2.kinetics.types`` in an Increment 8 pre-commit revision,
    still re-exported there unchanged), ``ParticipantRole``,
-   ``ModuleInterfaceRole``, ``CompartmentSourceScope``. Defined early
+   ``CompartmentSourceScope``. Defined early
    because later structural types reference them.
 3. **Full-network structural domain** -- ``CompartmentSpecification``,
    ``SpeciesSpecification``, ``ReactionParticipantSpecification``,
@@ -45,9 +45,12 @@ Sections, in the order data flows through the (future) pipeline:
    ``ParameterSpecification``. Structural declarations only: no fitting,
    no estimation, no expression evaluation.
 5. **Module decomposition domain** -- ``BoundaryAssessment``,
-   ``ModuleBoundaryInterface``, ``ModuleSpecification``,
-   ``ModuleDecomposition``. No heuristic computation exists yet -- these
-   are the contracts a future boundary-heuristic rule set will populate.
+   ``ModuleSpecification``, ``ModuleDecomposition``. The heuristic,
+   boundary-likelihood-driven partition algorithm
+   (``app.agent2.boundaries``/``app.agent2.modules``); its output is
+   converted into §7a-2's unified ``ModelModularization`` family rather
+   than stored on ``ModelSpecification`` directly (Module Decomposition/
+   Modularization Reconciliation increment).
 6. **ModelAssumption** -- a structured, categorized assumption record for
    cross-cutting, model-level disclosures (individual structural types
    keep their own lightweight free-text ``assumptions`` tuples for local
@@ -1299,15 +1302,6 @@ class ParticipantRole(StrEnum):
     REACTANT = "REACTANT"
     PRODUCT = "PRODUCT"
     MODIFIER = "MODIFIER"
-
-
-class ModuleInterfaceRole(StrEnum):
-    """A module boundary interface's structural role. Kept deliberately minimal."""
-
-    INPUT = "INPUT"
-    OUTPUT = "OUTPUT"
-    BIDIRECTIONAL = "BIDIRECTIONAL"
-    SHARED = "SHARED"
 
 
 class CompartmentSourceScope(StrEnum):
@@ -2577,53 +2571,8 @@ class BoundaryAssessment:
 
 
 @dataclass(frozen=True, slots=True)
-class ModuleBoundaryInterface:
-    """One explicit interface element required for a standalone module model.
-
-    Structural only -- no simulation semantics. Agent 2 never invents a
-    boundary condition silently; if this cannot be stated explicitly for a
-    module, no standalone model is produced for it
-    (``docs/01_agent2_architecture.md`` §14).
-    """
-
-    species_id: str
-    role: ModuleInterfaceRole
-    direction: str
-    assumption: str
-    externally_controlled: bool
-    initial_value: Decimal | None = None
-    unit: str | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "species_id", _require_non_empty_str(self.species_id, field_name="species_id")
-        )
-        if not isinstance(self.role, ModuleInterfaceRole):
-            raise TypeError(
-                f"ModuleBoundaryInterface.role must be a ModuleInterfaceRole, got {self.role!r}"
-            )
-        object.__setattr__(
-            self, "direction", _require_non_empty_str(self.direction, field_name="direction")
-        )
-        object.__setattr__(
-            self, "assumption", _require_non_empty_str(self.assumption, field_name="assumption")
-        )
-        if not isinstance(self.externally_controlled, bool):
-            raise TypeError(
-                "ModuleBoundaryInterface.externally_controlled must be a bool, "
-                f"got {self.externally_controlled!r}"
-            )
-        object.__setattr__(
-            self,
-            "initial_value",
-            _require_decimal_or_none(self.initial_value, field_name="initial_value"),
-        )
-        object.__setattr__(self, "unit", _clean_optional_str(self.unit, field_name="unit"))
-
-
-@dataclass(frozen=True, slots=True)
 class ModuleSpecification:
-    """One module: a named subset of the full network plus its boundary interfaces.
+    """One module: a named subset of the full network.
 
     Always traceable to the full model via ``source_boundary_ids`` -- a
     module is never defined independently of the ``BoundaryAssessment``\\ s
@@ -2642,12 +2591,20 @@ class ModuleSpecification:
     ``app.agent2.kinetics.types.KineticLawAssignment.assignment_id``
     values, a distinct id namespace, hence the separate
     ``kinetic_law_assignment_ids`` field rather than conflating the two
-    (``docs/10_module_decomposition.md`` §5). ``boundary_interface_ids``
-    references ``InterModuleBoundaryInterface.interface_id`` values on the
-    owning ``ModuleDecomposition.interfaces`` -- a different concept from
-    the pre-existing, per-species ``boundary_interfaces``
-    (``ModuleBoundaryInterface``), which remains reserved for a future
-    increment's standalone-Antimony boundary-condition declarations.
+    (``docs/10_module_decomposition.md`` §5).
+
+    **Module Decomposition/Modularization Reconciliation increment**
+    removed the never-populated-in-production per-species
+    ``boundary_interfaces`` (``ModuleBoundaryInterface``)/
+    ``has_explicit_boundary_interfaces`` -- that per-species
+    boundary-condition concept now lives on ``ModulePort`` instead (see
+    that type's own docstring), the one, unified representation standalone
+    submodel export now reads, for a module from *either* this type or
+    the newer ``ModelModule``/``ModuleMembership`` family.
+    ``boundary_interface_ids`` (a genuinely different, still-live concept
+    -- a reference to the *pairwise* ``InterModuleBoundaryInterface``
+    records this module participates in, populated by
+    ``app.agent2.modules.decomposer``) is retained unchanged.
     """
 
     module_id: str
@@ -2660,7 +2617,6 @@ class ModuleSpecification:
     compartment_ids: tuple[str, ...] = ()
     enzyme_state_ids: tuple[str, ...] = ()
     interface_species_ids: tuple[str, ...] = ()
-    boundary_interfaces: tuple[ModuleBoundaryInterface, ...] = ()
     boundary_interface_ids: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
     source_boundary_ids: tuple[str, ...] = ()
@@ -2703,23 +2659,6 @@ class ModuleSpecification:
                 "ModuleSpecification must reference at least one reaction -- an empty module is "
                 "not meaningful"
             )
-        object.__setattr__(
-            self,
-            "boundary_interfaces",
-            _require_tuple_of(
-                self.boundary_interfaces, ModuleBoundaryInterface, field_name="boundary_interfaces"
-            ),
-        )
-
-    @property
-    def has_explicit_boundary_interfaces(self) -> bool:
-        """Pure structural predicate: at least one ``ModuleBoundaryInterface`` is declared.
-
-        This is the same predicate used to decide whether a
-        ``ModuleAntimonyArtifact.standalone_antimony`` may be produced for
-        this module (never inferred any other way).
-        """
-        return len(self.boundary_interfaces) > 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -3676,7 +3615,23 @@ class ModulePort:
     (one ``OUTPUT``/``INPUT_OUTPUT``, one ``INPUT``/``INPUT_OUTPUT``) naming the identical
     ``species_id`` across two different modules of the same modularization is exactly how a
     cross-module connection is derived -- see ``app.agent2.modularization.derivation
-    .derive_cross_module_connections``, never stored as its own persisted type."""
+    .derive_cross_module_connections``, never stored as its own persisted type.
+
+    **Module Decomposition/Modularization Reconciliation increment.** ``externally_controlled``/
+    ``initial_value``/``unit`` absorb the entire useful content of the pre-existing, now-removed
+    ``ModuleBoundaryInterface`` (Increment 1) directly onto this type, so a module interface and
+    its boundary-condition treatment for standalone export are one record, never two parallel
+    ones. The distinction the task itself draws between "module" (an interface definition) and
+    "standalone submodel" (a derived executable artifact with explicit boundary treatment) is
+    preserved at the *function* level, not the type level: an ordinary cross-module port (used
+    only by ``derive_cross_module_connections``) simply leaves ``externally_controlled=False``
+    (the default) and no value -- a purely descriptive fact. Only a port with
+    ``externally_controlled=True`` is eligible to seed a standalone module model's own
+    ``const <species>;`` declaration (``app.agent2.antimony.generate_module_artifacts``) --
+    mirroring ``ModuleBoundaryInterface``'s own identical field exactly, never a fabricated
+    boundary condition: ``initial_value`` is only ever rendered when the port itself already
+    carries one.
+    """
 
     port_id: str
     modularization_id: str
@@ -3684,6 +3639,9 @@ class ModulePort:
     species_id: str
     direction: ModulePortDirection
     role: ModulePortRole | None = None
+    externally_controlled: bool = False
+    initial_value: Decimal | None = None
+    unit: str | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -3708,6 +3666,17 @@ class ModulePort:
             )
         if self.role is not None and not isinstance(self.role, ModulePortRole):
             raise TypeError(f"ModulePort.role must be a ModulePortRole or None, got {self.role!r}")
+        if not isinstance(self.externally_controlled, bool):
+            raise TypeError(
+                "ModulePort.externally_controlled must be a bool, got "
+                f"{self.externally_controlled!r}"
+            )
+        object.__setattr__(
+            self,
+            "initial_value",
+            _require_decimal_or_none(self.initial_value, field_name="initial_value"),
+        )
+        object.__setattr__(self, "unit", _clean_optional_str(self.unit, field_name="unit"))
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )
@@ -3728,12 +3697,26 @@ class ModelSpecification:
     """The top-level, authoritative contract Agent 2 produces.
 
     References a ``FullNetwork`` plus every ``KineticLawSpecification``/
-    ``ParameterSpecification``/``BoundaryAssessment``/
-    ``ModuleDecomposition``/``ModuleSpecification`` derived from it, and
-    enforces full internal reference integrity between them (every id one
-    object names must actually exist among the others). Never performs
-    Agent-3-level mass-balance, connectivity, unit-consistency, or
-    conservation-law analysis -- only structural referential integrity.
+    ``ParameterSpecification`` derived from it, and enforces full internal
+    reference integrity between them (every id one object names must
+    actually exist among the others). Never performs Agent-3-level
+    mass-balance, connectivity, unit-consistency, or conservation-law
+    analysis -- only structural referential integrity.
+
+    **Module Decomposition/Modularization Reconciliation increment**
+    removed ``boundary_assessments``/``module_decomposition``/
+    ``module_specifications`` -- confirmed zero downstream consumers
+    (``build_canonical_downstream_handoff`` never exposed any of the
+    three). ``modularizations``/``model_modules``/``module_memberships``/
+    ``module_ports`` below are now the *one* stored module-related
+    representation, for a model of either ``source_type``. The old
+    heuristic decomposition algorithm (``app.agent2.boundaries
+    .assess_boundaries``/``app.agent2.modules.decompose_network``) is
+    unchanged and still runs by default for a ``GENERATED`` build, but its
+    output is now converted into that same unified representation
+    (``app.agent2.modularization.modularization_from_decomposition``)
+    rather than stored under its own, second, parallel set of fields. See
+    ``docs/22_model_modularization.md``.
     """
 
     model_id: str
@@ -3742,9 +3725,6 @@ class ModelSpecification:
     organism_id: str | None = None
     kinetic_laws: tuple[KineticLawSpecification, ...] = ()
     parameters: tuple[ParameterSpecification, ...] = ()
-    boundary_assessments: tuple[BoundaryAssessment, ...] = ()
-    module_decomposition: ModuleDecomposition | None = None
-    module_specifications: tuple[ModuleSpecification, ...] = ()
     assumptions: tuple[str, ...] = ()
     model_assumptions: tuple[ModelAssumption, ...] = ()
     #: Quantitative Context Resolution and Derived Enzyme Concentration increment.
@@ -3786,8 +3766,8 @@ class ModelSpecification:
     source_provenance: ModelSourceProvenance | None = None
     #: Model Modularization increment. Zero or more independent, simultaneous decompositions
     #: of this same canonical model -- never assumed unique, never required. See §7a-2 above
-    #: for the full design and this field's own relationship to the pre-existing, unrelated
-    #: ``module_decomposition``/``module_specifications`` fields.
+    #: for the full design -- the one, unified module-related representation (Module
+    #: Decomposition/Modularization Reconciliation increment).
     modularizations: tuple[ModelModularization, ...] = ()
     model_modules: tuple[ModelModule, ...] = ()
     module_memberships: tuple[ModuleMembership, ...] = ()
@@ -3818,27 +3798,6 @@ class ModelSpecification:
             self,
             "parameters",
             _require_tuple_of(self.parameters, ParameterSpecification, field_name="parameters"),
-        )
-        object.__setattr__(
-            self,
-            "boundary_assessments",
-            _require_tuple_of(
-                self.boundary_assessments, BoundaryAssessment, field_name="boundary_assessments"
-            ),
-        )
-        if self.module_decomposition is not None and not isinstance(
-            self.module_decomposition, ModuleDecomposition
-        ):
-            raise TypeError(
-                "ModelSpecification.module_decomposition must be a ModuleDecomposition or None, "
-                f"got {self.module_decomposition!r}"
-            )
-        object.__setattr__(
-            self,
-            "module_specifications",
-            _require_tuple_of(
-                self.module_specifications, ModuleSpecification, field_name="module_specifications"
-            ),
         )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
@@ -3952,10 +3911,6 @@ class ModelSpecification:
             field_name="ModelSpecification.parameters[].parameter_id",
         )
         _require_unique(
-            tuple(module.module_id for module in self.module_specifications),
-            field_name="ModelSpecification.module_specifications[].module_id",
-        )
-        _require_unique(
             tuple(ec.protein_id for ec in self.enzyme_concentrations),
             field_name="ModelSpecification.enzyme_concentrations[].protein_id",
         )
@@ -3966,10 +3921,6 @@ class ModelSpecification:
         _require_unique(
             tuple(ec.enzyme_state_id for ec in self.enzyme_state_concentrations),
             field_name="ModelSpecification.enzyme_state_concentrations[].enzyme_state_id",
-        )
-        _require_unique(
-            tuple(boundary.boundary_id for boundary in self.boundary_assessments),
-            field_name="ModelSpecification.boundary_assessments[].boundary_id",
         )
         _require_unique(
             tuple(rule.rule_id for rule in self.rules),
@@ -4024,12 +3975,9 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
     """
     reaction_ids = {reaction.reaction_id for reaction in spec.full_network.reactions}
     species_ids = {species.species_id for species in spec.full_network.species}
-    compartment_ids = {c.compartment_id for c in spec.full_network.compartments}
     enzyme_state_ids = {s.id for s in spec.full_network.enzyme_states}
     kinetic_law_ids = {law.kinetic_law_id for law in spec.kinetic_laws}
     parameter_ids = {param.parameter_id for param in spec.parameters}
-    module_ids = {module.module_id for module in spec.module_specifications}
-    boundary_ids = {boundary.boundary_id for boundary in spec.boundary_assessments}
     rule_ids = {rule.rule_id for rule in spec.rules}
     event_ids = {event.event_id for event in spec.events}
     observable_ids = {observable.observable_id for observable in spec.observables}
@@ -4074,99 +4022,6 @@ def _validate_model_specification_references(spec: ModelSpecification) -> None:
                 (reaction.kinetic_law_id,),
                 kinetic_law_ids,
                 field_name=f"reaction {reaction.reaction_id}.kinetic_law_id",
-            )
-
-    for module in spec.module_specifications:
-        _require_known(
-            module.reaction_ids, reaction_ids, field_name=f"module {module.module_id}.reaction_ids"
-        )
-        _require_known(
-            module.species_ids, species_ids, field_name=f"module {module.module_id}.species_ids"
-        )
-        _require_known(
-            module.parameter_ids,
-            parameter_ids,
-            field_name=f"module {module.module_id}.parameter_ids",
-        )
-        _require_known(
-            module.kinetic_law_ids,
-            kinetic_law_ids,
-            field_name=f"module {module.module_id}.kinetic_law_ids",
-        )
-        _require_known(
-            module.source_boundary_ids,
-            boundary_ids,
-            field_name=f"module {module.module_id}.source_boundary_ids",
-        )
-        _require_known(
-            module.compartment_ids,
-            compartment_ids,
-            field_name=f"module {module.module_id}.compartment_ids",
-        )
-        _require_known(
-            module.enzyme_state_ids,
-            enzyme_state_ids,
-            field_name=f"module {module.module_id}.enzyme_state_ids",
-        )
-        _require_known(
-            module.interface_species_ids,
-            species_ids,
-            field_name=f"module {module.module_id}.interface_species_ids",
-        )
-        for interface in module.boundary_interfaces:
-            _require_known(
-                (interface.species_id,),
-                species_ids,
-                field_name=f"module {module.module_id} boundary interface species_id",
-            )
-
-    if spec.module_decomposition is not None:
-        decomposition = spec.module_decomposition
-        _require_known(
-            decomposition.module_ids,
-            module_ids,
-            field_name="module_decomposition.module_ids",
-        )
-        _require_known(
-            decomposition.boundary_assessment_ids,
-            boundary_ids,
-            field_name="module_decomposition.boundary_assessment_ids",
-        )
-        _require_known(
-            decomposition.candidate_boundary_ids,
-            boundary_ids,
-            field_name="module_decomposition.candidate_boundary_ids",
-        )
-        if decomposition.created_from_network_id != spec.full_network.network_id:
-            raise ValueError(
-                "module_decomposition.created_from_network_id "
-                f"({decomposition.created_from_network_id!r}) must equal "
-                f"full_network.network_id ({spec.full_network.network_id!r})"
-            )
-        interface_ids = {interface.interface_id for interface in decomposition.interfaces}
-        for interface in decomposition.interfaces:
-            _require_known(
-                (interface.upstream_module_id, interface.downstream_module_id),
-                module_ids,
-                field_name=f"module_decomposition interface {interface.interface_id} module ids",
-            )
-            _require_known(
-                (interface.boundary_id,),
-                boundary_ids,
-                field_name=f"module_decomposition interface {interface.interface_id}.boundary_id",
-            )
-            _require_known(
-                interface.shared_species_ids,
-                species_ids,
-                field_name=(
-                    f"module_decomposition interface {interface.interface_id}.shared_species_ids"
-                ),
-            )
-        for module in spec.module_specifications:
-            _require_known(
-                module.boundary_interface_ids,
-                interface_ids,
-                field_name=f"module {module.module_id}.boundary_interface_ids",
             )
 
     enzyme_state_transition_ids = {t.id for t in spec.full_network.enzyme_state_transitions}
@@ -4469,15 +4324,25 @@ class FullAntimonyArtifact:
 
 @dataclass(frozen=True, slots=True)
 class ModuleAntimonyArtifact:
-    """One module's Antimony output(s).
+    """One module's Antimony output(s), for one module of one ``ModelModularization``.
 
     ``antimony_view`` (a subset view, not necessarily simulatable) may
     exist without ``standalone_antimony``. ``standalone_antimony`` may be
-    present only when ``boundary_interfaces`` is non-empty -- the same
-    structural predicate as ``ModuleSpecification
-    .has_explicit_boundary_interfaces``. No boundary condition is ever
-    invented to satisfy this rule; a module lacking explicit interfaces
-    simply has no standalone artifact.
+    present only when at least one of ``boundary_ports`` has
+    ``externally_controlled=True`` -- the same structural predicate
+    ``app.agent2.antimony.generate_module_artifacts`` uses to decide
+    eligibility. No boundary condition is ever invented to satisfy this
+    rule; a module lacking an explicit externally-controlled port simply
+    has no standalone artifact.
+
+    **Module Decomposition/Modularization Reconciliation increment**:
+    ``modularization_id`` was added (every module-artifact now belongs to
+    exactly one, explicitly-selected ``ModelModularization`` -- never
+    generated automatically for every modularization a model happens to
+    carry), and ``boundary_interfaces`` (``ModuleBoundaryInterface``) was
+    replaced by ``boundary_ports`` (``ModulePort``) -- the one, unified
+    per-species boundary-treatment record ``ModulePort`` itself now
+    carries (see that type's own docstring).
 
     **Increment 9 (Antimony Generation)** added ``readiness``/
     ``unresolved_kinetic_law_ids``: ``VIEW_ONLY`` (the default) requires
@@ -4485,7 +4350,7 @@ class ModuleAntimonyArtifact:
     ``standalone_antimony`` to be populated and
     ``unresolved_kinetic_law_ids`` empty;
     ``NON_EXECUTABLE_UNRESOLVED_KINETICS`` means the module's boundary
-    interfaces were explicit enough to be eligible for a standalone model,
+    treatment was explicit enough to be eligible for a standalone model,
     but at least one of its kinetic laws blocked executability -- the
     standalone text is withheld (``standalone_antimony`` stays ``None``)
     rather than emitted as though it were runnable. See
@@ -4502,11 +4367,12 @@ class ModuleAntimonyArtifact:
     """
 
     module_id: str
+    modularization_id: str
     model_specification_id: str
     generator_version: str
     antimony_view: str | None = None
     standalone_antimony: str | None = None
-    boundary_interfaces: tuple[ModuleBoundaryInterface, ...] = ()
+    boundary_ports: tuple[ModulePort, ...] = ()
     assumptions: tuple[str, ...] = ()
     readiness: AntimonyArtifactReadiness = AntimonyArtifactReadiness.VIEW_ONLY
     unresolved_kinetic_law_ids: tuple[str, ...] = ()
@@ -4515,6 +4381,11 @@ class ModuleAntimonyArtifact:
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "module_id", _require_non_empty_str(self.module_id, field_name="module_id")
+        )
+        object.__setattr__(
+            self,
+            "modularization_id",
+            _require_non_empty_str(self.modularization_id, field_name="modularization_id"),
         )
         object.__setattr__(
             self,
@@ -4540,15 +4411,15 @@ class ModuleAntimonyArtifact:
         )
         object.__setattr__(
             self,
-            "boundary_interfaces",
-            _require_tuple_of(
-                self.boundary_interfaces, ModuleBoundaryInterface, field_name="boundary_interfaces"
-            ),
+            "boundary_ports",
+            _require_tuple_of(self.boundary_ports, ModulePort, field_name="boundary_ports"),
         )
-        if self.standalone_antimony is not None and not self.boundary_interfaces:
+        has_explicit_boundary_treatment = any(p.externally_controlled for p in self.boundary_ports)
+        if self.standalone_antimony is not None and not has_explicit_boundary_treatment:
             raise ValueError(
-                "ModuleAntimonyArtifact.standalone_antimony requires at least one explicit "
-                "ModuleBoundaryInterface -- no boundary condition may be invented implicitly"
+                "ModuleAntimonyArtifact.standalone_antimony requires at least one "
+                "externally_controlled ModulePort -- no boundary condition may be invented "
+                "implicitly"
             )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
@@ -4617,22 +4488,24 @@ class ModuleAntimonyArtifact:
 class Agent2OutputPackage:
     """The complete output of one Agent 2 build.
 
-    ``boundary_assessments``/``module_decomposition`` are convenience
-    top-level copies and must be identical to
-    ``model_specification.boundary_assessments``/``.module_decomposition``
-    -- never independently diverging data. ``full_antimony`` must name
-    this same ``model_specification``, and every ``module_artifacts`` entry
-    must reference a module that actually exists in
-    ``model_specification.module_specifications`` (not every module needs
-    an artifact yet).
+    ``full_antimony`` must name this same ``model_specification``.
+    ``module_artifacts`` is empty by default -- unlike the pre-Reconciliation
+    behavior, standalone/view module artifacts are never generated
+    automatically for every module a model happens to carry; a caller
+    explicitly requests them for one selected modularization via
+    ``app.agent2.antimony.generate_module_artifacts`` and may attach the
+    result here itself (``dataclasses.replace``).
+
+    **Module Decomposition/Modularization Reconciliation increment**
+    removed ``boundary_assessments``/``module_decomposition`` -- confirmed
+    zero downstream consumers; see ``ModelSpecification``'s own identical
+    removal for the full rationale.
     """
 
     contract_version: str
     model_specification: ModelSpecification
     full_antimony: FullAntimonyArtifact
     module_artifacts: tuple[ModuleAntimonyArtifact, ...] = ()
-    boundary_assessments: tuple[BoundaryAssessment, ...] = ()
-    module_decomposition: ModuleDecomposition | None = None
     assumptions: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -4660,23 +4533,12 @@ class Agent2OutputPackage:
             ),
         )
         _require_unique(
-            tuple(artifact.module_id for artifact in self.module_artifacts),
-            field_name="Agent2OutputPackage.module_artifacts[].module_id",
-        )
-        object.__setattr__(
-            self,
-            "boundary_assessments",
-            _require_tuple_of(
-                self.boundary_assessments, BoundaryAssessment, field_name="boundary_assessments"
+            tuple(
+                (artifact.modularization_id, artifact.module_id)
+                for artifact in self.module_artifacts
             ),
+            field_name="Agent2OutputPackage.module_artifacts[].(modularization_id, module_id)",
         )
-        if self.module_decomposition is not None and not isinstance(
-            self.module_decomposition, ModuleDecomposition
-        ):
-            raise TypeError(
-                "Agent2OutputPackage.module_decomposition must be a ModuleDecomposition or None, "
-                f"got {self.module_decomposition!r}"
-            )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )
@@ -4693,29 +4555,26 @@ class Agent2OutputPackage:
                 f"model_specification.model_id ({self.model_specification.model_id!r})"
             )
 
-        module_ids = {module.module_id for module in self.model_specification.module_specifications}
+        module_ids_by_modularization = {
+            m.modularization_id: set(m.module_ids) for m in self.model_specification.modularizations
+        }
         for artifact in self.module_artifacts:
-            if artifact.module_id not in module_ids:
+            known_module_ids = module_ids_by_modularization.get(artifact.modularization_id)
+            if known_module_ids is None:
+                raise ValueError(
+                    f"Agent2OutputPackage module artifact {artifact.module_id!r} references "
+                    f"unknown modularization {artifact.modularization_id!r}"
+                )
+            if artifact.module_id not in known_module_ids:
                 raise ValueError(
                     f"Agent2OutputPackage module artifact {artifact.module_id!r} does not "
-                    "reference a module in model_specification.module_specifications"
+                    f"belong to modularization {artifact.modularization_id!r}'s own module_ids"
                 )
             if artifact.model_specification_id != self.model_specification.model_id:
                 raise ValueError(
                     f"Agent2OutputPackage module artifact {artifact.module_id!r}'s "
                     "model_specification_id does not match model_specification.model_id"
                 )
-
-        if self.boundary_assessments != self.model_specification.boundary_assessments:
-            raise ValueError(
-                "Agent2OutputPackage.boundary_assessments must be identical to "
-                "model_specification.boundary_assessments"
-            )
-        if self.module_decomposition != self.model_specification.module_decomposition:
-            raise ValueError(
-                "Agent2OutputPackage.module_decomposition must be identical to "
-                "model_specification.module_decomposition"
-            )
 
 
 __all__ = [
@@ -4758,10 +4617,8 @@ __all__ = [
     "ModelSpecification",
     "ModularizationMethod",
     "ModuleAntimonyArtifact",
-    "ModuleBoundaryInterface",
     "ModuleComponentType",
     "ModuleDecomposition",
-    "ModuleInterfaceRole",
     "ModuleMembership",
     "ModulePort",
     "ModulePortDirection",

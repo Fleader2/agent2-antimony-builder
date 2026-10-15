@@ -200,6 +200,24 @@ itself.
 > `"agent2-downstream-v3"` (two purely additive downstream fields — Agents 3/4/5 synced their
 > own identical version constants in step). See
 > `docs/25_explicit_enzyme_concentration_representation.md`.
+>
+> **Module Decomposition/Modularization Reconciliation increment:** the old, GENERATED-only,
+> build-time `ModuleSpecification`/`ModuleDecomposition`/`BoundaryAssessment` system
+> (Increments 1/6/7) is reconciled with the newer, origin-agnostic Model Modularization layer
+> (`ModelModularization`/`ModelModule`/`ModuleMembership`/`ModulePort`) into one, unified,
+> stored representation for a model of either source type. `ModelSpecification` lost
+> `boundary_assessments`/`module_decomposition`/`module_specifications` entirely (confirmed
+> zero downstream consumers); the old heuristic boundary/connected-component algorithm is
+> unchanged and still runs by default for a `GENERATED` build, but its output is now converted
+> into the unified representation instead. Modularization is never mandatory (zero, one, or
+> many may coexist on the same model, none marked canonical), and a new, explicit, opt-in
+> `app.agent2.antimony.generate_module_artifacts(model, modularization_id)` is the one entry
+> point for module-view/standalone-submodel Antimony generation — reusing the old rendering
+> machinery rather than duplicating it, and working identically for a `GENERATED` or
+> `IMPORTED` model. `AGENT2_CONTRACT_VERSION` bumped `"0.14"` -> `"0.15"`;
+> `AGENT2_DOWNSTREAM_CONTRACT_VERSION` is unchanged — modules/boundaries were never part of
+> that contract. See
+> `docs/26_module_decomposition_modularization_reconciliation.md`.
 
 ## Roadmap
 
@@ -219,6 +237,7 @@ itself.
 - **Human-Readable Antimony Naming and Provenance Separation** — curated-name-based Antimony symbols, deterministic collision resolution, and a structured symbol-provenance map (implemented)
 - **Agent 1 → Agent 2 Biological Display Metadata Contract** — curated gene symbol/protein name/EC number naming tiers for reactions and parameters (implemented)
 - **Explicit Enzyme Concentration Representation in Kinetic Models** — explicit catalytic-enzyme species, injected into single-substrate Michaelis-Menten rate expressions (implemented)
+- **Module Decomposition/Modularization Reconciliation** — the old build-time module-decomposition system and the newer general model-modularization system unified into one, origin-agnostic representation, with executable-submodel export reusing the old rendering machinery (implemented)
 
 This roadmap describes implemented scope; Version 2 planning is tracked
 separately and has not begun.
@@ -246,6 +265,7 @@ separately and has not begun.
 - `docs/23_human_readable_antimony_naming.md` — Human-Readable Antimony Naming and Provenance Separation increment: the naming hierarchy, collision rules, provenance-map design, generated-vs-imported naming behavior, and fallback behavior, implemented
 - `docs/24_biological_display_metadata.md` — Agent 1 → Agent 2 Biological Display Metadata Contract increment: the new gene/protein/EC-number handoff fields, the ownership boundary, the extended reaction/parameter naming preference order, and fallback behavior, implemented
 - `docs/25_explicit_enzyme_concentration_representation.md` — Explicit Enzyme Concentration Representation increment: the new enzyme-concentration species package, the single-substrate Michaelis-Menten injection scope and its scientific justification, naming, contract/version changes, and the real-data regression, implemented
+- `docs/26_module_decomposition_modularization_reconciliation.md` — Module Decomposition/Modularization Reconciliation increment: which old types were retained/adapted/removed, the adapter, the unified standalone-submodel export entry point, GENERATED/IMPORTED symmetry, and contract/version changes, implemented
 
 ## Repository Structure
 

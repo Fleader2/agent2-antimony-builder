@@ -17,7 +17,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.agent2.antimony import UnsupportedAntimonySerializationError, generate_antimony
+from app.agent2.antimony import (
+    UnsupportedAntimonySerializationError,
+    generate_antimony,
+    generate_module_artifacts,
+)
 from app.agent2.antimony.naming import build_identifier_map, sanitize_model_name
 from app.agent2.types import (
     AntimonyArtifactReadiness,
@@ -29,10 +33,14 @@ from app.agent2.types import (
     KineticLawAssignmentSource,
     KineticLawSpecification,
     KineticLawType,
+    ModelModularization,
+    ModelModule,
     ModelSpecification,
-    ModuleBoundaryInterface,
-    ModuleInterfaceRole,
-    ModuleSpecification,
+    ModularizationMethod,
+    ModuleComponentType,
+    ModuleMembership,
+    ModulePort,
+    ModulePortDirection,
     ParameterSource,
     ParameterSpecification,
     ParticipantRole,
@@ -139,17 +147,74 @@ def _parameter(**overrides) -> ParameterSpecification:
     return ParameterSpecification(**merged)
 
 
-def _module(**overrides) -> ModuleSpecification:
+def _modularization(**overrides) -> ModelModularization:
     merged = {
-        "module_id": "mod-1",
-        "name": "test module",
-        "reaction_ids": ("r1",),
-        "species_ids": ("a", "b"),
-        "parameter_ids": ("k1",),
-        "compartment_ids": ("cyto",),
-        "source_boundary_ids": (),
+        "modularization_id": "mz-1",
+        "name": "test modularization",
+        "method": ModularizationMethod.USER_DEFINED,
+        "module_ids": ("mod-1",),
     } | overrides
-    return ModuleSpecification(**merged)
+    return ModelModularization(**merged)
+
+
+def _model_module(**overrides) -> ModelModule:
+    merged = {"module_id": "mod-1", "name": "test module"} | overrides
+    return ModelModule(**merged)
+
+
+def _membership(**overrides) -> ModuleMembership:
+    merged = {
+        "membership_id": "mem-1",
+        "modularization_id": "mz-1",
+        "module_id": "mod-1",
+        "component_type": ModuleComponentType.REACTION,
+        "component_id": "r1",
+    } | overrides
+    return ModuleMembership(**merged)
+
+
+def _memberships_for(
+    module_id: str,
+    *,
+    modularization_id: str = "mz-1",
+    reaction_ids: tuple[str, ...] = (),
+    species_ids: tuple[str, ...] = (),
+    parameter_ids: tuple[str, ...] = (),
+) -> tuple[ModuleMembership, ...]:
+    """Build the full set of ``ModuleMembership`` rows for one module -- the new system's own
+    equivalent of the old ``ModuleSpecification.reaction_ids``/``.species_ids``/
+    ``.parameter_ids`` tuples, one row per component rather than one tuple field each."""
+    memberships = []
+    for component_type, ids in (
+        (ModuleComponentType.REACTION, reaction_ids),
+        (ModuleComponentType.SPECIES, species_ids),
+        (ModuleComponentType.PARAMETER, parameter_ids),
+    ):
+        for component_id in ids:
+            memberships.append(
+                ModuleMembership(
+                    membership_id=(
+                        f"membership::{modularization_id}::{module_id}::"
+                        f"{component_type.value}::{component_id}"
+                    ),
+                    modularization_id=modularization_id,
+                    module_id=module_id,
+                    component_type=component_type,
+                    component_id=component_id,
+                )
+            )
+    return tuple(memberships)
+
+
+def _port(**overrides) -> ModulePort:
+    merged = {
+        "port_id": "port-1",
+        "modularization_id": "mz-1",
+        "module_id": "mod-1",
+        "species_id": "a",
+        "direction": ModulePortDirection.INPUT,
+    } | overrides
+    return ModulePort(**merged)
 
 
 def _model(**overrides) -> ModelSpecification:
@@ -159,7 +224,6 @@ def _model(**overrides) -> ModelSpecification:
         "full_network": _network(),
         "kinetic_laws": (_kinetic_law(),),
         "parameters": (_parameter(),),
-        "module_specifications": (_module(),),
     } | overrides
     return ModelSpecification(**merged)
 
@@ -208,7 +272,6 @@ def test_identifier_map_ids_are_valid_antimony_identifiers_for_hostile_input():
             ),
         ),
         kinetic_laws=(_kinetic_law(species_ids=("6-phosphofructokinase",)),),
-        module_specifications=(),
     )
     id_map = build_identifier_map(model)
     for antimony_id in (
@@ -237,7 +300,6 @@ def test_identifier_map_resolves_within_category_collisions_deterministically():
         ),
         kinetic_laws=(),
         parameters=(),
-        module_specifications=(),
     )
     first = build_identifier_map(model)
     second = build_identifier_map(model)
@@ -262,12 +324,19 @@ def test_sanitize_model_name_handles_leading_digit_and_punctuation():
 
 def test_identifier_map_reused_identically_between_full_model_and_module_view():
     """Step 32: the same Agent 2 entity gets the same Antimony identifier everywhere."""
-    model = _model()
+    model = _model(
+        modularizations=(_modularization(module_ids=("mod-1",)),),
+        model_modules=(_model_module(module_id="mod-1"),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+    )
     package = generate_antimony(model)
     id_map = build_identifier_map(model)
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert f"reaction_id=r1" in package.full_antimony.antimony_text  # noqa: F541
     assert id_map.species["a"] in package.full_antimony.antimony_text
-    assert id_map.species["a"] in package.module_artifacts[0].antimony_view
+    assert id_map.species["a"] in artifact.antimony_view
 
 
 # --- Full model serialization (Step 47) ------------------------------------------------------
@@ -320,7 +389,6 @@ def test_multiple_reactions_all_serialized():
             ),
         ),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k2")),
-        module_specifications=(),
     )
     text = generate_antimony(model).full_antimony.antimony_text
     assert "J_r1:" in text
@@ -345,7 +413,7 @@ def test_unresolved_reversibility_no_longer_blocks_executable_status():
     EXECUTABLE status merely because Agent 1's own curated reversible is None; it is modeled
     as tentatively reversible instead, disclosed via the reaction's own comment."""
     model = _model(
-        full_network=_network(reactions=(_reaction(reversible=None),)), module_specifications=()
+        full_network=_network(reactions=(_reaction(reversible=None),))
     )
     artifact = generate_antimony(model).full_antimony
     assert artifact.readiness is AntimonyArtifactReadiness.EXECUTABLE
@@ -371,7 +439,6 @@ def test_reversible_reaction_with_unresolved_reverse_kinetics_remains_non_execut
             _parameter(parameter_id="kf", value=Decimal("0.5")),
             _parameter(parameter_id="kr", value=None, source=ParameterSource.PLACEHOLDER),
         ),
-        module_specifications=(),
     )
     artifact = generate_antimony(model).full_antimony
     assert artifact.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
@@ -407,11 +474,19 @@ def test_stoichiometric_coefficients_preserved_verbatim():
 
 
 def test_determinism_byte_identical_across_repeated_generation():
-    model = _model()
+    model = _model(
+        modularizations=(_modularization(module_ids=("mod-1",)),),
+        model_modules=(_model_module(module_id="mod-1"),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+    )
     first = generate_antimony(model)
     second = generate_antimony(model)
     assert first.full_antimony.antimony_text == second.full_antimony.antimony_text
-    assert first.module_artifacts[0].antimony_view == second.module_artifacts[0].antimony_view
+    (first_artifact,) = generate_module_artifacts(model, "mz-1")
+    (second_artifact,) = generate_module_artifacts(model, "mz-1")
+    assert first_artifact.antimony_view == second_artifact.antimony_view
 
 
 # --- Kinetic-law serialization (Step 48) -------------------------------------------------------
@@ -420,7 +495,7 @@ def test_determinism_byte_identical_across_repeated_generation():
 def _resolved_model(
     law: KineticLawSpecification, parameters: tuple[ParameterSpecification, ...]
 ) -> ModelSpecification:
-    return _model(kinetic_laws=(law,), parameters=parameters, module_specifications=())
+    return _model(kinetic_laws=(law,), parameters=parameters)
 
 
 def test_mass_action_expression_rendered_with_antimony_ids():
@@ -652,7 +727,6 @@ def _two_context_model(**law_overrides) -> ModelSpecification:
         ),
         kinetic_laws=(law_e, law_ep),
         parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep")),
-        module_specifications=(),
     )
 
 
@@ -693,7 +767,6 @@ def test_isozymes_with_independent_resolved_contexts_compose_additively():
     model = _model(
         kinetic_laws=(law_1, law_2),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k2")),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     text = package.full_antimony.antimony_text
@@ -732,7 +805,6 @@ def test_isozymes_with_different_law_types_compose_additively():
             _parameter(parameter_id="kcat2", value=Decimal("1")),
             _parameter(parameter_id="km2", value=Decimal("10")),
         ),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     text = package.full_antimony.antimony_text
@@ -753,7 +825,6 @@ def _two_complex_model(**law_overrides) -> ModelSpecification:
     return _model(
         kinetic_laws=(law_c1, law_c2),
         parameters=(_parameter(parameter_id="k_c1"), _parameter(parameter_id="k_c2")),
-        module_specifications=(),
     )
 
 
@@ -784,7 +855,6 @@ def test_protein_and_complex_contexts_never_composed():
     model = _model(
         kinetic_laws=(law_protein, law_complex),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k_c1")),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     assert (
@@ -815,7 +885,6 @@ def test_enzyme_state_and_protein_context_mix_never_composed():
         ),
         kinetic_laws=(law_protein, law_state),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k_e")),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     assert (
@@ -853,7 +922,6 @@ def test_enzyme_states_in_a_modeled_pool_compose_additively():
         ),
         kinetic_laws=(law_e, law_ep),
         parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep")),
-        module_specifications=(),
         enzyme_state_pools=(_pool(),),
     )
     package = generate_antimony(model)
@@ -886,7 +954,6 @@ def test_enzyme_states_without_a_modeled_pool_are_still_unresolved():
         ),
         kinetic_laws=(law_e, law_ep),
         parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_ep")),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     assert (
@@ -921,7 +988,6 @@ def test_enzyme_states_from_two_different_pools_are_never_composed():
         ),
         kinetic_laws=(law_e, law_f),
         parameters=(_parameter(parameter_id="k_e"), _parameter(parameter_id="k_f")),
-        module_specifications=(),
         enzyme_state_pools=(
             _pool(protein_id="p1", state_ids=("E", "E_P")),
             _pool(protein_id="p2", state_ids=("F", "F_P")),
@@ -953,14 +1019,12 @@ def test_enzyme_state_composition_is_deterministically_ordered():
         full_network=network,
         kinetic_laws=(law_e, law_ep),
         parameters=params,
-        module_specifications=(),
         enzyme_state_pools=pools,
     )
     model_reversed = _model(
         full_network=network,
         kinetic_laws=(law_ep, law_e),
         parameters=params,
-        module_specifications=(),
         enzyme_state_pools=pools,
     )
     text_forward = generate_antimony(model_forward).full_antimony.antimony_text
@@ -986,10 +1050,10 @@ def test_three_isozymes_compose_in_deterministic_order_regardless_of_input_order
         _parameter(parameter_id="k3"),
     )
     model_forward = _model(
-        kinetic_laws=(law_a, law_b, law_c), parameters=params, module_specifications=()
+        kinetic_laws=(law_a, law_b, law_c), parameters=params
     )
     model_reversed = _model(
-        kinetic_laws=(law_c, law_b, law_a), parameters=params, module_specifications=()
+        kinetic_laws=(law_c, law_b, law_a), parameters=params
     )
     text_forward = generate_antimony(model_forward).full_antimony.antimony_text
     text_reversed = generate_antimony(model_reversed).full_antimony.antimony_text
@@ -1018,7 +1082,6 @@ def test_one_unresolved_isozyme_contribution_does_not_contaminate_the_other():
             _parameter(parameter_id="k1"),
             _parameter(parameter_id="k2", source=ParameterSource.PLACEHOLDER, value=None),
         ),
-        module_specifications=(),
     )
     package = generate_antimony(model)
     assert (
@@ -1152,16 +1215,14 @@ def test_module_view_contains_only_module_reactions_and_species():
             ),
         ),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k2")),
-        module_specifications=(
-            _module(
-                module_id="mod-1",
-                reaction_ids=("r1",),
-                species_ids=("a", "b"),
-                parameter_ids=("k1",),
-            ),
+        modularizations=(_modularization(module_ids=("mod-1",)),),
+        model_modules=(_model_module(module_id="mod-1"),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
         ),
     )
-    view = generate_antimony(model).module_artifacts[0].antimony_view
+    (artifact,) = generate_module_artifacts(model, "mz-1")
+    view = artifact.antimony_view
     assert "J_r1" in view
     assert "J_r2" not in view
     assert "species s_a" in view
@@ -1191,35 +1252,45 @@ def test_multiple_modules_each_get_their_own_artifact():
             ),
         ),
         parameters=(_parameter(parameter_id="k1"), _parameter(parameter_id="k2")),
-        module_specifications=(
-            _module(
-                module_id="mod-a",
-                reaction_ids=("r1",),
-                species_ids=("a", "b"),
-                parameter_ids=("k1",),
-            ),
-            _module(
-                module_id="mod-b",
-                reaction_ids=("r2",),
-                species_ids=("b", "c"),
-                parameter_ids=("k2",),
-                compartment_ids=("cyto",),
-            ),
+        modularizations=(_modularization(module_ids=("mod-a", "mod-b")),),
+        model_modules=(
+            _model_module(module_id="mod-a"),
+            _model_module(module_id="mod-b"),
+        ),
+        module_memberships=(
+            _memberships_for(
+                "mod-a", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+            )
+            + _memberships_for(
+                "mod-b", reaction_ids=("r2",), species_ids=("b", "c"), parameter_ids=("k2",)
+            )
         ),
     )
-    package = generate_antimony(model)
-    assert {a.module_id for a in package.module_artifacts} == {"mod-a", "mod-b"}
+    artifacts = generate_module_artifacts(model, "mz-1")
+    assert {a.module_id for a in artifacts} == {"mod-a", "mod-b"}
 
 
 def test_module_view_never_invents_a_source_or_sink_reaction():
-    model = _model()
-    view = generate_antimony(model).module_artifacts[0].antimony_view
-    assert view.count("->") + view.count("=>") == 1
+    model = _model(
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+    )
+    (artifact,) = generate_module_artifacts(model, "mz-1")
+    assert artifact.antimony_view.count("->") + artifact.antimony_view.count("=>") == 1
 
 
-def test_module_marked_view_only_without_boundary_interfaces():
-    model = _model()
-    artifact = generate_antimony(model).module_artifacts[0]
+def test_module_marked_view_only_without_boundary_treatment():
+    model = _model(
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+    )
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.readiness is AntimonyArtifactReadiness.VIEW_ONLY
     assert artifact.standalone_antimony is None
 
@@ -1233,11 +1304,13 @@ def test_module_view_preserves_unresolved_composition_without_duplicating_reacti
         full_network=base.full_network,
         kinetic_laws=base.kinetic_laws,
         parameters=base.parameters,
-        module_specifications=(
-            _module(reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k_e", "k_ep")),
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k_e", "k_ep")
         ),
     )
-    artifact = generate_antimony(model).module_artifacts[0]
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.antimony_view is not None
     assert artifact.antimony_view.count("J_r1:") == 1
     assert artifact.readiness is AntimonyArtifactReadiness.VIEW_ONLY
@@ -1246,49 +1319,50 @@ def test_module_view_preserves_unresolved_composition_without_duplicating_reacti
 # --- Standalone module eligibility (Step 53) ----------------------------------------------------
 
 
-def test_standalone_withheld_without_explicit_boundary_interfaces():
-    model = _model()
-    artifact = generate_antimony(model).module_artifacts[0]
+def test_standalone_withheld_without_explicit_boundary_treatment():
+    model = _model(
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+    )
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.standalone_antimony is None
     assert artifact.readiness is AntimonyArtifactReadiness.VIEW_ONLY
 
 
-def test_standalone_generated_when_boundary_interfaces_explicit_and_resolved():
-    interface = ModuleBoundaryInterface(
-        species_id="a",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="held constant externally",
-        externally_controlled=True,
-        initial_value=Decimal("5"),
+def test_standalone_generated_when_boundary_treatment_explicit_and_resolved():
+    port = _port(externally_controlled=True, initial_value=Decimal("5"))
+    model = _model(
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+        module_ports=(port,),
     )
-    model = _model(module_specifications=(_module(boundary_interfaces=(interface,)),))
-    artifact = generate_antimony(model).module_artifacts[0]
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.readiness is AntimonyArtifactReadiness.EXECUTABLE
     assert artifact.standalone_antimony is not None
     assert "const s_a;" in artifact.standalone_antimony
     assert "s_a = 5;" in artifact.standalone_antimony
 
 
-def test_standalone_withheld_when_interfaces_explicit_but_kinetics_unresolved():
-    interface = ModuleBoundaryInterface(
-        species_id="a",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="held constant externally",
-        externally_controlled=True,
-    )
+def test_standalone_withheld_when_treatment_explicit_but_kinetics_unresolved():
+    port = _port(externally_controlled=True)
     law = _kinetic_law(
         law_type=KineticLawType.UNASSIGNED, expression=None, parameter_ids=(), species_ids=()
     )
     model = _model(
         kinetic_laws=(law,),
         parameters=(),
-        module_specifications=(
-            _module(boundary_interfaces=(interface,), parameter_ids=(), kinetic_law_ids=()),
-        ),
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for("mod-1", reaction_ids=("r1",), species_ids=("a", "b")),
+        module_ports=(port,),
     )
-    artifact = generate_antimony(model).module_artifacts[0]
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
     assert artifact.standalone_antimony is None
     assert artifact.unresolved_kinetic_law_ids == ("k1",)
@@ -1297,29 +1371,21 @@ def test_standalone_withheld_when_interfaces_explicit_but_kinetics_unresolved():
 
 def test_standalone_withheld_when_unresolved_catalytic_composition_blocks_it():
     """Step 31: unresolved multi-context composition blocks standalone executable module
-    generation even though the module's own boundary interfaces are fully explicit."""
-    interface = ModuleBoundaryInterface(
-        species_id="a",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="held constant externally",
-        externally_controlled=True,
-    )
+    generation even though the module's own boundary treatment is fully explicit."""
+    port = _port(externally_controlled=True)
     base = _two_context_model()
     model = _model(
         full_network=base.full_network,
         kinetic_laws=base.kinetic_laws,
         parameters=base.parameters,
-        module_specifications=(
-            _module(
-                reaction_ids=("r1",),
-                species_ids=("a", "b"),
-                parameter_ids=("k_e", "k_ep"),
-                boundary_interfaces=(interface,),
-            ),
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k_e", "k_ep")
         ),
+        module_ports=(port,),
     )
-    artifact = generate_antimony(model).module_artifacts[0]
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.standalone_antimony is None
     assert artifact.readiness is AntimonyArtifactReadiness.NON_EXECUTABLE_UNRESOLVED_KINETICS
     assert artifact.unresolved_reaction_ids == ("r1",)
@@ -1327,16 +1393,17 @@ def test_standalone_withheld_when_unresolved_catalytic_composition_blocks_it():
 
 
 def test_standalone_never_invents_a_boundary_condition_value():
-    """No initial_value declared on the interface -- standalone must not fabricate one."""
-    interface = ModuleBoundaryInterface(
-        species_id="a",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="externally controlled, value unspecified",
-        externally_controlled=True,
+    """No initial_value declared on the port -- standalone must not fabricate one."""
+    port = _port(externally_controlled=True)
+    model = _model(
+        modularizations=(_modularization(),),
+        model_modules=(_model_module(),),
+        module_memberships=_memberships_for(
+            "mod-1", reaction_ids=("r1",), species_ids=("a", "b"), parameter_ids=("k1",)
+        ),
+        module_ports=(port,),
     )
-    model = _model(module_specifications=(_module(boundary_interfaces=(interface,)),))
-    artifact = generate_antimony(model).module_artifacts[0]
+    (artifact,) = generate_module_artifacts(model, "mz-1")
     assert artifact.standalone_antimony is not None
     assert "const s_a;" in artifact.standalone_antimony
     assert "s_a = " not in artifact.standalone_antimony.split("const s_a;")[1].split("\n")[1]
@@ -1370,7 +1437,6 @@ def test_multi_context_reaction_resolution_is_order_independent():
         full_network=forward.full_network,
         kinetic_laws=tuple(reversed(forward.kinetic_laws)),
         parameters=forward.parameters,
-        module_specifications=(),
     )
     first = generate_antimony(forward)
     second = generate_antimony(reversed_order)

@@ -684,6 +684,18 @@ id-namespace gap named in §5/§20 when it actually constructs
 would require design decisions (how a `KineticLawAssignment` becomes a
 `KineticLawSpecification`) squarely outside Increment 7's own scope.
 
+**Still accurate, with one later correction.** `ModelSpecification` no longer carries
+`module_decomposition`/`.module_specifications` directly (removed by the Module
+Decomposition/Modularization Reconciliation increment,
+`docs/26_module_decomposition_modularization_reconciliation.md`) -- everything else in this
+paragraph (what this package's own output carries, and that it is real/validated/complete)
+remains true. `app.agent2.model_specification.assemble_model_specification` now converts
+this package's output into the unified `ModelModularization`/`ModelModule`/
+`ModuleMembership`/`ModulePort` representation (`app.agent2.modularization
+.modularizations_from_decomposition_set`) before storing it, rather than storing it directly
+-- `decompose_network` itself, and everything this document describes about it, is completely
+unchanged.
+
 ## 26. Final architectural rule
 
 > The `FullNetwork` always remains authoritative. Modules are views onto

@@ -112,8 +112,10 @@ def test_representative_fixture_imports_every_required_construct():
     assert model.rules[0].rule_type is RuleType.ASSIGNMENT
     assert len(model.events) == 1
     # "// module: ..." comments are inert text -- no module structure is ever inferred.
-    assert model.module_specifications == ()
-    assert model.module_decomposition is None
+    assert model.modularizations == ()
+    assert model.model_modules == ()
+    assert model.module_memberships == ()
+    assert model.module_ports == ()
 
 
 def test_species_initial_values_preserved_exactly():

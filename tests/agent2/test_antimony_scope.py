@@ -189,13 +189,15 @@ def test_generate_antimony_never_mutates_model_specification():
 
 
 def test_generate_antimony_never_recomputes_upstream_decisions():
-    """The output package's boundary_assessments/module_decomposition/model_specification
-    must be exactly the input model's own data -- never independently re-derived."""
+    """The output package's model_specification must be exactly the input model's own data --
+    never independently re-derived. Module Decomposition/Modularization Reconciliation
+    increment: ``generate_antimony`` no longer auto-generates any module_artifacts at all
+    (never recomputes, or even reads, module/modularization data) -- that is now always an
+    explicit, separate, opt-in call (``app.agent2.antimony.generate_module_artifacts``)."""
     model = _real_model()
     package = generate_antimony(model)
     assert package.model_specification is model
-    assert package.boundary_assessments == model.boundary_assessments
-    assert package.module_decomposition == model.module_decomposition
+    assert package.module_artifacts == ()
 
 
 def test_generate_antimony_output_has_no_simulation_result_fields():

@@ -110,6 +110,22 @@ class ModuleDecompositionSet:
             tuple(m.module_id for m in self.module_specifications),
             field_name="ModuleDecompositionSet.module_specifications[].module_id",
         )
+        # Module Decomposition/Modularization Reconciliation increment: this cross-check used
+        # to run only transitively, as part of ModelSpecification's own validation (now removed
+        # -- ModelSpecification no longer stores module_decomposition/module_specifications at
+        # all) -- moved here, its more natural owner, so it is never silently lost.
+        interface_ids = {
+            interface.interface_id
+            for decomposition in self.decompositions
+            for interface in decomposition.interfaces
+        }
+        for module in self.module_specifications:
+            unknown = sorted(set(module.boundary_interface_ids) - interface_ids)
+            if unknown:
+                raise ValueError(
+                    f"module {module.module_id!r}.boundary_interface_ids references unknown "
+                    f"InterModuleBoundaryInterface id(s): {unknown}"
+                )
         object.__setattr__(
             self, "assumptions", _require_str_tuple(self.assumptions, field_name="assumptions")
         )

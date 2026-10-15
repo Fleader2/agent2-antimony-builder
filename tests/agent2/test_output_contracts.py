@@ -27,11 +27,15 @@ from app.agent2.types import (
     KineticLawSpecification,
     KineticLawType,
     ModelAssumption,
+    ModelModularization,
+    ModelModule,
     ModelSpecification,
+    ModularizationMethod,
     ModuleAntimonyArtifact,
-    ModuleBoundaryInterface,
-    ModuleDecomposition,
-    ModuleInterfaceRole,
+    ModuleComponentType,
+    ModuleMembership,
+    ModulePort,
+    ModulePortDirection,
     ModuleSpecification,
     ParameterSource,
     ParameterSpecification,
@@ -114,6 +118,32 @@ def _module(**overrides) -> ModuleSpecification:
     return ModuleSpecification(**merged)
 
 
+def _modularization(**overrides) -> ModelModularization:
+    merged = {
+        "modularization_id": "mz-1",
+        "name": "test modularization",
+        "method": ModularizationMethod.USER_DEFINED,
+        "module_ids": ("mod-1",),
+    } | overrides
+    return ModelModularization(**merged)
+
+
+def _model_module(**overrides) -> ModelModule:
+    merged = {"module_id": "mod-1", "name": "test module"} | overrides
+    return ModelModule(**merged)
+
+
+def _membership(**overrides) -> ModuleMembership:
+    merged = {
+        "membership_id": "mem-1",
+        "modularization_id": "mz-1",
+        "module_id": "mod-1",
+        "component_type": ModuleComponentType.REACTION,
+        "component_id": "r1",
+    } | overrides
+    return ModuleMembership(**merged)
+
+
 def _model_specification(**overrides) -> ModelSpecification:
     merged = {
         "model_id": "m1",
@@ -121,8 +151,9 @@ def _model_specification(**overrides) -> ModelSpecification:
         "full_network": _network(),
         "kinetic_laws": (_kinetic_law(),),
         "parameters": (_parameter(),),
-        "boundary_assessments": (_boundary(),),
-        "module_specifications": (_module(),),
+        "modularizations": (_modularization(),),
+        "model_modules": (_model_module(),),
+        "module_memberships": (_membership(),),
     } | overrides
     return ModelSpecification(**merged)
 
@@ -152,21 +183,39 @@ def test_model_specification_builds_with_valid_complete_object():
     assert spec.full_network.network_id == "n1"
     assert spec.kinetic_laws[0].kinetic_law_id == "k1"
     assert spec.parameters[0].parameter_id == "p1"
-    assert spec.module_specifications[0].module_id == "mod-1"
+    assert spec.modularizations[0].modularization_id == "mz-1"
+    assert spec.model_modules[0].module_id == "mod-1"
+    assert spec.module_memberships[0].component_id == "r1"
     assert spec.contract_version == AGENT2_CONTRACT_VERSION
 
 
-def test_model_specification_can_hold_model_decomposition():
-    decomposition = ModuleDecomposition(
-        decomposition_id="d1",
-        name="test decomposition",
-        policy_version="boundary-v1",
-        created_from_network_id="n1",
-        module_ids=("mod-1",),
-        boundary_assessment_ids=("b1",),
+def test_model_specification_can_hold_modularizations():
+    """Module Decomposition/Modularization Reconciliation increment: the unified
+    ModelModularization/ModelModule/ModuleMembership/ModulePort family is the one, stored
+    module-related representation -- ``module_decomposition``/``module_specifications`` no
+    longer exist on ``ModelSpecification`` at all (reference-integrity coverage for this
+    family lives in ``tests/agent2/test_modularization.py``)."""
+    port = ModulePort(
+        port_id="port-1",
+        modularization_id="mz-1",
+        module_id="mod-1",
+        species_id="s1",
+        direction=ModulePortDirection.OUTPUT,
     )
-    spec = _model_specification(module_decomposition=decomposition)
-    assert spec.module_decomposition.decomposition_id == "d1"
+    spec = _model_specification(module_ports=(port,))
+    assert spec.modularizations[0].method is ModularizationMethod.USER_DEFINED
+    assert spec.module_ports[0].port_id == "port-1"
+
+
+def test_model_specification_rejects_duplicate_model_modules_module_id():
+    """Module Decomposition/Modularization Reconciliation increment: ``model_modules[]
+    .module_id`` must be globally unique across the *entire* model, never merely unique per
+    modularization -- this is the direct successor to the old, now-removed
+    ``test_model_specification_rejects_duplicate_module_ids`` (which checked the identical
+    invariant on the since-removed ``module_specifications`` field)."""
+    duplicate_modules = (_model_module(module_id="mod-1"), _model_module(module_id="mod-1"))
+    with pytest.raises(ValueError):
+        _model_specification(model_modules=duplicate_modules)
 
 
 def test_model_specification_can_hold_model_assumptions():
@@ -220,78 +269,6 @@ def test_model_specification_rejects_reaction_with_unknown_kinetic_law_id():
         _model_specification(full_network=bad_network, kinetic_laws=(_kinetic_law(),))
 
 
-def test_model_specification_rejects_module_with_unknown_species_id():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(species_ids=("missing",)),))
-
-
-def test_model_specification_rejects_module_with_unknown_reaction_id():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(reaction_ids=("missing",)),))
-
-
-def test_model_specification_rejects_module_with_unknown_parameter_id():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(parameter_ids=("missing",)),))
-
-
-def test_model_specification_rejects_module_with_unknown_kinetic_law_id():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(kinetic_law_ids=("missing",)),))
-
-
-def test_model_specification_rejects_module_with_unknown_source_boundary_id():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(source_boundary_ids=("missing",)),))
-
-
-def test_model_specification_rejects_module_boundary_interface_with_unknown_species():
-    interface = ModuleBoundaryInterface(
-        species_id="missing",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="test",
-        externally_controlled=True,
-    )
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(boundary_interfaces=(interface,)),))
-
-
-def test_model_specification_rejects_decomposition_with_unknown_module_id():
-    decomposition = ModuleDecomposition(
-        decomposition_id="d1",
-        name="test",
-        policy_version="boundary-v1",
-        created_from_network_id="n1",
-        module_ids=("missing-module",),
-    )
-    with pytest.raises(ValueError):
-        _model_specification(module_decomposition=decomposition)
-
-
-def test_model_specification_rejects_decomposition_with_unknown_boundary_id():
-    decomposition = ModuleDecomposition(
-        decomposition_id="d1",
-        name="test",
-        policy_version="boundary-v1",
-        created_from_network_id="n1",
-        boundary_assessment_ids=("missing-boundary",),
-    )
-    with pytest.raises(ValueError):
-        _model_specification(module_decomposition=decomposition)
-
-
-def test_model_specification_rejects_decomposition_from_a_different_network():
-    decomposition = ModuleDecomposition(
-        decomposition_id="d1",
-        name="test",
-        policy_version="boundary-v1",
-        created_from_network_id="a-different-network",
-    )
-    with pytest.raises(ValueError):
-        _model_specification(module_decomposition=decomposition)
-
-
 def test_model_specification_rejects_duplicate_kinetic_law_ids():
     with pytest.raises(ValueError):
         _model_specification(kinetic_laws=(_kinetic_law(), _kinetic_law()))
@@ -300,16 +277,6 @@ def test_model_specification_rejects_duplicate_kinetic_law_ids():
 def test_model_specification_rejects_duplicate_parameter_ids():
     with pytest.raises(ValueError):
         _model_specification(parameters=(_parameter(), _parameter()))
-
-
-def test_model_specification_rejects_duplicate_module_ids():
-    with pytest.raises(ValueError):
-        _model_specification(module_specifications=(_module(), _module()))
-
-
-def test_model_specification_rejects_duplicate_boundary_ids():
-    with pytest.raises(ValueError):
-        _model_specification(boundary_assessments=(_boundary(), _boundary()))
 
 
 def test_model_specification_never_performs_agent3_level_validation():
@@ -345,6 +312,7 @@ def test_full_antimony_artifact_requires_non_blank_text():
 def test_module_antimony_artifact_view_without_standalone_allowed():
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// module view only",
@@ -353,30 +321,33 @@ def test_module_antimony_artifact_view_without_standalone_allowed():
     assert artifact.standalone_antimony is None
 
 
-def test_module_antimony_artifact_standalone_requires_explicit_boundary_interfaces():
+def test_module_antimony_artifact_standalone_requires_explicit_boundary_treatment():
     with pytest.raises(ValueError):
         ModuleAntimonyArtifact(
             module_id="mod-1",
+            modularization_id="mz-1",
             model_specification_id="m1",
             generator_version="0.0",
             standalone_antimony="// standalone attempt",
         )
 
 
-def test_module_antimony_artifact_standalone_allowed_with_explicit_interfaces():
-    interface = ModuleBoundaryInterface(
+def test_module_antimony_artifact_standalone_allowed_with_explicit_port():
+    port = ModulePort(
+        port_id="port-1",
+        modularization_id="mz-1",
+        module_id="mod-1",
         species_id="s1",
-        role=ModuleInterfaceRole.INPUT,
-        direction="inbound",
-        assumption="constant",
+        direction=ModulePortDirection.INPUT,
         externally_controlled=True,
     )
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         standalone_antimony="// standalone",
-        boundary_interfaces=(interface,),
+        boundary_ports=(port,),
         readiness=AntimonyArtifactReadiness.EXECUTABLE,
     )
     assert artifact.standalone_antimony == "// standalone"
@@ -439,6 +410,7 @@ def test_full_antimony_artifact_non_executable_requires_unresolved_reaction_ids_
 def test_module_antimony_artifact_defaults_to_view_only_readiness():
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// view",
@@ -450,6 +422,7 @@ def test_module_antimony_artifact_executable_requires_standalone_text():
     with pytest.raises(ValueError):
         ModuleAntimonyArtifact(
             module_id="mod-1",
+            modularization_id="mz-1",
             model_specification_id="m1",
             generator_version="0.0",
             antimony_view="// view",
@@ -461,6 +434,7 @@ def test_module_antimony_artifact_non_executable_requires_both_unresolved_id_fie
     with pytest.raises(ValueError):
         ModuleAntimonyArtifact(
             module_id="mod-1",
+            modularization_id="mz-1",
             model_specification_id="m1",
             generator_version="0.0",
             antimony_view="// view",
@@ -469,6 +443,7 @@ def test_module_antimony_artifact_non_executable_requires_both_unresolved_id_fie
         )
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// view",
@@ -503,8 +478,6 @@ def test_agent2_output_package_valid_construction():
         contract_version=AGENT2_CONTRACT_VERSION,
         model_specification=spec,
         full_antimony=_full_antimony(),
-        boundary_assessments=spec.boundary_assessments,
-        module_decomposition=spec.module_decomposition,
     )
     assert package.model_specification.model_id == "m1"
 
@@ -519,10 +492,29 @@ def test_agent2_output_package_rejects_mismatched_full_antimony_link():
         )
 
 
+def test_agent2_output_package_rejects_module_artifact_for_unknown_modularization():
+    spec = _model_specification()
+    artifact = ModuleAntimonyArtifact(
+        module_id="mod-1",
+        modularization_id="unknown-modularization",
+        model_specification_id="m1",
+        generator_version="0.0",
+        antimony_view="// view",
+    )
+    with pytest.raises(ValueError):
+        Agent2OutputPackage(
+            contract_version=AGENT2_CONTRACT_VERSION,
+            model_specification=spec,
+            full_antimony=_full_antimony(),
+            module_artifacts=(artifact,),
+        )
+
+
 def test_agent2_output_package_rejects_module_artifact_for_unknown_module():
     spec = _model_specification()
     artifact = ModuleAntimonyArtifact(
         module_id="unknown-module",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// view",
@@ -540,6 +532,7 @@ def test_agent2_output_package_rejects_duplicate_module_artifacts():
     spec = _model_specification()
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// view",
@@ -553,39 +546,11 @@ def test_agent2_output_package_rejects_duplicate_module_artifacts():
         )
 
 
-def test_agent2_output_package_requires_matching_boundary_assessments():
-    spec = _model_specification()
-    with pytest.raises(ValueError):
-        Agent2OutputPackage(
-            contract_version=AGENT2_CONTRACT_VERSION,
-            model_specification=spec,
-            full_antimony=_full_antimony(),
-            boundary_assessments=(),
-        )
-
-
-def test_agent2_output_package_requires_matching_module_decomposition():
-    spec = _model_specification()
-    other_decomposition = ModuleDecomposition(
-        decomposition_id="different",
-        name="different",
-        policy_version="boundary-v1",
-        created_from_network_id="n1",
-    )
-    with pytest.raises(ValueError):
-        Agent2OutputPackage(
-            contract_version=AGENT2_CONTRACT_VERSION,
-            model_specification=spec,
-            full_antimony=_full_antimony(),
-            boundary_assessments=spec.boundary_assessments,
-            module_decomposition=other_decomposition,
-        )
-
-
 def test_agent2_output_package_full_model_linkage_accepts_valid_artifact():
     spec = _model_specification()
     artifact = ModuleAntimonyArtifact(
         module_id="mod-1",
+        modularization_id="mz-1",
         model_specification_id="m1",
         generator_version="0.0",
         antimony_view="// view",
@@ -595,7 +560,5 @@ def test_agent2_output_package_full_model_linkage_accepts_valid_artifact():
         model_specification=spec,
         full_antimony=_full_antimony(),
         module_artifacts=(artifact,),
-        boundary_assessments=spec.boundary_assessments,
-        module_decomposition=spec.module_decomposition,
     )
     assert package.module_artifacts[0].module_id == "mod-1"
