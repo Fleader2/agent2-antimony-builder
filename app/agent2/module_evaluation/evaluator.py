@@ -73,6 +73,7 @@ def evaluate_modularization(
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, ModuleCalibrationEvaluation] | None = None,
+    null_reference_scores: Mapping[ModularizationCriterion, Decimal] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> ModularizationEvaluation:
     """Score one ``model.modularizations`` entry under ``weights``.
@@ -97,6 +98,18 @@ def evaluate_modularization(
     computed and added to ``criterion_scores`` at all -- omitting it (the default) reproduces
     this function's exact pre-existing behavior with no change whatsoever, and that previously-
     reserved criterion simply does not appear, exactly as before this increment.
+
+    ``null_reference_scores`` (Module-Count / Resolution Bias Audit increment, optional,
+    defaults to ``None``) is a caller-supplied ``{criterion: Decimal}`` mapping -- each
+    criterion's own score for a deterministic, structure-blind partition matched to this
+    modularization's own module count (``app.agent2.resolution_audit``, never computed by this
+    function itself). When a matching, available entry exists for a criterion,
+    ``ModularizationCriterionScore.corrected_score`` is populated (``(raw_score -
+    null_reference_score) / (1 - null_reference_score)``, ``None`` when the null score is
+    itself ``>= 1``), and that criterion's own *clamped-to-[0, 1]* corrected score -- never the
+    raw score -- drives ``weighted_contribution``/``overall_score`` instead. ``raw_score`` is
+    always preserved unchanged regardless. Omitting ``null_reference_scores`` (the default)
+    reproduces this function's exact pre-existing behavior with no change whatsoever.
 
     Raises ``ModuleEvaluationReferenceError`` if ``model`` is not a real ``ModelSpecification``,
     ``weights`` is not a real ``CriteriaWeights``, or ``modularization_id`` does not name a real
@@ -145,8 +158,22 @@ def evaluate_modularization(
         result = raw_results[criterion]
         raw_weight = weights.raw_weight(criterion)
         normalized_weight = weights.normalized_weight(criterion)
+
+        null_reference_score = None
+        corrected_score = None
+        effective_score = result.raw_score
+        if result.available and null_reference_scores is not None:
+            candidate_null = null_reference_scores.get(criterion)
+            if candidate_null is not None:
+                null_reference_score = candidate_null
+                if candidate_null < 1:
+                    corrected_score = (result.raw_score - candidate_null) / (
+                        Decimal(1) - candidate_null
+                    )
+                    effective_score = max(Decimal(0), min(Decimal(1), corrected_score))
+
         weighted_contribution = (
-            normalized_weight * result.raw_score
+            normalized_weight * effective_score
             if result.available and normalized_weight > 0
             else None
         )
@@ -161,6 +188,8 @@ def evaluate_modularization(
                 explanation=result.explanation,
                 warnings=result.warnings,
                 detail=result.detail,
+                null_reference_score=null_reference_score,
+                corrected_score=corrected_score,
             )
         )
         if not result.available and raw_weight > 0:

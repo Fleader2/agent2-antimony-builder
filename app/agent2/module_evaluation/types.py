@@ -476,6 +476,23 @@ class ModularizationCriterionScore:
     #: disclosed exception to this type's otherwise fully generic, criterion-agnostic shape --
     #: ``None`` for every other criterion.
     detail: TopologySeparationDetail | CalibrationIndependenceDetail | None = None
+    #: Module-Count / Resolution Bias Audit increment. ``null_reference_score`` is this one
+    #: criterion's own score for a deterministic, structure-blind partition matched to this
+    #: modularization's own module count (``app.agent2.resolution_audit``) -- ``None`` unless a
+    #: caller explicitly supplied one (``evaluate_modularization``'s own ``null_reference_
+    #: scores`` parameter; omitting it, the default, leaves both fields ``None`` and reproduces
+    #: every pre-existing behavior exactly). ``corrected_score`` is ``(raw_score -
+    #: null_reference_score) / (1 - null_reference_score)`` -- "how much of the possible
+    #: improvement over the resolution-matched blind baseline did this real partition actually
+    #: capture," deliberately **not** clamped to ``[0, 1]`` here (a real partition that scores
+    #: *worse* than a blind one is itself a genuine, disclosed negative finding, never hidden by
+    #: clamping) -- ``evaluate_modularization`` clamps only the value it feeds into ``weighted_
+    #: contribution``/``overall_score``, never this field. ``None`` when ``null_reference_score``
+    #: is itself ``>= 1`` (the blind baseline already achieves the maximum possible score at
+    #: this resolution -- no correction is meaningful). The original ``raw_score`` above is
+    #: always preserved unchanged alongside both.
+    null_reference_score: Decimal | None = None
+    corrected_score: Decimal | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.criterion, ModularizationCriterion):
@@ -561,6 +578,32 @@ class ModularizationCriterionScore:
                 raise TypeError(
                     "ModularizationCriterionScore.detail must be a TopologySeparationDetail, "
                     f"a CalibrationIndependenceDetail, or None, got {self.detail!r}"
+                )
+        if self.null_reference_score is not None:
+            if not self.available:
+                raise ValueError(
+                    "ModularizationCriterionScore.null_reference_score must be None when the "
+                    "criterion itself is not available -- a null baseline is only ever "
+                    "meaningful alongside a real, available score to compare it against"
+                )
+            object.__setattr__(
+                self,
+                "null_reference_score",
+                _require_unit_interval(
+                    self.null_reference_score, field_name="null_reference_score"
+                ),
+            )
+        if self.corrected_score is not None:
+            if self.null_reference_score is None:
+                raise ValueError(
+                    "ModularizationCriterionScore.corrected_score must be None when "
+                    "null_reference_score is None -- never a correction with nothing to "
+                    "correct against"
+                )
+            if not isinstance(self.corrected_score, Decimal):
+                raise TypeError(
+                    "ModularizationCriterionScore.corrected_score must be a Decimal or None, "
+                    f"got {self.corrected_score!r}"
                 )
 
 

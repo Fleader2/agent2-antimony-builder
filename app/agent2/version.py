@@ -1601,11 +1601,66 @@ behavior with no change whatsoever. No other version constant changes --
 ``WEIGHT_SPACE_EXPLORATION_POLICY_VERSION``'s own grid-sampling/high-scoring-selection/
 stability-computation policy is untouched; these functions are already fully criterion-
 agnostic. See ``docs/32_calibration_evidence_integration_into_weight_space_exploration.md``.
+
+**Candidate Modularization Search increment.** New ``app.agent2.modularization_search``
+package: deterministic, bounded beam/best-first search (``search_candidate_modularizations``)
+proposing neighboring modularizations from a seed via six proposal operators (move a reaction,
+add/remove a declared boundary, merge adjacent modules, split a module using its own internal
+topology, and a module-count "fast lane"), evaluated entirely through the existing, unchanged
+Module Boundary Evaluation Framework/Weight-Space Exploration framework
+(``evaluate_modularization``/``explore_weight_space``) -- no new scoring logic, no automatic
+Agent 3/Agent 4 calls. ``ModularizationMethod`` gained ``SEARCH_GENERATED`` (additive;
+``AGENT2_CONTRACT_VERSION`` bumped ``"0.15"`` -> ``"0.16"``) for every candidate this package
+produces. Every module/membership/port id this package generates is content-addressed
+(``app.agent2.modularization_search.identity``) -- the same, deterministic module id always
+results from the same membership content regardless of which candidate/generation produced
+it, which is what makes both duplicate-equivalence detection and calibration-evidence lookup
+(by module content, never by an arbitrary generated id) work correctly across independently-
+generated candidates with no extra bookkeeping. New
+``MODULARIZATION_SEARCH_POLICY_VERSION = "modularization-search-v1"``; no other version
+constant changes beyond ``AGENT2_CONTRACT_VERSION`` above. See
+``docs/33_candidate_modularization_search.md``.
+
+**Module-Count / Resolution Bias Audit increment.** New ``app.agent2.resolution_audit``
+package: ``audit_criterion_resolution`` scores one criterion across several already-built
+modularizations at different resolutions, builds and scores a matched, deterministic,
+structure-blind ``NULL_REFERENCE`` partition (new ``ModularizationMethod`` member; additive,
+``AGENT2_CONTRACT_VERSION`` bumped ``"0.16"`` -> ``"0.17"``) at each one's own module count, and
+classifies the criterion's own bias severity (``NO_MATERIAL_BIAS``/``MILD_RESOLUTION_
+DEPENDENCE``/``STRONG_COARSE_BIAS``/``STRONG_FINE_BIAS``/``INSUFFICIENT_EVIDENCE``) entirely
+from how *that null partition's own score* -- never the real partition's own score, which can
+legitimately vary for genuine biological reasons -- varies across resolutions. Found
+``TOPOLOGICAL_SEPARATION`` strongly coarse-biased (a degenerate 1-module partition is always,
+trivially, a perfect score) and ``COMPARTMENT_COHERENCE``/``EC_CLASS_COHERENCE`` strongly
+fine-biased (a near-singleton module is near-certain to score well by pure combinatorics, with
+no biological content); see ``docs/34_module_count_resolution_bias_audit.md`` for the full,
+hand-derived mathematical proof behind each finding, not just the empirical observation.
+
+``ModularizationCriterionScore`` (``module_evaluation.types``) gained ``null_reference_score``/
+``corrected_score`` (both ``None`` unless a caller explicitly supplies ``evaluate_modularization
+``'s own new, optional ``null_reference_scores`` parameter -- omitting it, the default,
+reproduces every pre-existing behavior with no change whatsoever). ``corrected_score =
+(raw_score - null_reference_score) / (1 - null_reference_score)`` -- "how much of the possible
+improvement over the resolution-matched blind baseline did this real partition actually
+capture" -- never clamped on the field itself (a real partition scoring *worse* than a blind
+one is itself a genuine, disclosed finding), only when it is the value actually used to drive
+``weighted_contribution``/``overall_score``. The original ``raw_score`` is always preserved
+unchanged, exactly as the task's own "preserve the original raw score alongside any corrected
+score" requires. ``MODULE_EVALUATION_POLICY_VERSION`` bumped ``"module-evaluation-v1"`` ->
+``"module-evaluation-v2"`` for this real, additive scoring-policy extension.
+``app.agent2.modularization_search.search_candidate_modularizations`` gained an optional
+``apply_resolution_correction: bool = False`` flag -- when set, the search computes a matching
+null partition for each candidate's own module count on the fly and ranks/retains by the
+corrected score instead of raw, while every candidate's own raw score, null baseline, and
+module count remain fully inspectable on its own ``ModularizationEvaluation``; omitting it (the
+default) reproduces the search's exact pre-existing behavior with no change whatsoever. New
+``RESOLUTION_AUDIT_POLICY_VERSION = "resolution-audit-v1"``. See
+``docs/34_module_count_resolution_bias_audit.md``.
 """
 
 from __future__ import annotations
 
-AGENT2_CONTRACT_VERSION = "0.15"
+AGENT2_CONTRACT_VERSION = "0.17"
 AGENT1_HANDOFF_VERSION = "1.7"
 BOUNDARY_POLICY_VERSION = "boundary-v3"
 REACTION_CHARACTERIZATION_POLICY_VERSION = "reaction-characterization-v1"
@@ -1637,8 +1692,11 @@ AGENT2_ORCHESTRATION_POLICY_VERSION = "agent2-orchestration-v1"
 AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
 #: Module Boundary Evaluation Framework increment -- the version of
 #: ``app.agent2.module_evaluation``'s own scoring policy (which criteria exist, how each one
-#: is computed, how weights are normalized and combined into an overall score).
-MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v1"
+#: is computed, how weights are normalized and combined into an overall score). Bumped to v2
+#: by the Module-Count / Resolution Bias Audit increment (``ModularizationCriterionScore``
+#: gained ``null_reference_score``/``corrected_score``; ``evaluate_modularization`` gained the
+#: optional ``null_reference_scores`` parameter).
+MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v2"
 #: Weight-Space Exploration and Stable Boundary Discovery increment -- the version of
 #: ``app.agent2.weight_space_exploration``'s own policy (deterministic weight-grid sampling,
 #: high-scoring-solution selection, boundary/co-membership/modularization-recurrence stability
@@ -1651,6 +1709,14 @@ WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"
 #: Calibration Evidence Integration into Weight-Space Exploration increment (a module with no
 #: evidence entry at all is now correctly treated as unavailable, not silently skipped).
 MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v2"
+#: Candidate Modularization Search increment -- the version of
+#: ``app.agent2.modularization_search``'s own search policy (proposal-operator semantics,
+#: content-addressed identity, duplicate-equivalence signature, beam-search retention rule).
+MODULARIZATION_SEARCH_POLICY_VERSION = "modularization-search-v1"
+#: Module-Count / Resolution Bias Audit increment -- the version of
+#: ``app.agent2.resolution_audit``'s own policy (null-partition construction, bias-severity
+#: classification thresholds).
+RESOLUTION_AUDIT_POLICY_VERSION = "resolution-audit-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1668,6 +1734,7 @@ __all__ = [
     "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULARIZATION_POLICY_VERSION",
+    "MODULARIZATION_SEARCH_POLICY_VERSION",
     "MODULE_CALIBRATION_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "MODULE_EVALUATION_POLICY_VERSION",
@@ -1675,5 +1742,6 @@ __all__ = [
     "QUANTITATIVE_CONTEXT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
     "REACTION_CONTEXT_RESOLUTION_POLICY_VERSION",
+    "RESOLUTION_AUDIT_POLICY_VERSION",
     "WEIGHT_SPACE_EXPLORATION_POLICY_VERSION",
 ]

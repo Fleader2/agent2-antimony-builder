@@ -3397,12 +3397,14 @@ class ModularizationMethod(StrEnum):
     """How one ``ModelModularization`` was produced -- provenance of the *decomposition
     itself*, never a confidence score.
 
-    Only ``USER_DEFINED``/``IMPORTED`` are ever actually constructed by this increment's own
-    code (task instructions: "do not implement sophisticated automatic module discovery in
-    this increment"). The remaining four names are reserved vocabulary for a future
-    algorithmic increment to populate -- declaring them now lets ``ModelModularization.method``
-    be a closed, stable enum from the start, never requiring every existing modularization's
-    own stored ``method`` value to be revisited when such an increment eventually lands.
+    Only ``USER_DEFINED``/``IMPORTED`` were ever actually constructed by the increment that
+    introduced this enum (task instructions: "do not implement sophisticated automatic module
+    discovery in this increment"). The Candidate Modularization Search increment adds
+    ``SEARCH_GENERATED`` as the first genuinely algorithmic producer. The remaining four names
+    stay reserved vocabulary for a future increment to populate -- declaring them now lets
+    ``ModelModularization.method`` be a closed, stable enum from the start, never requiring
+    every existing modularization's own stored ``method`` value to be revisited when such an
+    increment eventually lands.
     """
 
     #: Supplied directly by a human/caller -- this increment's own primary construction path.
@@ -3410,6 +3412,18 @@ class ModularizationMethod(StrEnum):
     #: Obtained from an external source by the *caller's* own means (not parsed from Antimony
     #: text by this repository -- see ``docs/22_model_modularization.md`` §6 for why).
     IMPORTED = "IMPORTED"
+    #: Candidate Modularization Search increment: produced by
+    #: ``app.agent2.modularization_search`` applying one deterministic proposal operator
+    #: (move/merge/split/boundary/vary-count) to a parent modularization -- never a human/
+    #: caller-supplied decomposition, and never (yet) informed by simulated dynamics,
+    #: sensitivity, or calibration evidence beyond whatever a caller already supplied.
+    SEARCH_GENERATED = "SEARCH_GENERATED"
+    #: Module-Count / Resolution Bias Audit increment: a deterministic, structure-blind
+    #: reference partition (``app.agent2.resolution_audit``), built only to match another
+    #: modularization's own module count/size distribution -- never a claim of real biological
+    #: structure, used solely as a null baseline for distinguishing genuine modularity evidence
+    #: from a module-count/size mathematical artifact.
+    NULL_REFERENCE = "NULL_REFERENCE"
     #: Reserved for a future increment: derived from network topology/connectivity alone.
     TOPOLOGICAL = "TOPOLOGICAL"
     #: Reserved for a future increment: derived from shared biological function/pathway role.
