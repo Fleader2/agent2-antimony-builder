@@ -1559,6 +1559,29 @@ semantics, and no existing type's stored shape changes. New
 constant changes -- this package's own types are never stored on ``ModelSpecification``/
 ``Agent2OutputPackage`` either. See
 ``docs/30_weight_space_exploration_and_stable_boundary_discovery.md``.
+
+**Recursive Module Evaluation Orchestration increment.** New ``app.agent2.module_calibration``
+package: ``build_module_calibration_request`` (uses the existing, unchanged
+``app.agent2.antimony.generate_module_artifacts`` standalone-module path),
+``ModuleCalibrationEvaluation``/``ModuleCalibrationStatus`` (the structured, externally-produced
+calibration-based module-quality result a Harness round trip through Agent 3/Agent 4 returns),
+and ``parse_module_calibration_evaluation`` (plain-dict-decoupled, mirrors the Agent2->Agent3/
+Agent3->Agent4 handoff-parsing convention exactly -- Agent 2 never imports the Harness's or
+Agent 4's own Python package). New ``app.agent2.module_evaluation.calibration_adapter
+.score_calibration_independence`` converts one valid ``ModuleCalibrationEvaluation`` into a
+``ModularizationCriterionScore`` for the previously-reserved ``CALIBRATION_INDEPENDENCE``
+criterion -- ``evaluate_modularization`` gained one new, optional ``calibration_evidence``
+parameter so that criterion's own weight share is honestly accounted for in
+``evaluated_weight_fraction``/``overall_score`` exactly like every other criterion, only when a
+caller actually supplies externally-obtained calibration evidence (never computed automatically
+-- Agent 2 never calls Agent 3/Agent 4 directly, and this package still performs no simulation
+or fitting of its own). New ``build_module_downstream_handoff`` (``app.agent2.pipeline``) emits
+one module's own standalone-submodel Antimony as a minimal, valid Agent2->Agent3 handoff dict
+(the identical shape ``build_canonical_downstream_handoff`` already emits for a whole model),
+so Agent 3 requires zero code change to simulate a module exactly as it would any whole model.
+New ``MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v1"``; no other version constant
+changes -- nothing here is ever stored on ``ModelSpecification``/``Agent2OutputPackage`` either.
+See ``docs/31_recursive_module_evaluation_orchestration.md``.
 """
 
 from __future__ import annotations
@@ -1602,6 +1625,11 @@ MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v1"
 #: high-scoring-solution selection, boundary/co-membership/modularization-recurrence stability
 #: computation).
 WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"
+#: Recursive Module Evaluation Orchestration increment -- the version of
+#: ``app.agent2.module_calibration``'s own request/result contract shape and of
+#: ``app.agent2.module_evaluation.calibration_adapter``'s own scoring policy (status ->
+#: available/raw-score mapping, weakest-link multi-module aggregation).
+MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1619,6 +1647,7 @@ __all__ = [
     "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULARIZATION_POLICY_VERSION",
+    "MODULE_CALIBRATION_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "MODULE_EVALUATION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",

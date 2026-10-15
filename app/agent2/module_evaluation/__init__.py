@@ -10,15 +10,18 @@ filtering.md`` for the full design, and this package's own ``types``/``criteria`
 property.*
 
 Public API: ``evaluate_modularization``, ``evaluate_modularization_under_weights``,
-``compare_modularizations`` (``evaluator``); ``CriteriaWeights``, ``CriterionWeight``,
-``ModularizationCriterion``, ``ModularizationCriterionScore``, ``ModularizationEvaluation``,
-``TopologyRole``, ``TopologyRoleOverride``, ``TopologyFilteringPolicy``,
-``TopologyComponentFilter``, ``TopologySeparationDetail`` (``types``); ``ModuleEvaluationError``,
-``ModuleEvaluationReferenceError`` (``errors``).
+``compare_modularizations`` (``evaluator``); ``score_calibration_independence``
+(``calibration_adapter``, Recursive Module Evaluation Orchestration increment);
+``CriteriaWeights``, ``CriterionWeight``, ``ModularizationCriterion``,
+``ModularizationCriterionScore``, ``ModularizationEvaluation``, ``TopologyRole``,
+``TopologyRoleOverride``, ``TopologyFilteringPolicy``, ``TopologyComponentFilter``,
+``TopologySeparationDetail``, ``CalibrationIndependenceDetail`` (``types``);
+``ModuleEvaluationError``, ``ModuleEvaluationReferenceError`` (``errors``).
 """
 
 from __future__ import annotations
 
+from app.agent2.module_evaluation.calibration_adapter import score_calibration_independence
 from app.agent2.module_evaluation.errors import (
     ModuleEvaluationError,
     ModuleEvaluationReferenceError,
@@ -29,6 +32,7 @@ from app.agent2.module_evaluation.evaluator import (
     evaluate_modularization_under_weights,
 )
 from app.agent2.module_evaluation.types import (
+    CalibrationIndependenceDetail,
     CriteriaWeights,
     CriterionWeight,
     ModularizationCriterion,
@@ -42,6 +46,7 @@ from app.agent2.module_evaluation.types import (
 )
 
 __all__ = [
+    "CalibrationIndependenceDetail",
     "CriteriaWeights",
     "CriterionWeight",
     "ModularizationCriterion",
@@ -57,4 +62,5 @@ __all__ = [
     "compare_modularizations",
     "evaluate_modularization",
     "evaluate_modularization_under_weights",
+    "score_calibration_independence",
 ]

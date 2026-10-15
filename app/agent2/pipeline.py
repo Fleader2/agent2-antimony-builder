@@ -63,6 +63,8 @@ from app.agent2.types import (
     Agent1CuratedKnowledgeViewContract,
     Agent2OutputPackage,
     ModelSpecification,
+    ModuleAntimonyArtifact,
+    ModuleComponentType,
 )
 from app.agent2.version import AGENT2_DOWNSTREAM_CONTRACT_VERSION
 
@@ -351,4 +353,96 @@ def build_canonical_downstream_handoff(
     }
 
 
-__all__ = ["Agent2PipelineResult", "build_canonical_downstream_handoff", "run_agent2_pipeline"]
+def build_module_downstream_handoff(
+    model: ModelSpecification,
+    package: Agent2OutputPackage,
+    modularization_id: str,
+    module_id: str,
+    module_artifact: ModuleAntimonyArtifact,
+) -> dict[str, Any]:
+    """Serialize one module's own standalone executable Antimony as the identical
+    Agent2->Agent3 handoff shape ``build_canonical_downstream_handoff`` already emits for a
+    whole model (Recursive Module Evaluation Orchestration increment) -- so Agent 3 requires
+    zero code change to simulate a module exactly as it would any whole model (``antimony_text``
+    is the *only* field Agent 3's own simulation engine ever reads; everything else is
+    provenance metadata, per ``agent3-simulation-diagnostics/app/agent3/handoff.py``'s own
+    documented "smallest stable contract").
+
+    ``module_artifact`` must already be one of ``module_id``'s own ``ModuleAntimonyArtifact``
+    entries with a populated ``standalone_antimony`` (``app.agent2.antimony
+    .generate_module_artifacts``'s own output) -- never called for an ineligible module (see
+    ``app.agent2.module_calibration.build_module_calibration_request``'s own identical
+    precondition).
+
+    ``compartments``/``species``/``reactions``/``kinetic_laws``/``parameters`` are filtered to
+    exactly this module's own ``ModuleMembership`` rows (plus any parameter a filtered kinetic
+    law's own ``parameter_ids`` names, even when that parameter carries no explicit
+    ``ModuleMembership`` row of its own) -- never the whole model's. ``model_assumptions`` is
+    filtered to those whose own ``related_entity_ids`` names at least one included species/
+    reaction/parameter id. ``antimony_symbol_map`` is passed through unfiltered (the whole
+    model's own canonical-id -> Antimony-symbol mapping is harmless as a superset; Agent 3 only
+    ever looks up ids it actually needs).
+    """
+    if module_artifact.standalone_antimony is None:
+        raise ValueError(
+            "build_module_downstream_handoff requires module_artifact.standalone_antimony to "
+            "be populated -- never called for an ineligible (VIEW_ONLY/"
+            "NON_EXECUTABLE_UNRESOLVED_KINETICS) module"
+        )
+    network = model.full_network
+    antimony = package.full_antimony
+    memberships = [
+        m
+        for m in model.module_memberships
+        if m.modularization_id == modularization_id and m.module_id == module_id
+    ]
+    species_ids = {
+        m.component_id for m in memberships if m.component_type is ModuleComponentType.SPECIES
+    }
+    reaction_ids = {
+        m.component_id for m in memberships if m.component_type is ModuleComponentType.REACTION
+    }
+    parameter_ids = {
+        m.component_id for m in memberships if m.component_type is ModuleComponentType.PARAMETER
+    }
+
+    filtered_species = [s for s in network.species if s.species_id in species_ids]
+    filtered_reactions = [r for r in network.reactions if r.reaction_id in reaction_ids]
+    filtered_kinetic_laws = [k for k in model.kinetic_laws if k.reaction_id in reaction_ids]
+    for law in filtered_kinetic_laws:
+        parameter_ids.update(law.parameter_ids)
+    filtered_parameters = [p for p in model.parameters if p.parameter_id in parameter_ids]
+    compartment_ids = {s.compartment_id for s in filtered_species}
+    filtered_compartments = [c for c in network.compartments if c.compartment_id in compartment_ids]
+    related_ids = species_ids | reaction_ids | parameter_ids
+    filtered_assumptions = [
+        a
+        for a in model.model_assumptions
+        if set(a.related_entity_ids) & related_ids
+    ]
+
+    return {
+        "contract_version": AGENT2_DOWNSTREAM_CONTRACT_VERSION,
+        "model_id": f"{model.model_id}::module::{modularization_id}::{module_id}",
+        "network_id": f"{network.network_id}::module::{modularization_id}::{module_id}",
+        "antimony_text": module_artifact.standalone_antimony,
+        "antimony_generator_version": module_artifact.generator_version,
+        "antimony_symbol_map": _antimony_symbol_map(antimony),
+        "readiness": module_artifact.readiness.value,
+        "unresolved_reaction_ids": list(module_artifact.unresolved_reaction_ids),
+        "unresolved_kinetic_law_ids": list(module_artifact.unresolved_kinetic_law_ids),
+        "compartments": [_compartment_dict(c) for c in filtered_compartments],
+        "species": [_species_dict(s) for s in filtered_species],
+        "reactions": [_reaction_dict(r) for r in filtered_reactions],
+        "kinetic_laws": [_kinetic_law_dict(k) for k in filtered_kinetic_laws],
+        "parameters": [_parameter_dict(p) for p in filtered_parameters],
+        "model_assumptions": [_model_assumption_dict(a) for a in filtered_assumptions],
+    }
+
+
+__all__ = [
+    "Agent2PipelineResult",
+    "build_canonical_downstream_handoff",
+    "build_module_downstream_handoff",
+    "run_agent2_pipeline",
+]

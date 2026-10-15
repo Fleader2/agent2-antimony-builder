@@ -12,8 +12,11 @@ for the caller (today) or a future Workbench UI (task instructions §5) to compa
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 
+from app.agent2.module_calibration.types import ModuleCalibrationEvaluation
+from app.agent2.module_evaluation.calibration_adapter import score_calibration_independence
 from app.agent2.module_evaluation.criteria import (
     IMPLEMENTED_CRITERIA,
     score_boundary_sparsity,
@@ -49,13 +52,15 @@ def _require_criteria_weights(weights: CriteriaWeights) -> CriteriaWeights:
     return weights
 
 
-def _weight_tag(weights: CriteriaWeights) -> str:
+def _weight_tag(
+    weights: CriteriaWeights, criteria: tuple[ModularizationCriterion, ...]
+) -> str:
     """A deterministic, human-inspectable fragment of ``evaluation_id`` naming every positive
     weight actually in effect -- never an opaque hash, consistent with every other id in this
     codebase being a meaningful, debuggable string."""
     parts = [
         f"{criterion.value}-{weights.raw_weight(criterion)}"
-        for criterion in IMPLEMENTED_CRITERIA
+        for criterion in criteria
         if weights.raw_weight(criterion) > 0
     ]
     return "_".join(parts) if parts else "none"
@@ -67,6 +72,7 @@ def evaluate_modularization(
     weights: CriteriaWeights,
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
+    calibration_evidence: Mapping[str, ModuleCalibrationEvaluation] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> ModularizationEvaluation:
     """Score one ``model.modularizations`` entry under ``weights``.
@@ -81,6 +87,16 @@ def evaluate_modularization(
     defaults to ``None`` -- curated name-based defaults only, no per-evaluation overrides, a
     built-in default hub-degree threshold) is threaded through to
     ``TOPOLOGICAL_SEPARATION`` alone; every other criterion is completely unaffected by it.
+
+    ``calibration_evidence`` (Recursive Module Evaluation Orchestration increment, optional,
+    defaults to ``None``) is a caller-supplied ``{module_id: ModuleCalibrationEvaluation}``
+    mapping -- always obtained by routing one ``ModuleCalibrationRequest`` per module through
+    the Harness/Agent 3/Agent 4 (``app.agent2.module_calibration``), **never computed by this
+    function itself** (this package still performs no simulation or fitting, and Agent 2 still
+    never calls Agent 3/Agent 4 directly). Only when given is ``CALIBRATION_INDEPENDENCE``
+    computed and added to ``criterion_scores`` at all -- omitting it (the default) reproduces
+    this function's exact pre-existing behavior with no change whatsoever, and that previously-
+    reserved criterion simply does not appear, exactly as before this increment.
 
     Raises ``ModuleEvaluationReferenceError`` if ``model`` is not a real ``ModelSpecification``,
     ``weights`` is not a real ``CriteriaWeights``, or ``modularization_id`` does not name a real
@@ -116,10 +132,16 @@ def evaluate_modularization(
             model.full_network, memberships
         ),
     }
+    criteria_to_score = list(IMPLEMENTED_CRITERIA)
+    if calibration_evidence is not None:
+        criteria_to_score.append(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
+        raw_results[ModularizationCriterion.CALIBRATION_INDEPENDENCE] = (
+            score_calibration_independence(calibration_evidence)
+        )
 
     criterion_scores: list[ModularizationCriterionScore] = []
     missing_evidence_warnings: list[str] = []
-    for criterion in IMPLEMENTED_CRITERIA:
+    for criterion in criteria_to_score:
         result = raw_results[criterion]
         raw_weight = weights.raw_weight(criterion)
         normalized_weight = weights.normalized_weight(criterion)
@@ -163,8 +185,9 @@ def evaluate_modularization(
         else None
     )
 
+    weight_tag = _weight_tag(weights, tuple(criteria_to_score))
     return ModularizationEvaluation(
-        evaluation_id=f"evaluation::{modularization_id}::{_weight_tag(weights)}",
+        evaluation_id=f"evaluation::{modularization_id}::{weight_tag}",
         modularization_id=modularization_id,
         module_count=len(modularization.module_ids),
         criterion_scores=tuple(criterion_scores),

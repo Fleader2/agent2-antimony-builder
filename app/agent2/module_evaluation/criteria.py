@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.agent2.module_evaluation.types import (
+    CalibrationIndependenceDetail,
     ModularizationCriterion,
     TopologyComponentFilter,
     TopologyFilteringPolicy,
@@ -116,8 +117,11 @@ class CriterionResult:
     warnings: tuple[str, ...] = ()
     #: Topology Hub/Currency Component Filtering increment: ``TOPOLOGICAL_SEPARATION``'s own
     #: extended report, threaded through by ``app.agent2.module_evaluation.evaluator`` onto
-    #: ``ModularizationCriterionScore.detail``. Always ``None`` for every other criterion.
-    detail: TopologySeparationDetail | None = None
+    #: ``ModularizationCriterionScore.detail``. Recursive Module Evaluation Orchestration
+    #: increment: ``CalibrationIndependenceDetail`` (``calibration_adapter
+    #: .score_calibration_independence``'s own result) is the other possible value. Always
+    #: ``None`` for every other criterion.
+    detail: TopologySeparationDetail | CalibrationIndependenceDetail | None = None
 
 
 def _member_ids(

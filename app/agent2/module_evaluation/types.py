@@ -400,6 +400,54 @@ class TopologySeparationDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibrationIndependenceDetail:
+    """``CALIBRATION_INDEPENDENCE``'s own extended, criterion-specific report (Recursive Module
+    Evaluation Orchestration increment) -- ``None`` for every other criterion, mirroring
+    ``TopologySeparationDetail``'s identical, one-disclosed-exception pattern.
+
+    ``module_ids_with_evidence``/``module_ids_missing_evidence`` disclose exactly which modules
+    of the modularization contributed real calibration evidence and which did not (never
+    silently averaged away) -- see ``app.agent2.module_evaluation.calibration_adapter`` for the
+    weakest-link aggregation policy these support. ``statuses_by_module_id`` names each
+    evidence-bearing module's own ``ModuleCalibrationStatus.value``.
+    """
+
+    module_ids_with_evidence: tuple[str, ...] = ()
+    module_ids_missing_evidence: tuple[str, ...] = ()
+    statuses_by_module_id: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "module_ids_with_evidence",
+            _require_str_tuple(
+                self.module_ids_with_evidence, field_name="module_ids_with_evidence"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "module_ids_missing_evidence",
+            _require_str_tuple(
+                self.module_ids_missing_evidence, field_name="module_ids_missing_evidence"
+            ),
+        )
+        def _is_str_pair(item: object) -> bool:
+            return (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and all(isinstance(x, str) for x in item)
+            )
+
+        if not isinstance(self.statuses_by_module_id, tuple) or any(
+            not _is_str_pair(item) for item in self.statuses_by_module_id
+        ):
+            raise TypeError(
+                "CalibrationIndependenceDetail.statuses_by_module_id must be a tuple of "
+                f"(module_id, status) str pairs, got {self.statuses_by_module_id!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class ModularizationCriterionScore:
     """One criterion's own fully-inspectable evaluated result for one modularization --
     always present for every criterion ``app.agent2.module_evaluation.criteria`` currently
@@ -423,9 +471,11 @@ class ModularizationCriterionScore:
     provenance_refs: tuple[str, ...] = ()
     #: Topology Hub/Currency Component Filtering increment: ``TOPOLOGICAL_SEPARATION``'s own
     #: extended report (raw vs. filtered score, exactly which components were filtered and
-    #: why). Always ``None`` for every other criterion -- this is the one, disclosed exception
-    #: to this type's otherwise fully generic, criterion-agnostic shape.
-    detail: TopologySeparationDetail | None = None
+    #: why). Recursive Module Evaluation Orchestration increment: ``CALIBRATION_INDEPENDENCE``'s
+    #: own extended report (``CalibrationIndependenceDetail``) joins this as the only other
+    #: disclosed exception to this type's otherwise fully generic, criterion-agnostic shape --
+    #: ``None`` for every other criterion.
+    detail: TopologySeparationDetail | CalibrationIndependenceDetail | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.criterion, ModularizationCriterion):
@@ -493,15 +543,24 @@ class ModularizationCriterionScore:
             _require_str_tuple(self.provenance_refs, field_name="provenance_refs"),
         )
         if self.detail is not None:
-            if not isinstance(self.detail, TopologySeparationDetail):
+            if isinstance(self.detail, TopologySeparationDetail):
+                if self.criterion is not ModularizationCriterion.TOPOLOGICAL_SEPARATION:
+                    raise ValueError(
+                        "ModularizationCriterionScore.detail (TopologySeparationDetail) is "
+                        "only ever set for the TOPOLOGICAL_SEPARATION criterion, got "
+                        f"criterion={self.criterion.value!r}"
+                    )
+            elif isinstance(self.detail, CalibrationIndependenceDetail):
+                if self.criterion is not ModularizationCriterion.CALIBRATION_INDEPENDENCE:
+                    raise ValueError(
+                        "ModularizationCriterionScore.detail (CalibrationIndependenceDetail) "
+                        "is only ever set for the CALIBRATION_INDEPENDENCE criterion, got "
+                        f"criterion={self.criterion.value!r}"
+                    )
+            else:
                 raise TypeError(
-                    "ModularizationCriterionScore.detail must be a TopologySeparationDetail "
-                    f"or None, got {self.detail!r}"
-                )
-            if self.criterion is not ModularizationCriterion.TOPOLOGICAL_SEPARATION:
-                raise ValueError(
-                    "ModularizationCriterionScore.detail is only ever set for the "
-                    f"TOPOLOGICAL_SEPARATION criterion, got criterion={self.criterion.value!r}"
+                    "ModularizationCriterionScore.detail must be a TopologySeparationDetail, "
+                    f"a CalibrationIndependenceDetail, or None, got {self.detail!r}"
                 )
 
 
@@ -623,6 +682,7 @@ class ModularizationEvaluation:
 
 
 __all__ = [
+    "CalibrationIndependenceDetail",
     "CriteriaWeights",
     "CriterionWeight",
     "ModularizationCriterion",
