@@ -1656,6 +1656,72 @@ module count remain fully inspectable on its own ``ModularizationEvaluation``; o
 default) reproduces the search's exact pre-existing behavior with no change whatsoever. New
 ``RESOLUTION_AUDIT_POLICY_VERSION = "resolution-audit-v1"``. See
 ``docs/34_module_count_resolution_bias_audit.md``.
+
+**Calibration-Independence Aggregation + Degenerate Resolution Policy increment.** Two
+independent corrections to remaining resolution bias in calibration-based modularization
+scoring:
+
+1. ``app.agent2.module_evaluation.calibration_adapter.score_calibration_independence``'s single,
+   previously hard-coded weakest-link (``min()``) aggregation across a modularization's own
+   modules was replaced by an explicit, pluggable ``CalibrationAggregationPolicy``
+   (``module_evaluation.types``: ``CalibrationAggregationMethod`` -- ``MINIMUM``/
+   ``WEIGHTED_MEAN``/``LOWER_QUANTILE``/``FRACTION_ABOVE_THRESHOLD``). Every per-module score is
+   still always preserved (``CalibrationIndependenceDetail.per_module_scores``, plus
+   ``mean_score``/``min_score``/``max_score``/``unavailable_module_count`` dispersion summary
+   statistics) regardless of which one aggregate number the policy produces -- "never hide a
+   weak module behind the aggregate." The unavailable-evidence gate itself (any module missing
+   evidence makes the whole aggregate unavailable) is **unchanged and policy-independent** --
+   every aggregation method shares the identical, disclosed "do not fabricate a partial
+   average" rule; only the aggregation *formula* once every module has available evidence
+   varies by method.
+
+   ``MINIMUM`` was proven (the Module-Count / Resolution Bias Audit increment above) to be
+   monotonically non-increasing as module count grows -- a structural coarse bias. ``WEIGHTED_
+   MEAN`` has no such structural bias: for a fixed per-module quality distribution,
+   ``E[mean(X_1..X_n)]`` is constant in ``n`` (an unbiased estimator of the per-module mean),
+   unlike ``E[min(X_1..X_n)]``, which is provably non-increasing in ``n``. ``WEIGHTED_MEAN`` is
+   therefore the new **default** aggregation policy (``DEFAULT_CALIBRATION_AGGREGATION_POLICY``)
+   used whenever a caller supplies ``calibration_evidence`` without pinning an explicit policy --
+   a real, disclosed behavior change from the prior implicit ``MINIMUM``-only behavior.
+   ``MINIMUM`` remains fully available (``MINIMUM_CALIBRATION_AGGREGATION_POLICY``) as an
+   explicit, strict diagnostic choice, per the task's own instruction, but is never the default.
+   ``evaluate_modularization``/``evaluate_modularization_under_weights``/
+   ``compare_modularizations`` (``module_evaluation.evaluator``) and ``explore_weight_space``
+   (``weight_space_exploration.exploration``) and ``search_candidate_modularizations``
+   (``modularization_search.search``) each gained one new, optional
+   ``calibration_aggregation_policy: CalibrationAggregationPolicy | None = None`` parameter,
+   threaded straight through to ``score_calibration_independence``; omitting
+   ``calibration_evidence`` entirely (every pre-existing call site that never supplied it) is
+   completely unaffected either way.
+
+2. A one-module decomposition has no internal boundary to optimize, so
+   ``search_candidate_modularizations`` now treats it as a reference/baseline, never a valid
+   winner of automatic candidate-search ranking: a new, optional
+   ``exclude_single_module_from_ranking: bool = True`` parameter (default **on**) means any
+   candidate whose own module count is exactly ``1`` is still fully evaluated (``_evaluate`` is
+   still called on it) and reported (the new ``CandidateModularizationSearchResult.degenerate``/
+   ``.degenerate_evaluations`` fields), but is excluded from beam selection, the retained
+   candidate set, and the frontier used to generate the next generation's proposals -- it can
+   never occupy a beam slot that would otherwise go to a genuine multi-module candidate, and the
+   final weight-space/stable-boundary analysis (which only ever runs over ``retained``) never
+   sees it either. Passing ``exclude_single_module_from_ranking=False`` reproduces the search's
+   exact pre-existing behavior (a one-module candidate competes normally) with no change
+   whatsoever. If every candidate this search ever produces is degenerate and excluded (e.g. an
+   intentionally one-module seed with no override), ``retained``/``evaluations`` are both empty
+   and ``weight_space_result`` is ``None`` (``explore_weight_space`` is never called with an
+   empty modularization-id tuple) -- a disclosed, honest outcome, never an exception, with a
+   warning naming the override that would change it.
+
+``MODULE_EVALUATION_POLICY_VERSION`` bumped ``"module-evaluation-v2"`` ->
+``"module-evaluation-v3"``; ``MODULE_CALIBRATION_POLICY_VERSION`` bumped
+``"module-calibration-v2"`` -> ``"module-calibration-v3"``; new
+``CALIBRATION_AGGREGATION_POLICY_VERSION = "calibration-aggregation-v1"``;
+``MODULARIZATION_SEARCH_POLICY_VERSION`` bumped ``"modularization-search-v1"`` ->
+``"modularization-search-v2"``. ``WEIGHT_SPACE_EXPLORATION_POLICY_VERSION``/
+``RESOLUTION_AUDIT_POLICY_VERSION``/``AGENT2_CONTRACT_VERSION`` are unchanged -- no
+``app.agent2.types`` shape changed, and neither the weight-grid/stability-computation policy nor
+the null-partition/bias-classification policy were touched by either correction above. See
+``docs/35_calibration_aggregation_degenerate_resolution_policy.md``.
 """
 
 from __future__ import annotations
@@ -1695,8 +1761,12 @@ AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
 #: is computed, how weights are normalized and combined into an overall score). Bumped to v2
 #: by the Module-Count / Resolution Bias Audit increment (``ModularizationCriterionScore``
 #: gained ``null_reference_score``/``corrected_score``; ``evaluate_modularization`` gained the
-#: optional ``null_reference_scores`` parameter).
-MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v2"
+#: optional ``null_reference_scores`` parameter). Bumped to v3 by the Calibration-Independence
+#: Aggregation increment (``evaluate_modularization``/``evaluate_modularization_under_weights``/
+#: ``compare_modularizations`` each gained an optional ``calibration_aggregation_policy``
+#: parameter; ``CalibrationIndependenceDetail`` gained ``aggregation_method``/
+#: ``per_module_scores``/``mean_score``/``min_score``/``max_score``/``unavailable_module_count``).
+MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v3"
 #: Weight-Space Exploration and Stable Boundary Discovery increment -- the version of
 #: ``app.agent2.weight_space_exploration``'s own policy (deterministic weight-grid sampling,
 #: high-scoring-solution selection, boundary/co-membership/modularization-recurrence stability
@@ -1705,14 +1775,35 @@ WEIGHT_SPACE_EXPLORATION_POLICY_VERSION = "weight-space-exploration-v1"
 #: Recursive Module Evaluation Orchestration increment -- the version of
 #: ``app.agent2.module_calibration``'s own request/result contract shape and of
 #: ``app.agent2.module_evaluation.calibration_adapter``'s own scoring policy (status ->
-#: available/raw-score mapping, weakest-link multi-module aggregation). Bumped to v2 by the
-#: Calibration Evidence Integration into Weight-Space Exploration increment (a module with no
-#: evidence entry at all is now correctly treated as unavailable, not silently skipped).
-MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v2"
+#: available/raw-score mapping, multi-module aggregation). Bumped to v2 by the Calibration
+#: Evidence Integration into Weight-Space Exploration increment (a module with no evidence
+#: entry at all is now correctly treated as unavailable, not silently skipped). Bumped to v3 by
+#: the Calibration-Independence Aggregation increment: the single, previously hard-coded
+#: weakest-link (``min()``) aggregation was replaced by an explicit, pluggable
+#: ``CalibrationAggregationPolicy`` (``MINIMUM``/``WEIGHTED_MEAN``/``LOWER_QUANTILE``/
+#: ``FRACTION_ABOVE_THRESHOLD``), and the *default* policy used when a caller omits one changed
+#: from ``MINIMUM`` to ``WEIGHTED_MEAN`` -- a real, disclosed behavior change for any caller
+#: that supplies ``calibration_evidence`` without pinning an explicit policy (see this file's
+#: own changelog entry below for the full rationale).
+MODULE_CALIBRATION_POLICY_VERSION = "module-calibration-v3"
+#: Calibration-Independence Aggregation increment -- the version of the
+#: ``CalibrationAggregationPolicy`` instances this repository constructs for its own
+#: ``DEFAULT_CALIBRATION_AGGREGATION_POLICY``/``MINIMUM_CALIBRATION_AGGREGATION_POLICY``
+#: (``app.agent2.module_evaluation.calibration_adapter``) -- distinct from
+#: ``MODULE_CALIBRATION_POLICY_VERSION`` above, which versions the *adapter function's* own
+#: behavior; this one versions the *policy object* a caller can alternatively construct and
+#: pass in directly.
+CALIBRATION_AGGREGATION_POLICY_VERSION = "calibration-aggregation-v1"
 #: Candidate Modularization Search increment -- the version of
 #: ``app.agent2.modularization_search``'s own search policy (proposal-operator semantics,
 #: content-addressed identity, duplicate-equivalence signature, beam-search retention rule).
-MODULARIZATION_SEARCH_POLICY_VERSION = "modularization-search-v1"
+#: Bumped to v2 by the Calibration-Independence Aggregation increment: a one-module candidate
+#: is now, by default, evaluated/reported but excluded from beam selection/retention/ranking
+#: (``exclude_single_module_from_ranking`` defaults to ``True``) -- a real, disclosed behavior
+#: change (the identical search call can now retain a different candidate set than before),
+#: even though an explicit ``exclude_single_module_from_ranking=False`` override reproduces the
+#: exact prior behavior.
+MODULARIZATION_SEARCH_POLICY_VERSION = "modularization-search-v2"
 #: Module-Count / Resolution Bias Audit increment -- the version of
 #: ``app.agent2.resolution_audit``'s own policy (null-partition construction, bias-severity
 #: classification thresholds).
@@ -1726,6 +1817,7 @@ __all__ = [
     "AGENT2_ORCHESTRATION_POLICY_VERSION",
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
+    "CALIBRATION_AGGREGATION_POLICY_VERSION",
     "ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION",
     "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
     "EVIDENCE_CONSOLIDATION_POLICY_VERSION",

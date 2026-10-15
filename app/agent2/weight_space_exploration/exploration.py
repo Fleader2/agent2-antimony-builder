@@ -15,7 +15,10 @@ from decimal import Decimal
 
 from app.agent2.module_calibration.types import ModuleCalibrationEvaluation
 from app.agent2.module_evaluation import CriteriaWeights, evaluate_modularization
-from app.agent2.module_evaluation.types import TopologyFilteringPolicy
+from app.agent2.module_evaluation.types import (
+    CalibrationAggregationPolicy,
+    TopologyFilteringPolicy,
+)
 from app.agent2.types import ModelSpecification, ModuleComponentType
 from app.agent2.version import WEIGHT_SPACE_EXPLORATION_POLICY_VERSION
 from app.agent2.weight_space_exploration.errors import WeightSpaceExplorationReferenceError
@@ -46,6 +49,7 @@ def explore_weight_space(
     *,
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, Mapping[str, ModuleCalibrationEvaluation]] | None = None,
+    calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
     ambiguous_band_low: Decimal = _DEFAULT_AMBIGUOUS_BAND_LOW,
     ambiguous_band_high: Decimal = _DEFAULT_AMBIGUOUS_BAND_HIGH,
     policy_version: str = WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
@@ -74,6 +78,11 @@ def explore_weight_space(
     default) reproduces this function's exact pre-existing behavior with no change
     whatsoever -- ``CALIBRATION_INDEPENDENCE`` simply never appears in any evaluation's own
     ``criterion_scores``, exactly as before this increment.
+
+    ``calibration_aggregation_policy`` (Calibration-Independence Aggregation increment,
+    optional, defaults to ``None`` -> ``evaluate_modularization``'s own default,
+    ``WEIGHTED_MEAN``) is held fixed across every ``(modularization_id, weight_vector)`` pair
+    evaluated -- the same aggregation method is applied everywhere evidence exists.
 
     ``ambiguous_band_low``/``ambiguous_band_high`` name the open interval a boundary/
     co-membership frequency must fall strictly inside to be reported among
@@ -110,6 +119,7 @@ def explore_weight_space(
                 if calibration_evidence is not None
                 else None
             ),
+            calibration_aggregation_policy=calibration_aggregation_policy,
         )
         for modularization_id in modularization_ids
         for weights in weight_vectors

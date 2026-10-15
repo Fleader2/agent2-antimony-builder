@@ -399,22 +399,151 @@ class TopologySeparationDetail:
         )
 
 
+class CalibrationAggregationMethod(StrEnum):
+    """One explicit, closed policy for aggregating several modules' own per-module
+    ``CALIBRATION_INDEPENDENCE`` contributions into one modularization-level score
+    (Calibration-Independence Aggregation increment, task instructions §1) -- replaces the
+    single, previously hard-coded weakest-link (``min()``) policy. Never inferred implicitly
+    from the number of modules or from any other criterion."""
+
+    #: Weakest-link: the minimum per-module score. Proven (Module-Count / Resolution Bias
+    #: Audit increment) to be inherently, monotonically non-increasing as module count grows --
+    #: retained here as an explicit, strict diagnostic choice, never the default search-ranking
+    #: policy (task instructions §3).
+    MINIMUM = "MINIMUM"
+    #: The (optionally per-module-weighted) arithmetic mean of every per-module score.
+    #: Unbiased in expectation with respect to module count for a fixed per-module quality
+    #: distribution (``E[mean(X_1..X_n)] = E[X]``, constant in ``n``) -- the chosen default
+    #: (task instructions §3).
+    WEIGHTED_MEAN = "WEIGHTED_MEAN"
+    #: A disclosed lower quantile (``policy.quantile``) of the per-module score distribution --
+    #: less sensitive to one single worst-scoring module than ``MINIMUM``, but still not fully
+    #: count-invariant.
+    LOWER_QUANTILE = "LOWER_QUANTILE"
+    #: The fraction of modules whose own score is ``>= policy.threshold`` -- "what proportion
+    #: of this modularization's modules are acceptable," never a continuous blend of scores.
+    FRACTION_ABOVE_THRESHOLD = "FRACTION_ABOVE_THRESHOLD"
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationAggregationPolicy:
+    """The complete, explicit configuration for one ``CalibrationAggregationMethod`` (task
+    instructions §1) -- never a bare enum value alone, since ``LOWER_QUANTILE``/
+    ``FRACTION_ABOVE_THRESHOLD`` each require one further, disclosed parameter, and
+    ``WEIGHTED_MEAN`` optionally accepts explicit per-module weights (uniform weight ``1`` for
+    any module not named in ``module_weights`` -- an unweighted mean when ``module_weights`` is
+    left empty, never a hidden default weighting scheme)."""
+
+    method: CalibrationAggregationMethod
+    quantile: Decimal | None = None
+    threshold: Decimal | None = None
+    module_weights: tuple[tuple[str, Decimal], ...] = ()
+    policy_version: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.method, CalibrationAggregationMethod):
+            raise TypeError(
+                "CalibrationAggregationPolicy.method must be a CalibrationAggregationMethod, "
+                f"got {self.method!r}"
+            )
+        if self.method is CalibrationAggregationMethod.LOWER_QUANTILE:
+            if self.quantile is None:
+                raise ValueError(
+                    "CalibrationAggregationPolicy.quantile is required for LOWER_QUANTILE"
+                )
+            object.__setattr__(
+                self, "quantile", _require_unit_interval(self.quantile, field_name="quantile")
+            )
+            if self.quantile == 0:
+                raise ValueError(
+                    "CalibrationAggregationPolicy.quantile must be > 0 for LOWER_QUANTILE, got 0"
+                )
+        elif self.quantile is not None:
+            raise ValueError(
+                "CalibrationAggregationPolicy.quantile must be None unless method is "
+                f"LOWER_QUANTILE, got method={self.method!r}, quantile={self.quantile!r}"
+            )
+        if self.method is CalibrationAggregationMethod.FRACTION_ABOVE_THRESHOLD:
+            if self.threshold is None:
+                raise ValueError(
+                    "CalibrationAggregationPolicy.threshold is required for "
+                    "FRACTION_ABOVE_THRESHOLD"
+                )
+            object.__setattr__(
+                self, "threshold", _require_unit_interval(self.threshold, field_name="threshold")
+            )
+        elif self.threshold is not None:
+            raise ValueError(
+                "CalibrationAggregationPolicy.threshold must be None unless method is "
+                f"FRACTION_ABOVE_THRESHOLD, got method={self.method!r}, "
+                f"threshold={self.threshold!r}"
+            )
+        if self.module_weights and self.method is not CalibrationAggregationMethod.WEIGHTED_MEAN:
+            raise ValueError(
+                "CalibrationAggregationPolicy.module_weights must be empty unless method is "
+                f"WEIGHTED_MEAN, got method={self.method!r}"
+            )
+        cleaned_weights: list[tuple[str, Decimal]] = []
+        seen_module_ids: set[str] = set()
+        for item in self.module_weights:
+            if (
+                not isinstance(item, tuple)
+                or len(item) != 2
+                or not isinstance(item[0], str)
+                or not item[0]
+                or not isinstance(item[1], Decimal)
+                or item[1] <= 0
+            ):
+                raise TypeError(
+                    "CalibrationAggregationPolicy.module_weights must be a tuple of "
+                    f"(non-empty module_id str, positive Decimal weight) pairs, got {item!r}"
+                )
+            if item[0] in seen_module_ids:
+                raise ValueError(
+                    "CalibrationAggregationPolicy.module_weights must not repeat a module_id, "
+                    f"got a duplicate {item[0]!r}"
+                )
+            seen_module_ids.add(item[0])
+            cleaned_weights.append(item)
+        object.__setattr__(self, "module_weights", tuple(cleaned_weights))
+        object.__setattr__(
+            self,
+            "policy_version",
+            _require_non_empty_str(self.policy_version, field_name="policy_version"),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CalibrationIndependenceDetail:
     """``CALIBRATION_INDEPENDENCE``'s own extended, criterion-specific report (Recursive Module
-    Evaluation Orchestration increment) -- ``None`` for every other criterion, mirroring
-    ``TopologySeparationDetail``'s identical, one-disclosed-exception pattern.
+    Evaluation Orchestration increment; extended by the Calibration-Independence Aggregation
+    increment) -- ``None`` for every other criterion, mirroring ``TopologySeparationDetail``'s
+    identical, one-disclosed-exception pattern.
 
     ``module_ids_with_evidence``/``module_ids_missing_evidence`` disclose exactly which modules
     of the modularization contributed real calibration evidence and which did not (never
     silently averaged away) -- see ``app.agent2.module_evaluation.calibration_adapter`` for the
-    weakest-link aggregation policy these support. ``statuses_by_module_id`` names each
+    pluggable aggregation policy these support. ``statuses_by_module_id`` names each
     evidence-bearing module's own ``ModuleCalibrationStatus.value``.
+
+    ``aggregation_method``/``per_module_scores``/``mean_score``/``min_score``/``max_score``/
+    ``unavailable_module_count`` (Calibration-Independence Aggregation increment) disclose
+    exactly how ``raw_score`` was computed and never hide a weak module behind the aggregate:
+    ``per_module_scores`` always lists *every* evidence-bearing module's own individual score,
+    regardless of which aggregation method produced the single aggregate number, and regardless
+    of whether the aggregate itself is available at all (a modularization with some, but not
+    all, modules missing evidence still discloses the scores of the modules that do have it).
     """
 
     module_ids_with_evidence: tuple[str, ...] = ()
     module_ids_missing_evidence: tuple[str, ...] = ()
     statuses_by_module_id: tuple[tuple[str, str], ...] = ()
+    aggregation_method: CalibrationAggregationMethod | None = None
+    per_module_scores: tuple[tuple[str, Decimal], ...] = ()
+    mean_score: Decimal | None = None
+    min_score: Decimal | None = None
+    max_score: Decimal | None = None
+    unavailable_module_count: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -444,6 +573,46 @@ class CalibrationIndependenceDetail:
             raise TypeError(
                 "CalibrationIndependenceDetail.statuses_by_module_id must be a tuple of "
                 f"(module_id, status) str pairs, got {self.statuses_by_module_id!r}"
+            )
+        if self.aggregation_method is not None and not isinstance(
+            self.aggregation_method, CalibrationAggregationMethod
+        ):
+            raise TypeError(
+                "CalibrationIndependenceDetail.aggregation_method must be a "
+                f"CalibrationAggregationMethod or None, got {self.aggregation_method!r}"
+            )
+
+        def _is_module_score_pair(item: object) -> bool:
+            return (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and isinstance(item[0], str)
+                and bool(item[0])
+                and isinstance(item[1], Decimal)
+            )
+
+        if not isinstance(self.per_module_scores, tuple) or any(
+            not _is_module_score_pair(item) for item in self.per_module_scores
+        ):
+            raise TypeError(
+                "CalibrationIndependenceDetail.per_module_scores must be a tuple of "
+                f"(module_id, Decimal score) pairs, got {self.per_module_scores!r}"
+            )
+        for field_name in ("mean_score", "min_score", "max_score"):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, Decimal):
+                raise TypeError(
+                    f"CalibrationIndependenceDetail.{field_name} must be a Decimal or None, "
+                    f"got {value!r}"
+                )
+        if (
+            not isinstance(self.unavailable_module_count, int)
+            or isinstance(self.unavailable_module_count, bool)
+            or self.unavailable_module_count < 0
+        ):
+            raise ValueError(
+                "CalibrationIndependenceDetail.unavailable_module_count must be a "
+                f"non-negative int, got {self.unavailable_module_count!r}"
             )
 
 
@@ -725,6 +894,8 @@ class ModularizationEvaluation:
 
 
 __all__ = [
+    "CalibrationAggregationMethod",
+    "CalibrationAggregationPolicy",
     "CalibrationIndependenceDetail",
     "CriteriaWeights",
     "CriterionWeight",

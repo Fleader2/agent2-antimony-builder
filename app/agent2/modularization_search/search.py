@@ -49,6 +49,7 @@ from app.agent2.modularization_search.types import (
 from app.agent2.module_calibration.types import ModuleCalibrationEvaluation
 from app.agent2.module_evaluation import CriteriaWeights, evaluate_modularization
 from app.agent2.module_evaluation.types import (
+    CalibrationAggregationPolicy,
     ModularizationCriterion,
     ModularizationEvaluation,
     TopologyFilteringPolicy,
@@ -108,6 +109,10 @@ def _cap_fairly_across_operations(
         )
         capped.extend(items[:share])
     return capped
+
+
+def _module_count(bundle: CandidateModularizationBundle) -> int:
+    return len({m.module_id for m in bundle.memberships})
 
 
 def _calibration_evidence_for_bundle(
@@ -177,7 +182,9 @@ def search_candidate_modularizations(
     constraints: SearchConstraints | None = None,
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[ModuleContentKey, ModuleCalibrationEvaluation] | None = None,
+    calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
     apply_resolution_correction: bool = False,
+    exclude_single_module_from_ranking: bool = True,
     stability_weight_vectors: tuple[CriteriaWeights, ...] | None = None,
     high_scoring_policy: HighScoringSolutionPolicy | None = None,
     policy_version: str = MODULARIZATION_SEARCH_POLICY_VERSION,
@@ -208,6 +215,24 @@ def search_candidate_modularizations(
     score, null baseline, and module count remain fully inspectable on its own
     ``ModularizationEvaluation.criterion_scores``. Omitting it (the default) reproduces this
     function's exact pre-existing behavior with no change whatsoever.
+
+    ``calibration_aggregation_policy`` (Calibration-Independence Aggregation increment,
+    optional, defaults to ``None`` -> ``evaluate_modularization``'s own default,
+    ``WEIGHTED_MEAN``) selects how several modules' own per-module ``CALIBRATION_INDEPENDENCE``
+    contributions are combined; held fixed across every candidate evaluated this search.
+
+    ``exclude_single_module_from_ranking`` (Calibration-Independence Aggregation + Degenerate
+    Resolution Policy increment, optional, defaults to ``True``) -- a one-module decomposition
+    has no internal boundary left to optimize, so by default it is still fully evaluated and
+    reported (``CandidateModularizationSearchResult.degenerate``/``.degenerate_evaluations``),
+    but never occupies a beam slot, never appears in ``retained``/``evaluations``, and never
+    seeds the next generation's proposals -- it can never "win" automatic candidate-search
+    ranking merely by being the trivial, boundary-free case. Pass ``False`` to restore the
+    search's exact pre-existing behavior (a one-module candidate, including the seed itself,
+    competes normally). If this exclusion leaves zero retained candidates (e.g. an
+    intentionally one-module seed with no override), ``retained``/``evaluations`` are both
+    empty and ``weight_space_result`` is ``None`` (never called with an empty modularization-id
+    tuple) -- a disclosed outcome, with a warning naming the override, never an exception.
 
     ``stability_weight_vectors``/``high_scoring_policy`` (optional) configure the final
     weight-space/stable-boundary analysis run over every retained candidate together
@@ -252,16 +277,20 @@ def search_candidate_modularizations(
             criteria_weights,
             topology_filtering=topology_filtering,
             calibration_evidence=evidence,
+            calibration_aggregation_policy=calibration_aggregation_policy,
             null_reference_scores=null_reference_scores,
         )
 
     seed_id = _next_id(0)
     seed_bundle = restamp_modularization_id(canonicalize_bundle(seed_raw), seed_id)
     seed_evaluation = _evaluate(seed_bundle)
+    seed_is_degenerate = exclude_single_module_from_ranking and _module_count(seed_bundle) <= 1
 
     seed_signature = candidate_signature(seed_bundle.memberships, seed_bundle.ports)
     seen_signatures: set = {seed_signature}
-    retained_by_signature: dict = {seed_signature: seed_bundle}
+    bundles_by_id: dict[str, CandidateModularizationBundle] = {seed_id: seed_bundle}
+    degenerate_ids: set[str] = {seed_id} if seed_is_degenerate else set()
+    retained_by_signature: dict = {} if seed_is_degenerate else {seed_signature: seed_bundle}
     evaluations_by_id: dict[str, ModularizationEvaluation] = {seed_id: seed_evaluation}
     lineage: list[CandidateLineage] = [
         CandidateLineage(
@@ -276,7 +305,9 @@ def search_candidate_modularizations(
     ]
     rejected: list[RejectedCandidate] = []
 
-    frontier: list[tuple[str, CandidateModularizationBundle]] = [(seed_id, seed_bundle)]
+    frontier: list[tuple[str, CandidateModularizationBundle]] = (
+        [] if seed_is_degenerate else [(seed_id, seed_bundle)]
+    )
     iterations_run = 0
 
     for generation in range(1, search_policy.max_iterations + 1):
@@ -333,7 +364,14 @@ def search_candidate_modularizations(
         for candidate_id, cbundle, signature in new_this_generation:
             evaluation = _evaluate(cbundle)
             evaluations_by_id[candidate_id] = evaluation
+            bundles_by_id[candidate_id] = cbundle
             scored.append((candidate_id, cbundle, signature, evaluation))
+
+        if exclude_single_module_from_ranking:
+            degenerate_this_generation = [item for item in scored if _module_count(item[1]) <= 1]
+            for candidate_id, *_rest in degenerate_this_generation:
+                degenerate_ids.add(candidate_id)
+            scored = [item for item in scored if _module_count(item[1]) > 1]
 
         scored.sort(
             key=lambda item: (
@@ -367,38 +405,56 @@ def search_candidate_modularizations(
     retained_ids = tuple(b.modularization.modularization_id for b in retained_bundles)
     retained_evaluations = tuple(evaluations_by_id[cid] for cid in retained_ids)
 
-    weight_vectors = (
-        stability_weight_vectors if stability_weight_vectors is not None else (criteria_weights,)
-    )
-    policy = (
-        high_scoring_policy
-        if high_scoring_policy is not None
-        else HighScoringSolutionPolicy(
-            HighScoringSolutionSelectionMethod.TOP_N,
-            Decimal(len(retained_bundles)),
-            policy_version=policy_version,
+    degenerate_ordered_ids = tuple(sorted(degenerate_ids))
+    degenerate_bundles = tuple(bundles_by_id[cid] for cid in degenerate_ordered_ids)
+    degenerate_evaluations = tuple(evaluations_by_id[cid] for cid in degenerate_ordered_ids)
+
+    warnings: list[str] = []
+    if retained_ids:
+        weight_vectors = (
+            stability_weight_vectors
+            if stability_weight_vectors is not None
+            else (criteria_weights,)
         )
-    )
-    combined_model = attach_many(model, retained_bundles)
-    combined_calibration_evidence = (
-        {
-            b.modularization.modularization_id: _calibration_evidence_for_bundle(
-                b, calibration_evidence
+        policy = (
+            high_scoring_policy
+            if high_scoring_policy is not None
+            else HighScoringSolutionPolicy(
+                HighScoringSolutionSelectionMethod.TOP_N,
+                Decimal(len(retained_bundles)),
+                policy_version=policy_version,
             )
-            for b in retained_bundles
-        }
-        if calibration_evidence is not None
-        else None
-    )
-    weight_space_result = explore_weight_space(
-        combined_model,
-        retained_ids,
-        weight_vectors,
-        policy,
-        topology_filtering=topology_filtering,
-        calibration_evidence=combined_calibration_evidence,
-        policy_version=WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
-    )
+        )
+        combined_model = attach_many(model, retained_bundles)
+        combined_calibration_evidence = (
+            {
+                b.modularization.modularization_id: _calibration_evidence_for_bundle(
+                    b, calibration_evidence
+                )
+                for b in retained_bundles
+            }
+            if calibration_evidence is not None
+            else None
+        )
+        weight_space_result = explore_weight_space(
+            combined_model,
+            retained_ids,
+            weight_vectors,
+            policy,
+            topology_filtering=topology_filtering,
+            calibration_evidence=combined_calibration_evidence,
+            calibration_aggregation_policy=calibration_aggregation_policy,
+            policy_version=WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
+        )
+    else:
+        weight_space_result = None
+        warnings.append(
+            "every candidate this search evaluated was excluded from ranking by the "
+            "degenerate-single-module policy (exclude_single_module_from_ranking=True) -- "
+            "retained/evaluations are empty and weight-space exploration was skipped; pass "
+            "exclude_single_module_from_ranking=False to let a one-module candidate compete "
+            "normally"
+        )
 
     return CandidateModularizationSearchResult(
         search_id=f"search::{model.model_id}::{seed_modularization_id}",
@@ -412,6 +468,10 @@ def search_candidate_modularizations(
         search_policy=search_policy,
         iterations_run=iterations_run,
         policy_version=policy_version,
+        exclude_single_module_from_ranking=exclude_single_module_from_ranking,
+        degenerate=degenerate_bundles,
+        degenerate_evaluations=degenerate_evaluations,
+        warnings=tuple(warnings),
         provenance_refs=(f"seed-modularization::{seed_modularization_id}",),
     )
 

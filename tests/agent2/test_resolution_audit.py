@@ -506,11 +506,19 @@ def test_yeast_score_vs_module_count_audit():
 
 
 def test_calibration_independence_weakest_link_aggregation_is_monotonically_non_increasing():
+    """``MINIMUM`` specifically (an explicit, strict diagnostic policy, task instructions §3)
+    -- the exact bias this increment's own successor (Calibration-Independence Aggregation
+    increment) moved away from as the *default*, replacing it with ``WEIGHTED_MEAN``. Pinning
+    ``policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY`` explicitly keeps testing this one
+    aggregation method's own property, regardless of whatever the current default is."""
     from app.agent2.module_calibration.types import (
         ModuleCalibrationEvaluation,
         ModuleCalibrationStatus,
     )
-    from app.agent2.module_evaluation.calibration_adapter import score_calibration_independence
+    from app.agent2.module_evaluation.calibration_adapter import (
+        MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+        score_calibration_independence,
+    )
 
     def _evaluation(module_id: str) -> ModuleCalibrationEvaluation:
         return ModuleCalibrationEvaluation(
@@ -529,7 +537,9 @@ def test_calibration_independence_weakest_link_aggregation_is_monotonically_non_
     scores = []
     for count in range(1, 6):
         module_ids = tuple(f"m{i}" for i in range(1, count + 1))
-        result = score_calibration_independence(module_ids, evaluations)
+        result = score_calibration_independence(
+            module_ids, evaluations, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+        )
         assert result.available is True
         scores.append(result.raw_score)
     # Every identically-supported module here scores the maximum (1) individually -- yet the
@@ -557,8 +567,12 @@ def test_calibration_independence_weakest_link_aggregation_is_monotonically_non_
     evaluations_with_weak = {**evaluations, "m6": weak}
     five_ids = ("m1", "m2", "m3", "m4", "m5")
     six_ids = ("m1", "m2", "m3", "m4", "m5", "m6")
-    before = score_calibration_independence(five_ids, evaluations_with_weak)
-    after = score_calibration_independence(six_ids, evaluations_with_weak)
+    before = score_calibration_independence(
+        five_ids, evaluations_with_weak, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    )
+    after = score_calibration_independence(
+        six_ids, evaluations_with_weak, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    )
     assert before.raw_score == Decimal("1")
     assert after.raw_score == Decimal("0")
     assert after.raw_score <= before.raw_score  # adding a module never raises the aggregate

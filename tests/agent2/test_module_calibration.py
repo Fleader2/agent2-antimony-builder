@@ -38,7 +38,15 @@ from app.agent2.module_evaluation import (
     ModularizationCriterion,
     evaluate_modularization,
 )
-from app.agent2.module_evaluation.calibration_adapter import score_calibration_independence
+from app.agent2.module_evaluation.calibration_adapter import (
+    DEFAULT_CALIBRATION_AGGREGATION_POLICY,
+    MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+    score_calibration_independence,
+)
+from app.agent2.module_evaluation.types import (
+    CalibrationAggregationMethod,
+    CalibrationAggregationPolicy,
+)
 from app.agent2.pipeline import build_module_downstream_handoff
 from app.agent2.types import (
     Agent2OutputPackage,
@@ -488,7 +496,11 @@ def test_score_calibration_independence_available_min_aggregation_across_modules
             ),
         ),
     )
-    result = score_calibration_independence(("mod-a", "mod-b"), {"mod-a": high, "mod-b": low})
+    result = score_calibration_independence(
+        ("mod-a", "mod-b"),
+        {"mod-a": high, "mod-b": low},
+        policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+    )
     assert result.available is True
     assert result.raw_score == Decimal("0.5")  # min(1, 1 - 0.5)
     assert result.detail.module_ids_with_evidence == ("mod-a", "mod-b")
@@ -668,3 +680,365 @@ def test_recursive_readiness_module_rebuilt_as_its_own_model_specification():
     )
     assert request.parent_model_id == "submodel::mz-1::mod-1"
     assert request.module_handoff["antimony_text"] is not None
+
+
+# --- CalibrationAggregationPolicy / pluggable aggregation (Calibration-Independence ----------
+# Aggregation increment) -----------------------------------------------------------------------
+
+
+def test_calibration_aggregation_policy_rejects_non_enum_method():
+    with pytest.raises(TypeError):
+        CalibrationAggregationPolicy(method="MINIMUM", policy_version="v1")  # type: ignore[arg-type]
+
+
+def test_calibration_aggregation_policy_lower_quantile_requires_quantile():
+    with pytest.raises(ValueError, match="quantile is required"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.LOWER_QUANTILE, policy_version="v1"
+        )
+
+
+def test_calibration_aggregation_policy_fraction_above_threshold_requires_threshold():
+    with pytest.raises(ValueError, match="threshold is required"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.FRACTION_ABOVE_THRESHOLD, policy_version="v1"
+        )
+
+
+def test_calibration_aggregation_policy_rejects_quantile_for_wrong_method():
+    with pytest.raises(ValueError, match="quantile must be None"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.MINIMUM,
+            quantile=Decimal("0.5"),
+            policy_version="v1",
+        )
+
+
+def test_calibration_aggregation_policy_rejects_threshold_for_wrong_method():
+    with pytest.raises(ValueError, match="threshold must be None"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.WEIGHTED_MEAN,
+            threshold=Decimal("0.5"),
+            policy_version="v1",
+        )
+
+
+def test_calibration_aggregation_policy_rejects_module_weights_for_wrong_method():
+    with pytest.raises(ValueError, match="module_weights must be empty"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.MINIMUM,
+            module_weights=(("mod-1", Decimal("2")),),
+            policy_version="v1",
+        )
+
+
+def test_calibration_aggregation_policy_rejects_duplicate_module_weight_key():
+    with pytest.raises(ValueError, match="must not repeat a module_id"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.WEIGHTED_MEAN,
+            module_weights=(("mod-1", Decimal("2")), ("mod-1", Decimal("3"))),
+            policy_version="v1",
+        )
+
+
+def test_calibration_aggregation_policy_quantile_zero_rejected():
+    with pytest.raises(ValueError, match="must be > 0"):
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.LOWER_QUANTILE,
+            quantile=Decimal("0"),
+            policy_version="v1",
+        )
+
+
+def _three_module_evidence() -> dict[str, ModuleCalibrationEvaluation]:
+    """Three modules at three distinct score tiers: ``mod-hi`` = 1 (no findings), ``mod-mid`` =
+    0.9 (one WARNING), ``mod-lo`` = 0.5 (one CRITICAL) -- deliberately spread, not clustered, so
+    every aggregation method produces a visibly distinct number."""
+    return {
+        "mod-hi": _evaluation(
+            module_id="mod-hi", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-mid": _evaluation(
+            module_id="mod-mid",
+            status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+            identifiability_findings=(
+                IdentifiabilityFindingSummary(
+                    finding_id="f-mid", category="HIGH_CORRELATION", severity="WARNING", summary="s"
+                ),
+            ),
+        ),
+        "mod-lo": _evaluation(
+            module_id="mod-lo",
+            status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED,
+            identifiability_findings=(
+                IdentifiabilityFindingSummary(
+                    finding_id="f-lo", category="HIGH_CORRELATION", severity="CRITICAL", summary="s"
+                ),
+            ),
+        ),
+    }
+
+
+_THREE_MODULE_IDS = ("mod-hi", "mod-lo", "mod-mid")
+
+
+def test_default_policy_is_weighted_mean():
+    evidence = _three_module_evidence()
+    result = score_calibration_independence(_THREE_MODULE_IDS, evidence)
+    assert result.available is True
+    # mean(1, 0.5, 0.9) == 0.8
+    assert result.raw_score == Decimal("0.8")
+    assert result.detail.aggregation_method is CalibrationAggregationMethod.WEIGHTED_MEAN
+
+
+def test_minimum_policy_is_opt_in_not_default():
+    evidence = _three_module_evidence()
+    mean_result = score_calibration_independence(
+        _THREE_MODULE_IDS, evidence, policy=DEFAULT_CALIBRATION_AGGREGATION_POLICY
+    )
+    min_result = score_calibration_independence(
+        _THREE_MODULE_IDS, evidence, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    )
+    assert mean_result.raw_score == Decimal("0.8")
+    assert min_result.raw_score == Decimal("0.5")
+    assert mean_result.raw_score != min_result.raw_score
+
+
+def test_one_poor_module_scores_differently_under_mean_vs_minimum():
+    """Task instructions §6's own explicit test: one poor module among otherwise-perfect ones
+    pulls ``MINIMUM`` all the way down to its own score, but only partially drags ``WEIGHTED_
+    MEAN`` -- demonstrating why ``MINIMUM`` is a strict diagnostic (it reports the single worst
+    module verbatim) while ``WEIGHTED_MEAN`` blends it with the rest."""
+    evidence = {
+        "mod-a": _evaluation(
+            module_id="mod-a", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-b": _evaluation(
+            module_id="mod-b", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-poor": _evaluation(
+            module_id="mod-poor", status=ModuleCalibrationStatus.UNIDENTIFIABLE
+        ),
+    }
+    module_ids = ("mod-a", "mod-b", "mod-poor")
+    mean_result = score_calibration_independence(module_ids, evidence)
+    min_result = score_calibration_independence(
+        module_ids, evidence, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    )
+    assert min_result.raw_score == Decimal("0")  # the one poor module, verbatim
+    assert mean_result.raw_score == Decimal("2") / Decimal("3")  # (1 + 1 + 0) / 3
+    assert mean_result.raw_score > min_result.raw_score
+
+
+def test_weighted_mean_respects_explicit_module_weights():
+    evidence = _three_module_evidence()
+    policy = CalibrationAggregationPolicy(
+        method=CalibrationAggregationMethod.WEIGHTED_MEAN,
+        module_weights=(("mod-lo", Decimal("10")),),  # mod-hi/mod-mid default to weight 1
+        policy_version="v1",
+    )
+    result = score_calibration_independence(_THREE_MODULE_IDS, evidence, policy=policy)
+    # (1*1 + 0.9*1 + 0.5*10) / (1 + 1 + 10) = 6.9 / 12
+    assert result.raw_score == Decimal("6.9") / Decimal("12")
+
+
+def test_lower_quantile_aggregation_deterministic_nearest_rank():
+    evidence = _three_module_evidence()  # sorted scores: 0.5, 0.9, 1
+    policy = CalibrationAggregationPolicy(
+        method=CalibrationAggregationMethod.LOWER_QUANTILE,
+        quantile=Decimal("0.5"),
+        policy_version="v1",
+    )
+    result = score_calibration_independence(_THREE_MODULE_IDS, evidence, policy=policy)
+    # ceil(0.5 * 3) = 2 -> the 2nd-lowest of 3 -> 0.9
+    assert result.raw_score == Decimal("0.9")
+
+    smallest_policy = CalibrationAggregationPolicy(
+        method=CalibrationAggregationMethod.LOWER_QUANTILE,
+        quantile=Decimal("0.1"),
+        policy_version="v1",
+    )
+    smallest_result = score_calibration_independence(
+        _THREE_MODULE_IDS, evidence, policy=smallest_policy
+    )
+    # ceil(0.1 * 3) = 1 -> the lowest of 3 -> 0.5 (same as MINIMUM at a small enough quantile)
+    assert smallest_result.raw_score == Decimal("0.5")
+
+
+def test_fraction_above_threshold_aggregation():
+    evidence = _three_module_evidence()  # scores: mod-hi=1, mod-mid=0.9, mod-lo=0.5
+    policy = CalibrationAggregationPolicy(
+        method=CalibrationAggregationMethod.FRACTION_ABOVE_THRESHOLD,
+        threshold=Decimal("0.8"),
+        policy_version="v1",
+    )
+    result = score_calibration_independence(_THREE_MODULE_IDS, evidence, policy=policy)
+    assert result.raw_score == Decimal("2") / Decimal("3")  # mod-hi and mod-mid qualify
+
+    strict_policy = CalibrationAggregationPolicy(
+        method=CalibrationAggregationMethod.FRACTION_ABOVE_THRESHOLD,
+        threshold=Decimal("1"),
+        policy_version="v1",
+    )
+    strict_result = score_calibration_independence(
+        _THREE_MODULE_IDS, evidence, policy=strict_policy
+    )
+    assert strict_result.raw_score == Decimal("1") / Decimal("3")  # only mod-hi qualifies
+
+
+def test_per_module_scores_and_dispersion_always_disclosed_regardless_of_method():
+    evidence = _three_module_evidence()
+    for policy in (
+        DEFAULT_CALIBRATION_AGGREGATION_POLICY,
+        MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+    ):
+        result = score_calibration_independence(_THREE_MODULE_IDS, evidence, policy=policy)
+        assert dict(result.detail.per_module_scores) == {
+            "mod-hi": Decimal("1"),
+            "mod-mid": Decimal("0.9"),
+            "mod-lo": Decimal("0.5"),
+        }
+        assert result.detail.min_score == Decimal("0.5")
+        assert result.detail.max_score == Decimal("1")
+        assert result.detail.mean_score == Decimal("0.8")
+        assert result.detail.unavailable_module_count == 0
+
+
+def test_per_module_scores_disclosed_even_when_aggregate_unavailable():
+    """"Never hide a weak module behind the aggregate" extends to the unavailable case too:
+    the modules that *do* have evidence still disclose their own scores even though the whole
+    aggregate is withheld because one other module is missing."""
+    evidence = {
+        "mod-a": _evaluation(
+            module_id="mod-a", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-b": _evaluation(
+            module_id="mod-b", status=ModuleCalibrationStatus.INSUFFICIENT_DATA
+        ),
+    }
+    result = score_calibration_independence(("mod-a", "mod-b"), evidence)
+    assert result.available is False
+    assert dict(result.detail.per_module_scores) == {"mod-a": Decimal("1")}
+    assert result.detail.unavailable_module_count == 1
+
+
+def test_unavailable_evidence_gate_is_identical_across_aggregation_methods():
+    """The "any module missing evidence makes the whole aggregate unavailable" gate must not
+    depend on which aggregation method was requested -- never a policy-dependent fabrication
+    of a partial score for ``WEIGHTED_MEAN``/``LOWER_QUANTILE``/``FRACTION_ABOVE_THRESHOLD``
+    just because they *could* mathematically ignore the missing module."""
+    evidence = {
+        "mod-a": _evaluation(
+            module_id="mod-a", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-b": _evaluation(
+            module_id="mod-b", status=ModuleCalibrationStatus.INSUFFICIENT_DATA
+        ),
+    }
+    module_ids = ("mod-a", "mod-b")
+    for policy in (
+        DEFAULT_CALIBRATION_AGGREGATION_POLICY,
+        MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+        CalibrationAggregationPolicy(
+            method=CalibrationAggregationMethod.FRACTION_ABOVE_THRESHOLD,
+            threshold=Decimal("0.5"),
+            policy_version="v1",
+        ),
+    ):
+        result = score_calibration_independence(module_ids, evidence, policy=policy)
+        assert result.available is False
+        assert result.raw_score is None
+
+
+def test_mean_aggregation_can_increase_unlike_minimum_which_never_can():
+    """The module-count-bias-relevant structural distinction (task instructions §3): adding a
+    new, above-average module to ``WEIGHTED_MEAN`` *can* raise the aggregate -- a capability
+    ``MINIMUM`` structurally lacks (proven elsewhere:
+    ``test_calibration_independence_weakest_link_aggregation_is_monotonically_non_increasing``
+    in ``tests/agent2/test_resolution_audit.py`` -- adding a module can only ever keep ``MINIMUM``
+    the same or lower it, never raise it). This is the concrete reason ``WEIGHTED_MEAN`` carries
+    no inherent module-count bias while ``MINIMUM`` does."""
+    evaluations = {
+        "m1": _evaluation(module_id="m1", status=ModuleCalibrationStatus.UNIDENTIFIABLE),
+        "m2": _evaluation(module_id="m2", status=ModuleCalibrationStatus.UNIDENTIFIABLE),
+        "m3": _evaluation(module_id="m3", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED),
+    }
+    two_ids = ("m1", "m2")
+    three_ids = ("m1", "m2", "m3")
+
+    mean_before = score_calibration_independence(two_ids, evaluations).raw_score
+    mean_after = score_calibration_independence(three_ids, evaluations).raw_score
+    assert mean_after > mean_before  # adding the above-average module raised the mean
+
+    min_before = score_calibration_independence(
+        two_ids, evaluations, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    ).raw_score
+    min_after = score_calibration_independence(
+        three_ids, evaluations, policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY
+    ).raw_score
+    assert min_after <= min_before  # MINIMUM can never rise, by construction
+
+
+def test_evaluate_modularization_threads_calibration_aggregation_policy():
+    """End-to-end (not just the adapter function alone): ``evaluate_modularization`` itself
+    produces a different ``overall_score`` for the identical evidence depending on which
+    ``calibration_aggregation_policy`` is passed."""
+    network = _network()
+    model = ModelSpecification(
+        model_id="m1",
+        name="m1",
+        full_network=network,
+        kinetic_laws=(_kinetic_law(),),
+        parameters=(_parameter(),),
+        modularizations=(
+            ModelModularization(
+                modularization_id="mz-1",
+                name="mz-1",
+                method=ModularizationMethod.USER_DEFINED,
+                module_ids=("mod-a", "mod-b"),
+            ),
+        ),
+        model_modules=(
+            ModelModule(module_id="mod-a", name="a"),
+            ModelModule(module_id="mod-b", name="b"),
+        ),
+        module_memberships=(
+            ModuleMembership(
+                membership_id="mem-a",
+                modularization_id="mz-1",
+                module_id="mod-a",
+                component_type=ModuleComponentType.REACTION,
+                component_id="r1",
+            ),
+            ModuleMembership(
+                membership_id="mem-b",
+                modularization_id="mz-1",
+                module_id="mod-b",
+                component_type=ModuleComponentType.REACTION,
+                component_id="r1",
+            ),
+        ),
+    )
+    evidence = {
+        "mod-a": _evaluation(
+            module_id="mod-a", status=ModuleCalibrationStatus.CALIBRATION_SUPPORTED
+        ),
+        "mod-b": _evaluation(
+            module_id="mod-b", status=ModuleCalibrationStatus.UNIDENTIFIABLE
+        ),
+    }
+    weights = CriteriaWeights(
+        weights=(CriterionWeight(ModularizationCriterion.CALIBRATION_INDEPENDENCE, Decimal("1")),),
+        policy_version="test-v1",
+    )
+    default_eval = evaluate_modularization(model, "mz-1", weights, calibration_evidence=evidence)
+    min_eval = evaluate_modularization(
+        model,
+        "mz-1",
+        weights,
+        calibration_evidence=evidence,
+        calibration_aggregation_policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY,
+    )
+    assert default_eval.overall_score == Decimal("0.5")  # mean(1, 0)
+    assert min_eval.overall_score == Decimal("0")  # min(1, 0)
+    assert default_eval.overall_score != min_eval.overall_score

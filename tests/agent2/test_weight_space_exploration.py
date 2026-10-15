@@ -19,6 +19,7 @@ import pytest
 from app.agent2.antimony_import import import_antimony
 from app.agent2.module_calibration import ModuleCalibrationEvaluation, ModuleCalibrationStatus
 from app.agent2.module_evaluation import (
+    MINIMUM_CALIBRATION_AGGREGATION_POLICY,
     CriteriaWeights,
     CriterionWeight,
     ModularizationCriterion,
@@ -784,6 +785,11 @@ def test_explore_weight_space_unavailable_calibration_evidence_handled_honestly(
 
 
 def test_calibration_failed_and_unidentifiable_are_negative_evidence_not_missing():
+    """Pins ``policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY`` explicitly (Calibration-
+    Independence Aggregation increment changed the *default* to ``WEIGHTED_MEAN``) so this
+    test keeps demonstrating its own, narrower point: a real negative-evidence status is
+    scored and aggregated like any other available evidence, never silently treated as
+    missing -- regardless of which aggregation method is in effect."""
     model = _two_candidate_model()
     weights = _single_weight(ModularizationCriterion.CALIBRATION_INDEPENDENCE)
     for status in (
@@ -801,7 +807,11 @@ def test_calibration_failed_and_unidentifiable_are_negative_evidence_not_missing
             ),
         }
         evaluation = evaluate_modularization(
-            model, "topo", weights, calibration_evidence=evidence
+            model,
+            "topo",
+            weights,
+            calibration_evidence=evidence,
+            calibration_aggregation_policy=MINIMUM_CALIBRATION_AGGREGATION_POLICY,
         )
         calib_score = next(
             cs

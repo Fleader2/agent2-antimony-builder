@@ -371,7 +371,17 @@ class CandidateModularizationSearchResult:
     """Everything one ``search_candidate_modularizations`` call produces (task instructions
     §7). Never declares one retained candidate "correct" -- every score/stability measure is
     reported for the caller (or a future Workbench UI) to compare, exactly like
-    ``ModularizationEvaluation``/``WeightSpaceExplorationResult`` already do."""
+    ``ModularizationEvaluation``/``WeightSpaceExplorationResult`` already do.
+
+    ``degenerate``/``degenerate_evaluations`` (Calibration-Independence Aggregation +
+    Degenerate Resolution Policy increment) hold every one-module candidate this search ever
+    fully evaluated but excluded from beam selection/retention/ranking under
+    ``exclude_single_module_from_ranking`` (default ``True``) -- a one-module decomposition has
+    no internal boundary left to optimize, so it is treated as a reference/baseline, never a
+    valid winner, but is still evaluated and reported here, never silently dropped. Both are
+    always empty when ``exclude_single_module_from_ranking=False`` was passed (every one-module
+    candidate then competes normally and appears in ``retained``/``evaluations`` instead).
+    """
 
     search_id: str
     model_id: str
@@ -384,6 +394,9 @@ class CandidateModularizationSearchResult:
     search_policy: SearchPolicy
     iterations_run: int
     policy_version: str
+    exclude_single_module_from_ranking: bool = True
+    degenerate: tuple[CandidateModularizationBundle, ...] = ()
+    degenerate_evaluations: tuple[ModularizationEvaluation, ...] = ()
     warnings: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
 
@@ -446,6 +459,27 @@ class CandidateModularizationSearchResult:
             self,
             "policy_version",
             _require_non_empty_str(self.policy_version, field_name="policy_version"),
+        )
+        if not isinstance(self.exclude_single_module_from_ranking, bool):
+            raise TypeError(
+                "CandidateModularizationSearchResult.exclude_single_module_from_ranking must "
+                f"be a bool, got {self.exclude_single_module_from_ranking!r}"
+            )
+        object.__setattr__(
+            self,
+            "degenerate",
+            _require_tuple_of(
+                self.degenerate, CandidateModularizationBundle, field_name="degenerate"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "degenerate_evaluations",
+            _require_tuple_of(
+                self.degenerate_evaluations,
+                ModularizationEvaluation,
+                field_name="degenerate_evaluations",
+            ),
         )
         object.__setattr__(
             self, "warnings", _require_str_tuple(self.warnings, field_name="warnings")

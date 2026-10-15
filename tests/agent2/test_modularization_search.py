@@ -882,7 +882,10 @@ def test_apply_resolution_correction_cannot_fix_the_degenerate_single_module_cas
     result = search_candidate_modularizations(
         model, "seed", weights, policy, apply_resolution_correction=True
     )
-    merged_eval = next(ev for ev in result.evaluations if ev.module_count == 1)
+    # The 1-module merge is, by default, excluded from ranking (degenerate-single-module
+    # policy, Calibration-Independence Aggregation increment) -- still fully evaluated and
+    # reported, just in ``degenerate_evaluations`` rather than ``evaluations``.
+    merged_eval = next(ev for ev in result.degenerate_evaluations if ev.module_count == 1)
     score = merged_eval.criterion_scores[0]
     assert score.null_reference_score == Decimal("1")
     assert score.corrected_score is None
@@ -905,3 +908,157 @@ def test_apply_resolution_correction_default_false_reproduces_prior_search():
     assert without_scores == with_scores
     for ev in with_flag_false.evaluations:
         assert all(cs.null_reference_score is None for cs in ev.criterion_scores)
+
+
+# --- Degenerate single-module policy (Calibration-Independence Aggregation + Degenerate -----
+# Resolution Policy increment) -----------------------------------------------------------------
+
+
+def _one_module_seed_model(**overrides) -> ModelSpecification:
+    """The identical chain network as ``_seed_model``, but seeded as one single module (``r1``-
+    ``r4`` all together) -- the degenerate, boundary-free starting point."""
+    modularization = ModelModularization(
+        modularization_id="seed1",
+        name="seed1",
+        method=ModularizationMethod.USER_DEFINED,
+        module_ids=("modAll",),
+    )
+    merged = {
+        "model_id": "m1",
+        "name": "m1",
+        "full_network": _chain_network(),
+        "kinetic_laws": (),
+        "parameters": (),
+        "modularizations": (modularization,),
+        "model_modules": (ModelModule(module_id="modAll", name="All"),),
+        "module_memberships": (
+            _membership("modAll", "r1", modularization_id="seed1"),
+            _membership("modAll", "r2", modularization_id="seed1"),
+            _membership("modAll", "r3", modularization_id="seed1"),
+            _membership("modAll", "r4", modularization_id="seed1"),
+        ),
+    } | overrides
+    return ModelSpecification(**merged)
+
+
+def test_exclude_single_module_from_ranking_defaults_to_true():
+    model = _seed_model()
+    policy = _policy(allowed_operations=(ProposalOperation.MERGE_MODULES,))
+    weights = _topology_weights()
+    result = search_candidate_modularizations(model, "seed", weights, policy)
+    assert result.exclude_single_module_from_ranking is True
+
+
+def test_one_module_candidate_is_evaluated_and_reported_but_excluded_from_ranking():
+    model = _seed_model()
+    policy = _policy(allowed_operations=(ProposalOperation.MERGE_MODULES,))
+    weights = _topology_weights()
+    result = search_candidate_modularizations(model, "seed", weights, policy)
+
+    # Never a valid winner: no 1-module candidate occupies a retained/evaluations slot.
+    assert all(len(b.modules) != 1 for b in result.retained)
+    assert all(ev.module_count != 1 for ev in result.evaluations)
+
+    # Still fully evaluated and reported, never silently dropped.
+    assert any(len(b.modules) == 1 for b in result.degenerate)
+    assert any(ev.module_count == 1 for ev in result.degenerate_evaluations)
+    degenerate_eval = next(ev for ev in result.degenerate_evaluations if ev.module_count == 1)
+    assert degenerate_eval.overall_score is not None  # a real, computed score, not a stub
+
+    # Lineage records every candidate ever produced regardless of fate -- including the
+    # degenerate one, which is neither "rejected" (a competitive loss) nor silently absent.
+    degenerate_candidate_ids = {
+        b.modularization.modularization_id for b in result.degenerate
+    }
+    assert degenerate_candidate_ids
+    lineage_ids = {entry.candidate_id for entry in result.lineage}
+    assert degenerate_candidate_ids <= lineage_ids
+    rejected_ids = {entry.candidate_id for entry in result.rejected}
+    assert degenerate_candidate_ids.isdisjoint(rejected_ids)
+
+
+def test_exclude_single_module_from_ranking_false_restores_prior_behavior():
+    model = _seed_model()
+    policy = _policy(allowed_operations=(ProposalOperation.MERGE_MODULES,))
+    weights = _topology_weights()
+    result = search_candidate_modularizations(
+        model, "seed", weights, policy, exclude_single_module_from_ranking=False
+    )
+    assert result.exclude_single_module_from_ranking is False
+    # The 1-module merge now competes normally -- it is retained/evaluated directly.
+    assert any(len(b.modules) == 1 for b in result.retained)
+    assert any(ev.module_count == 1 for ev in result.evaluations)
+    # ...and never duplicated into the degenerate-reporting buckets.
+    assert result.degenerate == ()
+    assert result.degenerate_evaluations == ()
+
+
+def test_degenerate_exclusion_matches_prior_search_results_otherwise():
+    """Excluding the degenerate candidate from ranking must not change any *other* retained
+    candidate's own score or membership -- it is removed from competition, not allowed to
+    perturb anyone else's evaluation."""
+    model = _seed_model()
+    policy = _policy(
+        allowed_operations=(ProposalOperation.MERGE_MODULES, ProposalOperation.MOVE_REACTION)
+    )
+    weights = _topology_weights()
+    excluded = search_candidate_modularizations(model, "seed", weights, policy)
+    included = search_candidate_modularizations(
+        model, "seed", weights, policy, exclude_single_module_from_ranking=False
+    )
+    excluded_multi = {
+        frozenset(m.component_id for m in bundle.memberships): ev.overall_score
+        for bundle, ev in zip(excluded.retained, excluded.evaluations, strict=True)
+    }
+    included_multi = {
+        frozenset(m.component_id for m in bundle.memberships): ev.overall_score
+        for bundle, ev in zip(included.retained, included.evaluations, strict=True)
+        if len(bundle.modules) != 1
+    }
+    assert excluded_multi == included_multi
+
+
+def test_fully_degenerate_seed_yields_empty_retained_and_no_weight_space_by_default():
+    """An intentionally one-module seed, with no override: the search cannot even start (there
+    is nothing non-degenerate to build the frontier from), so every output collection is
+    honestly empty/``None`` rather than fabricated -- a disclosed outcome, never an exception."""
+    model = _one_module_seed_model()
+    policy = _policy(allowed_operations=(ProposalOperation.SPLIT_MODULE,))
+    weights = _topology_weights()
+    result = search_candidate_modularizations(model, "seed1", weights, policy)
+    assert result.retained == ()
+    assert result.evaluations == ()
+    assert result.weight_space_result is None
+    assert len(result.degenerate) == 1
+    assert len(result.degenerate_evaluations) == 1
+    assert any("exclude_single_module_from_ranking=False" in w for w in result.warnings)
+
+
+def test_fully_degenerate_seed_with_override_competes_and_can_still_split():
+    """The override restores the ability to explore from a one-module seed (e.g. splitting it
+    back out) -- the exact scenario the default exclusion would otherwise foreclose."""
+    model = _one_module_seed_model()
+    policy = _policy(allowed_operations=(ProposalOperation.SPLIT_MODULE,))
+    weights = _topology_weights()
+    result = search_candidate_modularizations(
+        model, "seed1", weights, policy, exclude_single_module_from_ranking=False
+    )
+    assert result.retained != ()
+    assert result.weight_space_result is not None
+    assert any(len(b.modules) > 1 for b in result.retained)  # SPLIT_MODULE found a 2-module split
+
+
+def test_degenerate_policy_results_are_deterministic():
+    model = _seed_model()
+    policy = _policy(
+        allowed_operations=(ProposalOperation.MERGE_MODULES, ProposalOperation.MOVE_REACTION)
+    )
+    weights = _topology_weights()
+    first = search_candidate_modularizations(model, "seed", weights, policy)
+    second = search_candidate_modularizations(model, "seed", weights, policy)
+    first_degenerate_ids = {b.modularization.modularization_id for b in first.degenerate}
+    second_degenerate_ids = {b.modularization.modularization_id for b in second.degenerate}
+    assert first_degenerate_ids == second_degenerate_ids
+    first_scores = [ev.overall_score for ev in first.degenerate_evaluations]
+    second_scores = [ev.overall_score for ev in second.degenerate_evaluations]
+    assert first_scores == second_scores
