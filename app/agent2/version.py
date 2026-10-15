@@ -1722,6 +1722,37 @@ scoring:
 ``app.agent2.types`` shape changed, and neither the weight-grid/stability-computation policy nor
 the null-partition/bias-classification policy were touched by either correction above. See
 ``docs/35_calibration_aggregation_degenerate_resolution_policy.md``.
+
+**Recursive Agent-4-Assisted Candidate Search Orchestration increment.** New ``app.agent2
+.candidate_orchestration`` package -- Agent 2's own half of closing the modularization loop,
+reusing ``app.agent2.modularization_search``/``app.agent2.module_evaluation``/``app.agent2
+.module_calibration`` entirely unchanged: ``run_candidate_search_round`` runs one bounded,
+structurally-scored search under whatever calibration evidence already exists, ``select_
+candidates_for_calibration`` gates which of that round's own candidates' modules are worth a
+real Agent 3/Agent 4 round trip (an explicit, deterministic ``CalibrationSelectionPolicy`` --
+candidate/module/score/rank/total-budget limits, plus an "only if it could plausibly change
+ordering" rule proven never to select when the weights vector gives ``CALIBRATION_INDEPENDENCE``
+zero weight), and ``build_calibration_requests`` turns every selected module into a real
+``ModuleCalibrationRequest`` or, when ineligible, a disclosed ``BOUNDARY_INADEQUATE`` resolved
+locally with no round trip at all. ``build_submodel`` wraps one already-decomposed module as its
+own standalone ``ModelSpecification`` (recursive readiness) -- the identical round function then
+works on it with no code-path change, never automatically triggered.
+
+**Agent 2 still never calls Agent 3 or Agent 4, and this package never decides how many rounds
+to run or when to stop** -- that recursive loop, its cross-round calibration-evidence cache, its
+stopping rules, and its human-review gate all live entirely in the Harness
+(``agent-integration-harness/app/harness/recursive_candidate_search``), which drives this
+package one round at a time via a new subprocess runner
+(``app/harness/runners/run_agent2_candidate_search_round.py``), exactly like every other
+Agent2<->Harness boundary in this project. ``app.agent2.module_calibration.serialization``
+gained one new, additive function, ``serialize_module_calibration_evaluation`` (the exact
+inverse of the already-existing ``parse_module_calibration_evaluation``), so a locally-resolved
+``BOUNDARY_INADEQUATE`` evidence record can cross the subprocess boundary in the identical dict
+shape a real Harness-routed result already uses.
+
+New ``CANDIDATE_ORCHESTRATION_POLICY_VERSION = "candidate-orchestration-v1"``; no other version
+constant changes -- no ``app.agent2.types`` shape changed, and every reused function's own
+behavior is untouched. See ``docs/36_recursive_agent4_assisted_candidate_search_orchestration.md``.
 """
 
 from __future__ import annotations
@@ -1808,6 +1839,11 @@ MODULARIZATION_SEARCH_POLICY_VERSION = "modularization-search-v2"
 #: ``app.agent2.resolution_audit``'s own policy (null-partition construction, bias-severity
 #: classification thresholds).
 RESOLUTION_AUDIT_POLICY_VERSION = "resolution-audit-v1"
+#: Recursive Agent-4-Assisted Candidate Search Orchestration increment -- the version of
+#: ``app.agent2.candidate_orchestration``'s own policy (the calibration-selection gate's
+#: decision rules, the per-round request-construction/local-``BOUNDARY_INADEQUATE``-resolution
+#: policy, the round-result serialization shape).
+CANDIDATE_ORCHESTRATION_POLICY_VERSION = "candidate-orchestration-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1818,6 +1854,7 @@ __all__ = [
     "ANTIMONY_GENERATION_POLICY_VERSION",
     "BOUNDARY_POLICY_VERSION",
     "CALIBRATION_AGGREGATION_POLICY_VERSION",
+    "CANDIDATE_ORCHESTRATION_POLICY_VERSION",
     "ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION",
     "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
     "EVIDENCE_CONSOLIDATION_POLICY_VERSION",

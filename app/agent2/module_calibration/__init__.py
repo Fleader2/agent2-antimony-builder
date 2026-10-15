@@ -32,6 +32,7 @@ from app.agent2.module_calibration.request_builder import (
 from app.agent2.module_calibration.serialization import (
     parse_module_calibration_evaluation,
     parse_module_calibration_request,
+    serialize_module_calibration_evaluation,
     serialize_module_calibration_request,
 )
 from app.agent2.module_calibration.types import (
@@ -69,5 +70,6 @@ __all__ = [
     "build_module_calibration_request",
     "parse_module_calibration_evaluation",
     "parse_module_calibration_request",
+    "serialize_module_calibration_evaluation",
     "serialize_module_calibration_request",
 ]

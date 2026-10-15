@@ -122,6 +122,87 @@ def serialize_module_calibration_request(request: ModuleCalibrationRequest) -> d
     }
 
 
+def serialize_module_calibration_evaluation(
+    evaluation: ModuleCalibrationEvaluation,
+) -> dict[str, Any]:
+    """``ModuleCalibrationEvaluation`` -> the one plain dict shape ``parse_module_calibration
+    _evaluation`` (below) reads back -- the exact inverse, field for field. Added for the
+    Recursive Agent-4-Assisted Candidate Search Orchestration increment: a module Agent 2
+    itself resolves locally (``BOUNDARY_INADEQUATE``, no Harness round trip needed at all)
+    must still be reported to the caller in the identical dict shape a real Harness-routed
+    result would use, so a caller never needs two different parsers for "evidence that came
+    from a round trip" versus "evidence resolved locally."
+    """
+    return {
+        "evaluation_id": evaluation.evaluation_id,
+        "request_id": evaluation.request_id,
+        "correlation_id": evaluation.correlation_id,
+        "run_id": evaluation.run_id,
+        "parent_model_id": evaluation.parent_model_id,
+        "modularization_id": evaluation.modularization_id,
+        "module_id": evaluation.module_id,
+        "status": evaluation.status.value,
+        "policy_version": evaluation.policy_version,
+        "fit_quality": (
+            {
+                "objective_before": _decimal_str(evaluation.fit_quality.objective_before),
+                "objective_after": _decimal_str(evaluation.fit_quality.objective_after),
+                "total_sum_squared_residual": _decimal_str(
+                    evaluation.fit_quality.total_sum_squared_residual
+                ),
+                "validation_sum_squared_residual": _decimal_str(
+                    evaluation.fit_quality.validation_sum_squared_residual
+                ),
+            }
+            if evaluation.fit_quality is not None
+            else None
+        ),
+        "identifiability_findings": [
+            {
+                "finding_id": f.finding_id,
+                "category": f.category,
+                "severity": f.severity,
+                "summary": f.summary,
+                "related_target_ids": list(f.related_target_ids),
+            }
+            for f in evaluation.identifiability_findings
+        ],
+        "parameter_uncertainty": [
+            {
+                "target_id": u.target_id,
+                "fitted_value": _decimal_str(u.fitted_value),
+                "standard_error": _decimal_str(u.standard_error),
+            }
+            for u in evaluation.parameter_uncertainty
+        ],
+        "parameter_correlations": [
+            {
+                "target_id_a": c.target_id_a,
+                "target_id_b": c.target_id_b,
+                "correlation": _decimal_str(c.correlation),
+            }
+            for c in evaluation.parameter_correlations
+        ],
+        "boundary_sensitivity_findings": [
+            {"target_id": b.target_id, "category": b.category, "summary": b.summary}
+            for b in evaluation.boundary_sensitivity_findings
+        ],
+        "parameters_requiring_external_context": list(
+            evaluation.parameters_requiring_external_context
+        ),
+        "parameter_stability": [
+            {
+                "target_id": s.target_id,
+                "max_relative_difference": _decimal_str(s.max_relative_difference),
+                "compared_run_count": s.compared_run_count,
+            }
+            for s in evaluation.parameter_stability
+        ],
+        "warnings": list(evaluation.warnings),
+        "provenance_refs": list(evaluation.provenance_refs),
+    }
+
+
 def parse_module_calibration_request(data: dict) -> ModuleCalibrationRequest:
     """The reverse of ``serialize_module_calibration_request`` -- used by the Harness side to
     parse what Agent 2 sent without importing Agent 2's own Python package."""
@@ -328,5 +409,6 @@ def parse_module_calibration_evaluation(data: dict) -> ModuleCalibrationEvaluati
 __all__ = [
     "parse_module_calibration_evaluation",
     "parse_module_calibration_request",
+    "serialize_module_calibration_evaluation",
     "serialize_module_calibration_request",
 ]
