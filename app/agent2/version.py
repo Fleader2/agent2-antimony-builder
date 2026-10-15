@@ -1753,6 +1753,40 @@ shape a real Harness-routed result already uses.
 New ``CANDIDATE_ORCHESTRATION_POLICY_VERSION = "candidate-orchestration-v1"``; no other version
 constant changes -- no ``app.agent2.types`` shape changed, and every reused function's own
 behavior is untouched. See ``docs/36_recursive_agent4_assisted_candidate_search_orchestration.md``.
+
+**Functional Modularity Criteria from Agents 3 and 4 increment.** Activates the two remaining
+reserved structural-adjacent criteria, ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``, from
+real Agent 3 whole-network perturbation evidence -- new ``app.agent2.module_functional
+_evaluation`` package (mirrors ``app.agent2.module_calibration``'s own request/result/
+serialization structure exactly, but for Agent 3 rather than Agent 4) builds a deterministic
+battery of perturbation targets spanning both inside and outside one candidate module, against
+the *whole* canonical network (never the module's own filtered standalone artifact -- dynamic
+isolation/sensitivity coherence are properties of behavior relative to context, which only
+exists in a whole-network simulation); new ``app.agent2.module_evaluation.functional_adapter``
+interprets the identical returned per-species perturbation-response evidence two different
+ways (magnitude -> ``DYNAMIC_ISOLATION``; profile-shape similarity -> ``SENSITIVITY_
+COHERENCE``), one real Agent 3 round trip serving both criteria. ``evaluate_modularization``/
+``evaluate_modularization_under_weights``/``compare_modularizations``/``explore_weight_space``/
+``search_candidate_modularizations``/``run_candidate_search_round`` each gained one new,
+optional ``functional_evaluation_evidence`` parameter, threaded through identically to
+``calibration_evidence`` (content-addressed lookup, zero-risk by default). ``Modularization
+CriterionScore.detail`` gained two new possible types, ``DynamicIsolationDetail``/
+``SensitivityCoherenceDetail`` (a real bug caught and fixed in this same increment: the
+``__post_init__`` type-gate for ``.detail`` was a closed ``if``/``elif`` chain that would have
+rejected these two new types outright -- extended, never bypassed).
+
+``AGENT3_CONTRACT_VERSION`` (sibling repository) bumped ``"0.1"`` -> ``"0.2"``:
+``PerturbationResult`` gained one new, additive field, ``relative_change_by_species`` --
+exposing per-species data that module already computed internally and previously discarded
+down to one scalar (``max_relative_change_in_final_state``); no new simulation algorithm.
+``MODULE_EVALUATION_POLICY_VERSION`` bumped ``"module-evaluation-v3"`` -> ``"module-
+evaluation-v4"``. New ``MODULE_FUNCTIONAL_EVALUATION_POLICY_VERSION = "module-functional-
+evaluation-v1"``. ``MODULARIZATION_SEARCH_POLICY_VERSION``/``WEIGHT_SPACE_EXPLORATION_POLICY
+_VERSION``/``CANDIDATE_ORCHESTRATION_POLICY_VERSION`` are **unchanged** -- the search/
+exploration/orchestration policy itself (bounds, beam, stopping, aggregation choices) is
+untouched; only a new, fully optional evidence channel was added that reproduces every
+pre-existing call site's exact behavior when omitted. See ``docs/
+37_functional_modularity_criteria_from_agents_3_and_4.md``.
 """
 
 from __future__ import annotations
@@ -1797,7 +1831,13 @@ AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
 #: ``compare_modularizations`` each gained an optional ``calibration_aggregation_policy``
 #: parameter; ``CalibrationIndependenceDetail`` gained ``aggregation_method``/
 #: ``per_module_scores``/``mean_score``/``min_score``/``max_score``/``unavailable_module_count``).
-MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v3"
+#: Bumped to v4 by the Functional Modularity Criteria from Agents 3 and 4 increment:
+#: ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE`` activated (previously reserved),
+#: ``evaluate_modularization``/``evaluate_modularization_under_weights``/``compare
+#: _modularizations`` each gained an optional ``functional_evaluation_evidence`` parameter,
+#: and ``ModularizationCriterionScore.detail`` gained two new possible types
+#: (``DynamicIsolationDetail``/``SensitivityCoherenceDetail``).
+MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v4"
 #: Weight-Space Exploration and Stable Boundary Discovery increment -- the version of
 #: ``app.agent2.weight_space_exploration``'s own policy (deterministic weight-grid sampling,
 #: high-scoring-solution selection, boundary/co-membership/modularization-recurrence stability
@@ -1844,6 +1884,13 @@ RESOLUTION_AUDIT_POLICY_VERSION = "resolution-audit-v1"
 #: decision rules, the per-round request-construction/local-``BOUNDARY_INADEQUATE``-resolution
 #: policy, the round-result serialization shape).
 CANDIDATE_ORCHESTRATION_POLICY_VERSION = "candidate-orchestration-v1"
+#: Functional Modularity Criteria from Agents 3 and 4 increment -- the version of
+#: ``app.agent2.module_functional_evaluation``'s own request-construction policy (deterministic
+#: internal/external perturbation-target selection, minimum-target-count gating, the local
+#: ``UNSUPPORTED_ANALYSIS``/``INSUFFICIENT_TARGETS`` resolution rules) and of ``app.agent2
+#: .module_evaluation.functional_adapter``'s own ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``
+#: scoring formulas.
+MODULE_FUNCTIONAL_EVALUATION_POLICY_VERSION = "module-functional-evaluation-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1867,6 +1914,7 @@ __all__ = [
     "MODULE_CALIBRATION_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
     "MODULE_EVALUATION_POLICY_VERSION",
+    "MODULE_FUNCTIONAL_EVALUATION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "QUANTITATIVE_CONTEXT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",

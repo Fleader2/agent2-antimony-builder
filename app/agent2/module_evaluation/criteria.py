@@ -26,7 +26,9 @@ from decimal import Decimal
 
 from app.agent2.module_evaluation.types import (
     CalibrationIndependenceDetail,
+    DynamicIsolationDetail,
     ModularizationCriterion,
+    SensitivityCoherenceDetail,
     TopologyComponentFilter,
     TopologyFilteringPolicy,
     TopologyRole,
@@ -63,10 +65,36 @@ DEFAULT_TOPOLOGY_ROLE_WEIGHT: dict[TopologyRole, Decimal] = {
 #: fallback for exactly that case.
 _UNIVERSAL_CURRENCY_NAMES: frozenset[str] = frozenset(
     {
-        "atp", "adp", "amp", "gtp", "gdp", "gmp", "utp", "udp", "ump", "ctp", "cdp", "cmp",
-        "water", "h2o", "proton", "h+", "hydron", "h",
-        "orthophosphate", "phosphate", "pi", "diphosphate", "pyrophosphate", "ppi",
-        "co2", "carbon dioxide", "ammonia", "nh3", "oxygen", "o2",
+        "atp",
+        "adp",
+        "amp",
+        "gtp",
+        "gdp",
+        "gmp",
+        "utp",
+        "udp",
+        "ump",
+        "ctp",
+        "cdp",
+        "cmp",
+        "water",
+        "h2o",
+        "proton",
+        "h+",
+        "hydron",
+        "h",
+        "orthophosphate",
+        "phosphate",
+        "pi",
+        "diphosphate",
+        "pyrophosphate",
+        "ppi",
+        "co2",
+        "carbon dioxide",
+        "ammonia",
+        "nh3",
+        "oxygen",
+        "o2",
     }
 )
 #: Curated, name-based default classification for common redox/acyl-carrier cofactors (task's
@@ -74,10 +102,24 @@ _UNIVERSAL_CURRENCY_NAMES: frozenset[str] = frozenset(
 #: as ``_UNIVERSAL_CURRENCY_NAMES`` above.
 _COFACTOR_NAMES: frozenset[str] = frozenset(
     {
-        "nad", "nad+", "nadh", "nadp", "nadp+", "nadph",
-        "coa", "coenzyme a", "fad", "fadh", "fadh2",
-        "thiamine", "thiamine diphosphate", "biotin", "pyridoxal phosphate",
-        "tetrahydrofolate", "s-adenosylmethionine", "sam",
+        "nad",
+        "nad+",
+        "nadh",
+        "nadp",
+        "nadp+",
+        "nadph",
+        "coa",
+        "coenzyme a",
+        "fad",
+        "fadh",
+        "fadh2",
+        "thiamine",
+        "thiamine diphosphate",
+        "biotin",
+        "pyridoxal phosphate",
+        "tetrahydrofolate",
+        "s-adenosylmethionine",
+        "sam",
     }
 )
 
@@ -93,6 +135,7 @@ def _curated_default_role(name: str | None) -> TopologyRole | None:
     if normalized in _COFACTOR_NAMES:
         return TopologyRole.COFACTOR
     return None
+
 
 #: Every ``ModularizationCriterion`` with a real producer in this module today -- the task's
 #: own "initial criteria" list (§2). Kept here, not in ``types.py``, since it describes
@@ -119,9 +162,16 @@ class CriterionResult:
     #: extended report, threaded through by ``app.agent2.module_evaluation.evaluator`` onto
     #: ``ModularizationCriterionScore.detail``. Recursive Module Evaluation Orchestration
     #: increment: ``CalibrationIndependenceDetail`` (``calibration_adapter
-    #: .score_calibration_independence``'s own result) is the other possible value. Always
-    #: ``None`` for every other criterion.
-    detail: TopologySeparationDetail | CalibrationIndependenceDetail | None = None
+    #: .score_calibration_independence``'s own result). Functional Modularity Criteria from
+    #: Agents 3 and 4 increment: ``DynamicIsolationDetail``/``SensitivityCoherenceDetail``
+    #: (``functional_adapter``'s own two results). Always ``None`` for every other criterion.
+    detail: (
+        TopologySeparationDetail
+        | CalibrationIndependenceDetail
+        | DynamicIsolationDetail
+        | SensitivityCoherenceDetail
+        | None
+    ) = None
 
 
 def _member_ids(
@@ -223,9 +273,7 @@ def score_topological_separation(
         if reaction.reaction_id not in scoped_reaction_ids:
             continue
         for participant in reaction.participants:
-            species_to_reactions.setdefault(participant.species_id, set()).add(
-                reaction.reaction_id
-            )
+            species_to_reactions.setdefault(participant.species_id, set()).add(reaction.reaction_id)
 
     edge_shared_species: dict[frozenset[str], set[str]] = {}
     for species_id, reaction_ids in species_to_reactions.items():
@@ -271,11 +319,7 @@ def score_topological_separation(
         else max(4, len(scoped_reaction_ids) // 3)
     )
     hub_candidate_species_ids = tuple(
-        sorted(
-            sid
-            for sid in all_edge_species
-            if len(species_to_reactions[sid]) >= hub_threshold
-        )
+        sorted(sid for sid in all_edge_species if len(species_to_reactions[sid]) >= hub_threshold)
     )
 
     filtered_internal = Decimal(0)
@@ -309,10 +353,7 @@ def score_topological_separation(
         hub_candidate_species_ids=hub_candidate_species_ids,
     )
     filtered_component_warnings = (
-        (
-            f"{len(filters)} component(s) filtered: "
-            f"{', '.join(f.species_id for f in filters)}.",
-        )
+        (f"{len(filters)} component(s) filtered: {', '.join(f.species_id for f in filters)}.",)
         if filters
         else ()
     )

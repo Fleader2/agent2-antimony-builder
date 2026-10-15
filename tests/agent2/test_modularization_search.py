@@ -36,6 +36,11 @@ from app.agent2.module_evaluation.types import (
     TopologyRole,
     TopologyRoleOverride,
 )
+from app.agent2.module_functional_evaluation.types import (
+    FunctionalEvaluationStatus,
+    ModuleFunctionalEvaluationResult,
+    PerturbationEffectRecord,
+)
 from app.agent2.types import (
     CompartmentSourceScope,
     CompartmentSpecification,
@@ -354,12 +359,8 @@ def test_split_module_uses_connected_components_when_disconnected():
     )
     bundle = _canonical_seed_bundle(model)
     proposals = propose_split_module(bundle, model, SearchConstraints())
-    mod_a_module_ids = {
-        m.module_id for m in bundle.memberships if m.component_id == "r1"
-    }
-    mod_a_split = next(
-        p for p in proposals if p.affected_module_ids[0] in mod_a_module_ids
-    )
+    mod_a_module_ids = {m.module_id for m in bundle.memberships if m.component_id == "r1"}
+    mod_a_split = next(p for p in proposals if p.affected_module_ids[0] in mod_a_module_ids)
     reaction_sets = []
     for module_id in {m.module_id for m in mod_a_split.bundle.memberships}:
         reactions = frozenset(
@@ -404,9 +405,9 @@ def test_add_boundary_declares_a_port_pair_for_shared_species():
     directions = {p.direction for p in ports}
     assert directions == {ModulePortDirection.OUTPUT, ModulePortDirection.INPUT}
     # membership partition is unchanged -- only ports changed.
-    assert {
-        (m.module_id, m.component_id) for m in proposal.bundle.memberships
-    } == {(m.module_id, m.component_id) for m in bundle.memberships}
+    assert {(m.module_id, m.component_id) for m in proposal.bundle.memberships} == {
+        (m.module_id, m.component_id) for m in bundle.memberships
+    }
 
 
 def test_add_boundary_respects_fixed_boundary_must_not_be_declared():
@@ -592,12 +593,8 @@ def test_candidate_rankings_change_under_different_weights():
         policy_version="test-v1",
     )
     boundary_result = search_candidate_modularizations(model, "seed", boundary_weights, policy)
-    topology_scores = {
-        ev.modularization_id: ev.overall_score for ev in topology_result.evaluations
-    }
-    boundary_scores = {
-        ev.modularization_id: ev.overall_score for ev in boundary_result.evaluations
-    }
+    topology_scores = {ev.modularization_id: ev.overall_score for ev in topology_result.evaluations}
+    boundary_scores = {ev.modularization_id: ev.overall_score for ev in boundary_result.evaluations}
     assert topology_scores != boundary_scores
 
 
@@ -967,9 +964,7 @@ def test_one_module_candidate_is_evaluated_and_reported_but_excluded_from_rankin
 
     # Lineage records every candidate ever produced regardless of fate -- including the
     # degenerate one, which is neither "rejected" (a competitive loss) nor silently absent.
-    degenerate_candidate_ids = {
-        b.modularization.modularization_id for b in result.degenerate
-    }
+    degenerate_candidate_ids = {b.modularization.modularization_id for b in result.degenerate}
     assert degenerate_candidate_ids
     lineage_ids = {entry.candidate_id for entry in result.lineage}
     assert degenerate_candidate_ids <= lineage_ids
@@ -1062,3 +1057,123 @@ def test_degenerate_policy_results_are_deterministic():
     first_scores = [ev.overall_score for ev in first.degenerate_evaluations]
     second_scores = [ev.overall_score for ev in second.degenerate_evaluations]
     assert first_scores == second_scores
+
+
+# --- Functional Modularity Criteria from Agents 3 and 4: threading -----------------------------
+
+
+def _functional_result(
+    status: FunctionalEvaluationStatus, effects=()
+) -> ModuleFunctionalEvaluationResult:
+    return ModuleFunctionalEvaluationResult(
+        evaluation_id="e",
+        request_id="r",
+        correlation_id="c",
+        run_id="run",
+        parent_model_id="m1",
+        modularization_id="seed",
+        module_id="placeholder",
+        status=status,
+        policy_version="test-v1",
+        perturbation_effects=tuple(effects),
+    )
+
+
+def test_search_threads_functional_evaluation_evidence_by_content_key():
+    """Content-addressed lookup (identical convention to ``calibration_evidence``): functional
+    evidence supplied keyed by a module's own content key is picked up automatically for every
+    candidate sharing that exact module content, and correctly populates ``DYNAMIC_ISOLATION``/
+    ``SENSITIVITY_COHERENCE`` in the resulting evaluations. Needs explicit ``SPECIES``-type
+    memberships (``_seed_model``'s own default fixture only declares ``REACTION``-type ones)
+    so ``internal_species_ids`` is non-empty -- otherwise both criteria are legitimately
+    unavailable, never fabricated, which is correct but not what this test is checking."""
+    model = _seed_model(
+        module_memberships=(
+            _membership("modA", "r1"),
+            _membership("modA", "r2"),
+            _membership("modB", "r3"),
+            _membership("modB", "r4"),
+            ModuleMembership(
+                membership_id="mem_seed_modA_species_A",
+                modularization_id="seed",
+                module_id="modA",
+                component_type=ModuleComponentType.SPECIES,
+                component_id="A",
+            ),
+            ModuleMembership(
+                membership_id="mem_seed_modA_species_B",
+                modularization_id="seed",
+                module_id="modA",
+                component_type=ModuleComponentType.SPECIES,
+                component_id="B",
+            ),
+            ModuleMembership(
+                membership_id="mem_seed_modB_species_D",
+                modularization_id="seed",
+                module_id="modB",
+                component_type=ModuleComponentType.SPECIES,
+                component_id="D",
+            ),
+            ModuleMembership(
+                membership_id="mem_seed_modB_species_E",
+                modularization_id="seed",
+                module_id="modB",
+                component_type=ModuleComponentType.SPECIES,
+                component_id="E",
+            ),
+        )
+    )
+    bundle = canonicalize_bundle(extract_bundle(model, "seed"))
+    module_ids = sorted({m.module_id for m in bundle.modules})
+    content_keys = {mid: module_content_key(bundle.memberships, mid) for mid in module_ids}
+
+    isolated_effects = [
+        PerturbationEffectRecord(
+            target_kind="PARAMETER",
+            target_id="k1",
+            is_internal=True,
+            simulation_status="SUCCESS",
+            remained_numerically_stable=True,
+            relative_change_by_species=(("A", Decimal("0.5")), ("B", Decimal("0.4"))),
+        ),
+        PerturbationEffectRecord(
+            target_kind="PARAMETER",
+            target_id="k2",
+            is_internal=True,
+            simulation_status="SUCCESS",
+            remained_numerically_stable=True,
+            relative_change_by_species=(("A", Decimal("0.3")), ("B", Decimal("0.35"))),
+        ),
+        PerturbationEffectRecord(
+            target_kind="PARAMETER",
+            target_id="k3",
+            is_internal=False,
+            simulation_status="SUCCESS",
+            remained_numerically_stable=True,
+            relative_change_by_species=(("A", Decimal("0.001")), ("B", Decimal("0.02"))),
+        ),
+    ]
+    evidence = {
+        content_keys[mid]: _functional_result(
+            FunctionalEvaluationStatus.EVALUATED, isolated_effects
+        )
+        for mid in module_ids
+    }
+    functional_weights = CriteriaWeights(
+        weights=(
+            CriterionWeight(ModularizationCriterion.DYNAMIC_ISOLATION, Decimal("1")),
+            CriterionWeight(ModularizationCriterion.SENSITIVITY_COHERENCE, Decimal("1")),
+        ),
+        policy_version="test-v1",
+    )
+    policy = _policy(allowed_operations=(ProposalOperation.MOVE_REACTION,))
+    result = search_candidate_modularizations(
+        model, "seed", functional_weights, policy, functional_evaluation_evidence=evidence
+    )
+    seed_eval = next(
+        ev for ev in result.evaluations if ev.modularization_id == result.seed_candidate_id
+    )
+    criteria = {cs.criterion for cs in seed_eval.criterion_scores}
+    assert ModularizationCriterion.DYNAMIC_ISOLATION in criteria
+    assert ModularizationCriterion.SENSITIVITY_COHERENCE in criteria
+    assert seed_eval.overall_score is not None

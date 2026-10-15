@@ -59,14 +59,18 @@ class ModularizationCriterion(StrEnum):
     start, so a future increment adding a new producer never requires revisiting every
     already-stored evaluation's own scored-criterion set.
 
-    Only the first four have a real producer today (``app.agent2.module_evaluation.criteria``)
-    -- currently supportable from Agent 2/canonical-model information alone, per this
-    increment's own scope. The remaining six are reserved vocabulary for future increments
-    this task explicitly excludes from this one: genuine pathway/network membership, Agent 3
-    dynamic isolation, sensitivity coherence, Agent 4 calibration independence/
-    identifiability, regulatory coherence, and Agent 5 experimental validation. A future
-    increment implementing one of these needs no interface change -- it only adds its own
-    scoring function to ``criteria.py`` and extends the one dispatch table there.
+    The first four have a real producer from Agent 2/canonical-model information alone
+    (``app.agent2.module_evaluation.criteria``). ``DYNAMIC_ISOLATION``/``SENSITIVITY_
+    COHERENCE`` (Functional Modularity Criteria from Agents 3 and 4 increment) and
+    ``CALIBRATION_INDEPENDENCE`` (Recursive Module Evaluation Orchestration increment) each
+    have a real producer too, but only ever computed when a caller supplies the corresponding
+    external evidence (``functional_evaluation_evidence``/``calibration_evidence``) -- never
+    computed from the canonical model alone, and never appearing in ``criterion_scores`` at
+    all when that evidence is omitted (see ``app.agent2.module_evaluation.functional_adapter``/
+    ``.calibration_adapter``). The remaining three are still-reserved vocabulary for future
+    increments: genuine pathway/network membership, regulatory coherence, and Agent 5
+    experimental validation. A future increment implementing one of these needs no interface
+    change -- it only adds its own scoring function and extends the relevant dispatch table.
 
     **Naming correction (Topology Hub/Currency Component Filtering's own corrective
     follow-up increment).** A prior increment's own ``PATHWAY_ANNOTATION_COHERENCE`` member
@@ -103,14 +107,27 @@ class ModularizationCriterion(StrEnum):
     #: codebase today -- never conflate with ``EC_CLASS_COHERENCE`` above, which is a
     #: differently-scoped, already-implemented proxy signal.
     PATHWAY_ANNOTATION_COHERENCE = "PATHWAY_ANNOTATION_COHERENCE"
-    #: Reserved: Agent 3's own dynamic-isolation analysis (e.g. relaxation-time separation
-    #: between modules). No producer in this codebase today.
+    #: Does a candidate module behave relatively independently of its surrounding context --
+    #: does an internal perturbation mostly stay internal (little spillover), do the module's
+    #: own outputs mostly ignore external perturbations (little external dependence), and do
+    #: its own declared boundary ports actually absorb most of whatever cross-module influence
+    #: does exist? Computed from real Agent 3 whole-network perturbation evidence (Functional
+    #: Modularity Criteria from Agents 3 and 4 increment); unavailable unless a caller supplies
+    #: ``functional_evaluation_evidence``. (app.agent2.module_evaluation.functional_adapter
+    #: .score_dynamic_isolation)
     DYNAMIC_ISOLATION = "DYNAMIC_ISOLATION"
-    #: Reserved: sensitivity-coherence (do a module's own parameters dominate its own outputs'
-    #: sensitivity, with little cross-module sensitivity leakage). No producer today.
+    #: Do a module's own components share a coherent internal sensitivity *pattern* (similar
+    #: profiles of which species respond to which internal perturbations), and is that pattern
+    #: genuinely distinct from how an external perturbation's own profile looks -- i.e. does
+    #: the declared boundary actually separate two weakly-coupled sensitivity groups? Computed
+    #: from the identical Agent 3 perturbation evidence ``DYNAMIC_ISOLATION`` uses, interpreted
+    #: as pattern similarity rather than effect magnitude; unavailable unless a caller supplies
+    #: ``functional_evaluation_evidence``. (.score_sensitivity_coherence)
     SENSITIVITY_COHERENCE = "SENSITIVITY_COHERENCE"
-    #: Reserved: Agent 4's own calibration independence/practical identifiability across
-    #: modules. No producer today.
+    #: Agent 4's own calibration independence/practical identifiability across modules.
+    #: Computed from real Agent 4 evidence (Recursive Module Evaluation Orchestration
+    #: increment); unavailable unless a caller supplies ``calibration_evidence``.
+    #: (app.agent2.module_evaluation.calibration_adapter.score_calibration_independence)
     CALIBRATION_INDEPENDENCE = "CALIBRATION_INDEPENDENCE"
     #: Reserved: regulatory coherence (do regulatory interactions stay within, rather than
     #: cross, module boundaries). No producer today.
@@ -560,11 +577,10 @@ class CalibrationIndependenceDetail:
                 self.module_ids_missing_evidence, field_name="module_ids_missing_evidence"
             ),
         )
+
         def _is_str_pair(item: object) -> bool:
             return (
-                isinstance(item, tuple)
-                and len(item) == 2
-                and all(isinstance(x, str) for x in item)
+                isinstance(item, tuple) and len(item) == 2 and all(isinstance(x, str) for x in item)
             )
 
         if not isinstance(self.statuses_by_module_id, tuple) or any(
@@ -614,6 +630,115 @@ class CalibrationIndependenceDetail:
                 "CalibrationIndependenceDetail.unavailable_module_count must be a "
                 f"non-negative int, got {self.unavailable_module_count!r}"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class DynamicIsolationDetail:
+    """``DYNAMIC_ISOLATION``'s own extended, criterion-specific report (Functional Modularity
+    Criteria from Agents 3 and 4 increment) -- every per-module raw metric Agent 2's own
+    ``app.agent2.module_evaluation.functional_adapter.score_dynamic_isolation`` derives from
+    real Agent 3 perturbation evidence, preserved alongside the single normalized ``[0, 1]``
+    score (task instructions §2: "return a normalized score plus raw metrics and provenance").
+
+    ``per_module_boundary_capture_fraction`` only ever names a module for which it was actually
+    computable (a module with no declared ``ModulePort`` at all has no boundary to measure
+    capture against) -- never fabricated for one with none.
+    """
+
+    module_ids_with_evidence: tuple[str, ...] = ()
+    module_ids_missing_evidence: tuple[str, ...] = ()
+    per_module_scores: tuple[tuple[str, Decimal], ...] = ()
+    per_module_spillover_ratio: tuple[tuple[str, Decimal], ...] = ()
+    per_module_external_dependence_ratio: tuple[tuple[str, Decimal], ...] = ()
+    per_module_boundary_capture_fraction: tuple[tuple[str, Decimal], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "module_ids_with_evidence",
+            _require_str_tuple(
+                self.module_ids_with_evidence, field_name="module_ids_with_evidence"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "module_ids_missing_evidence",
+            _require_str_tuple(
+                self.module_ids_missing_evidence, field_name="module_ids_missing_evidence"
+            ),
+        )
+
+        def _is_module_decimal_pair(item: object) -> bool:
+            return (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and isinstance(item[0], str)
+                and bool(item[0])
+                and isinstance(item[1], Decimal)
+            )
+
+        for field_name in (
+            "per_module_scores",
+            "per_module_spillover_ratio",
+            "per_module_external_dependence_ratio",
+            "per_module_boundary_capture_fraction",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, tuple) or any(not _is_module_decimal_pair(i) for i in value):
+                raise TypeError(
+                    f"DynamicIsolationDetail.{field_name} must be a tuple of (module_id, "
+                    f"Decimal) pairs, got {value!r}"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class SensitivityCoherenceDetail:
+    """``SENSITIVITY_COHERENCE``'s own extended, criterion-specific report (Functional
+    Modularity Criteria from Agents 3 and 4 increment) -- mirrors ``DynamicIsolationDetail``'s
+    own disclosure convention for the identical reason."""
+
+    module_ids_with_evidence: tuple[str, ...] = ()
+    module_ids_missing_evidence: tuple[str, ...] = ()
+    per_module_scores: tuple[tuple[str, Decimal], ...] = ()
+    per_module_within_module_coherence: tuple[tuple[str, Decimal], ...] = ()
+    per_module_across_boundary_coherence: tuple[tuple[str, Decimal], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "module_ids_with_evidence",
+            _require_str_tuple(
+                self.module_ids_with_evidence, field_name="module_ids_with_evidence"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "module_ids_missing_evidence",
+            _require_str_tuple(
+                self.module_ids_missing_evidence, field_name="module_ids_missing_evidence"
+            ),
+        )
+
+        def _is_module_decimal_pair(item: object) -> bool:
+            return (
+                isinstance(item, tuple)
+                and len(item) == 2
+                and isinstance(item[0], str)
+                and bool(item[0])
+                and isinstance(item[1], Decimal)
+            )
+
+        for field_name in (
+            "per_module_scores",
+            "per_module_within_module_coherence",
+            "per_module_across_boundary_coherence",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, tuple) or any(not _is_module_decimal_pair(i) for i in value):
+                raise TypeError(
+                    f"SensitivityCoherenceDetail.{field_name} must be a tuple of (module_id, "
+                    f"Decimal) pairs, got {value!r}"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -743,10 +868,25 @@ class ModularizationCriterionScore:
                         "is only ever set for the CALIBRATION_INDEPENDENCE criterion, got "
                         f"criterion={self.criterion.value!r}"
                     )
+            elif isinstance(self.detail, DynamicIsolationDetail):
+                if self.criterion is not ModularizationCriterion.DYNAMIC_ISOLATION:
+                    raise ValueError(
+                        "ModularizationCriterionScore.detail (DynamicIsolationDetail) is "
+                        "only ever set for the DYNAMIC_ISOLATION criterion, got "
+                        f"criterion={self.criterion.value!r}"
+                    )
+            elif isinstance(self.detail, SensitivityCoherenceDetail):
+                if self.criterion is not ModularizationCriterion.SENSITIVITY_COHERENCE:
+                    raise ValueError(
+                        "ModularizationCriterionScore.detail (SensitivityCoherenceDetail) is "
+                        "only ever set for the SENSITIVITY_COHERENCE criterion, got "
+                        f"criterion={self.criterion.value!r}"
+                    )
             else:
                 raise TypeError(
                     "ModularizationCriterionScore.detail must be a TopologySeparationDetail, "
-                    f"a CalibrationIndependenceDetail, or None, got {self.detail!r}"
+                    "a CalibrationIndependenceDetail, a DynamicIsolationDetail, a "
+                    f"SensitivityCoherenceDetail, or None, got {self.detail!r}"
                 )
         if self.null_reference_score is not None:
             if not self.available:
@@ -851,8 +991,7 @@ class ModularizationEvaluation:
             )
         if not isinstance(self.weights, CriteriaWeights):
             raise TypeError(
-                f"ModularizationEvaluation.weights must be a CriteriaWeights, got "
-                f"{self.weights!r}"
+                f"ModularizationEvaluation.weights must be a CriteriaWeights, got {self.weights!r}"
             )
         object.__setattr__(
             self,
@@ -899,9 +1038,11 @@ __all__ = [
     "CalibrationIndependenceDetail",
     "CriteriaWeights",
     "CriterionWeight",
+    "DynamicIsolationDetail",
     "ModularizationCriterion",
     "ModularizationCriterionScore",
     "ModularizationEvaluation",
+    "SensitivityCoherenceDetail",
     "TopologyComponentFilter",
     "TopologyFilteringPolicy",
     "TopologyRole",

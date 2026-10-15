@@ -28,6 +28,10 @@ from app.agent2.module_evaluation.criteria import (
     score_topological_separation,
 )
 from app.agent2.module_evaluation.errors import ModuleEvaluationReferenceError
+from app.agent2.module_evaluation.functional_adapter import (
+    score_dynamic_isolation,
+    score_sensitivity_coherence,
+)
 from app.agent2.module_evaluation.types import (
     CalibrationAggregationPolicy,
     CriteriaWeights,
@@ -36,7 +40,8 @@ from app.agent2.module_evaluation.types import (
     ModularizationEvaluation,
     TopologyFilteringPolicy,
 )
-from app.agent2.types import ModelSpecification, ModuleMembership, ModulePort
+from app.agent2.module_functional_evaluation.types import ModuleFunctionalEvaluationResult
+from app.agent2.types import ModelSpecification, ModuleComponentType, ModuleMembership, ModulePort
 from app.agent2.version import MODULE_EVALUATION_POLICY_VERSION
 
 
@@ -56,9 +61,27 @@ def _require_criteria_weights(weights: CriteriaWeights) -> CriteriaWeights:
     return weights
 
 
-def _weight_tag(
-    weights: CriteriaWeights, criteria: tuple[ModularizationCriterion, ...]
-) -> str:
+def _species_by_module(memberships: tuple[ModuleMembership, ...]) -> dict[str, frozenset[str]]:
+    """``{module_id: frozenset(species_id, ...)}`` for every ``SPECIES``-type membership --
+    the identical derivation ``criteria.score_boundary_sparsity``/``.score_compartment
+    _coherence`` already use, reused here for ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``'s
+    own "which species are internal to this module" question."""
+    result: dict[str, set[str]] = {}
+    for m in memberships:
+        if m.component_type is ModuleComponentType.SPECIES:
+            result.setdefault(m.module_id, set()).add(m.component_id)
+    return {module_id: frozenset(species_ids) for module_id, species_ids in result.items()}
+
+
+def _boundary_species_by_module(ports: tuple[ModulePort, ...]) -> dict[str, frozenset[str]]:
+    """``{module_id: frozenset(species_id, ...)}`` for every declared ``ModulePort``."""
+    result: dict[str, set[str]] = {}
+    for p in ports:
+        result.setdefault(p.module_id, set()).add(p.species_id)
+    return {module_id: frozenset(species_ids) for module_id, species_ids in result.items()}
+
+
+def _weight_tag(weights: CriteriaWeights, criteria: tuple[ModularizationCriterion, ...]) -> str:
     """A deterministic, human-inspectable fragment of ``evaluation_id`` naming every positive
     weight actually in effect -- never an opaque hash, consistent with every other id in this
     codebase being a meaningful, debuggable string."""
@@ -78,6 +101,7 @@ def evaluate_modularization(
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, ModuleCalibrationEvaluation] | None = None,
     calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
+    functional_evaluation_evidence: Mapping[str, ModuleFunctionalEvaluationResult] | None = None,
     null_reference_scores: Mapping[ModularizationCriterion, Decimal] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> ModularizationEvaluation:
@@ -113,6 +137,19 @@ def evaluate_modularization(
     the single, previously hard-coded weakest-link policy. Every per-module score is always
     disclosed on ``CalibrationIndependenceDetail.per_module_scores`` regardless of which method
     produced the aggregate.
+
+    ``functional_evaluation_evidence`` (Functional Modularity Criteria from Agents 3 and 4
+    increment, optional, defaults to ``None``) is a caller-supplied ``{module_id:
+    ModuleFunctionalEvaluationResult}`` mapping -- always obtained by routing one
+    ``ModuleFunctionalEvaluationRequest`` per module through the Harness/Agent 3
+    (``app.agent2.module_functional_evaluation``), **never computed by this function itself**
+    (this package still performs no simulation, and Agent 2 still never calls Agent 3
+    directly). Only when given are ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE`` computed
+    and added to ``criterion_scores`` at all -- one Harness round trip per module serves both
+    criteria, since each is derived from the identical underlying perturbation evidence,
+    interpreted two different ways (magnitude vs. shape; see
+    ``app.agent2.module_evaluation.functional_adapter``). Omitting it (the default) reproduces
+    this function's exact pre-existing behavior with no change whatsoever.
 
     ``null_reference_scores`` (Module-Count / Resolution Bias Audit increment, optional,
     defaults to ``None``) is a caller-supplied ``{criterion: Decimal}`` mapping -- each
@@ -169,6 +206,22 @@ def evaluate_modularization(
                 calibration_evidence,
                 policy=calibration_aggregation_policy or DEFAULT_CALIBRATION_AGGREGATION_POLICY,
             )
+        )
+    if functional_evaluation_evidence is not None:
+        internal_species_by_module = _species_by_module(memberships)
+        boundary_species_by_module = _boundary_species_by_module(ports)
+        criteria_to_score.append(ModularizationCriterion.DYNAMIC_ISOLATION)
+        raw_results[ModularizationCriterion.DYNAMIC_ISOLATION] = score_dynamic_isolation(
+            modularization.module_ids,
+            functional_evaluation_evidence,
+            internal_species_by_module,
+            boundary_species_by_module,
+        )
+        criteria_to_score.append(ModularizationCriterion.SENSITIVITY_COHERENCE)
+        raw_results[ModularizationCriterion.SENSITIVITY_COHERENCE] = score_sensitivity_coherence(
+            modularization.module_ids,
+            functional_evaluation_evidence,
+            internal_species_by_module,
         )
 
     criterion_scores: list[ModularizationCriterionScore] = []
@@ -259,17 +312,19 @@ def evaluate_modularization_under_weights(
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, ModuleCalibrationEvaluation] | None = None,
     calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
+    functional_evaluation_evidence: Mapping[str, ModuleFunctionalEvaluationResult] | None = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> tuple[ModularizationEvaluation, ...]:
     """Score the identical modularization once per supplied ``CriteriaWeights`` vector (task
     instructions §5, weight-space exploration) -- a thin, deterministic loop over
     ``evaluate_modularization``, never a UI, never a search over weight space on its own
     (a caller/future Workbench UI supplies every vector to try). ``topology_filtering``/
-    ``calibration_evidence``/``calibration_aggregation_policy`` (if given) are each held fixed
-    across every weight vector -- weight-space exploration and this evidence are independent
-    axes: a module's own calibration-independence evidence does not change depending on which
-    weight vector is being scored, only its *contribution* to ``overall_score`` does
-    (Calibration Evidence Integration into Weight-Space Exploration increment).
+    ``calibration_evidence``/``calibration_aggregation_policy``/``functional_evaluation
+    _evidence`` (if given) are each held fixed across every weight vector -- weight-space
+    exploration and this evidence are independent axes: a module's own evidence does not
+    change depending on which weight vector is being scored, only its *contribution* to
+    ``overall_score`` does (Calibration Evidence Integration into Weight-Space Exploration
+    increment; extended by Functional Modularity Criteria from Agents 3 and 4).
 
     Returns evaluations in the identical order ``weight_vectors`` was given, one-to-one --
     never reordered, never deduplicated, never ranked.
@@ -287,6 +342,7 @@ def evaluate_modularization_under_weights(
             topology_filtering=topology_filtering,
             calibration_evidence=calibration_evidence,
             calibration_aggregation_policy=calibration_aggregation_policy,
+            functional_evaluation_evidence=functional_evaluation_evidence,
             policy_version=policy_version,
         )
         for weights in weight_vectors
@@ -301,6 +357,9 @@ def compare_modularizations(
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, Mapping[str, ModuleCalibrationEvaluation]] | None = None,
     calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
+    functional_evaluation_evidence: (
+        Mapping[str, Mapping[str, ModuleFunctionalEvaluationResult]] | None
+    ) = None,
     policy_version: str = MODULE_EVALUATION_POLICY_VERSION,
 ) -> tuple[ModularizationEvaluation, ...]:
     """Score several alternative modularizations -- of possibly different module counts --
@@ -315,7 +374,9 @@ def compare_modularizations(
     across different modularizations' own, structurally distinct modules.
     ``calibration_aggregation_policy`` (Calibration-Independence Aggregation increment), when
     given, is held fixed across every modularization compared -- the same aggregation method
-    is applied to whichever evidence each one has.
+    is applied to whichever evidence each one has. ``functional_evaluation_evidence``
+    (Functional Modularity Criteria from Agents 3 and 4 increment) follows the identical
+    per-modularization lookup convention as ``calibration_evidence``.
     """
     if not isinstance(modularization_ids, tuple) or not modularization_ids:
         raise ModuleEvaluationReferenceError(
@@ -334,6 +395,11 @@ def compare_modularizations(
                 else None
             ),
             calibration_aggregation_policy=calibration_aggregation_policy,
+            functional_evaluation_evidence=(
+                functional_evaluation_evidence.get(modularization_id)
+                if functional_evaluation_evidence is not None
+                else None
+            ),
             policy_version=policy_version,
         )
         for modularization_id in modularization_ids

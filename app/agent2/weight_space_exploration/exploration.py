@@ -19,6 +19,7 @@ from app.agent2.module_evaluation.types import (
     CalibrationAggregationPolicy,
     TopologyFilteringPolicy,
 )
+from app.agent2.module_functional_evaluation.types import ModuleFunctionalEvaluationResult
 from app.agent2.types import ModelSpecification, ModuleComponentType
 from app.agent2.version import WEIGHT_SPACE_EXPLORATION_POLICY_VERSION
 from app.agent2.weight_space_exploration.errors import WeightSpaceExplorationReferenceError
@@ -50,6 +51,9 @@ def explore_weight_space(
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[str, Mapping[str, ModuleCalibrationEvaluation]] | None = None,
     calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
+    functional_evaluation_evidence: (
+        Mapping[str, Mapping[str, ModuleFunctionalEvaluationResult]] | None
+    ) = None,
     ambiguous_band_low: Decimal = _DEFAULT_AMBIGUOUS_BAND_LOW,
     ambiguous_band_high: Decimal = _DEFAULT_AMBIGUOUS_BAND_HIGH,
     policy_version: str = WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
@@ -83,6 +87,14 @@ def explore_weight_space(
     optional, defaults to ``None`` -> ``evaluate_modularization``'s own default,
     ``WEIGHTED_MEAN``) is held fixed across every ``(modularization_id, weight_vector)`` pair
     evaluated -- the same aggregation method is applied everywhere evidence exists.
+
+    ``functional_evaluation_evidence`` (Functional Modularity Criteria from Agents 3 and 4
+    increment, optional, defaults to ``None``) follows the identical per-modularization
+    lookup convention as ``calibration_evidence`` -- held fixed across every weight vector,
+    never computed here (obtained by routing a ``ModuleFunctionalEvaluationRequest`` per
+    module through the Harness/Agent 3, ``app.agent2.module_functional_evaluation``, before
+    calling this function). Omitting it (the default) reproduces this function's exact
+    pre-existing behavior with no change whatsoever.
 
     ``ambiguous_band_low``/``ambiguous_band_high`` name the open interval a boundary/
     co-membership frequency must fall strictly inside to be reported among
@@ -120,6 +132,11 @@ def explore_weight_space(
                 else None
             ),
             calibration_aggregation_policy=calibration_aggregation_policy,
+            functional_evaluation_evidence=(
+                functional_evaluation_evidence.get(modularization_id)
+                if functional_evaluation_evidence is not None
+                else None
+            ),
         )
         for modularization_id in modularization_ids
         for weights in weight_vectors

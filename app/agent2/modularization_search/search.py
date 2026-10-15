@@ -54,6 +54,7 @@ from app.agent2.module_evaluation.types import (
     ModularizationEvaluation,
     TopologyFilteringPolicy,
 )
+from app.agent2.module_functional_evaluation.types import ModuleFunctionalEvaluationResult
 from app.agent2.resolution_audit import build_null_partition
 from app.agent2.types import ModelSpecification
 from app.agent2.version import (
@@ -115,23 +116,21 @@ def _module_count(bundle: CandidateModularizationBundle) -> int:
     return len({m.module_id for m in bundle.memberships})
 
 
-def _calibration_evidence_for_bundle(
+def _content_evidence_for_bundle(
     bundle: CandidateModularizationBundle,
-    calibration_evidence: Mapping[ModuleContentKey, ModuleCalibrationEvaluation] | None,
-) -> dict[str, ModuleCalibrationEvaluation] | None:
-    """Content-addressed lookup (task instructions §2/§5): a module in ``bundle`` whose own
-    content key matches one the caller already has evidence for picks it up automatically,
-    regardless of which generation/operation produced that exact module -- never recomputed,
-    never requested here (``calibration_evidence`` must already have been obtained by routing
-    a ``ModuleCalibrationRequest`` through the Harness/Agent 3/Agent 4 before this search ever
-    ran)."""
-    if calibration_evidence is None:
+    evidence: Mapping[ModuleContentKey, object] | None,
+) -> dict[str, object] | None:
+    """Content-addressed lookup (task instructions §2/§5), generalized across whichever
+    evidence mapping is supplied: a module in ``bundle`` whose own content key matches one the
+    caller already has evidence for picks it up automatically, regardless of which generation/
+    operation produced that exact module -- never recomputed, never requested here."""
+    if evidence is None:
         return None
     module_ids = {m.module_id for m in bundle.memberships}
     return {
-        module_id: calibration_evidence[module_content_key(bundle.memberships, module_id)]
+        module_id: evidence[module_content_key(bundle.memberships, module_id)]
         for module_id in module_ids
-        if module_content_key(bundle.memberships, module_id) in calibration_evidence
+        if module_content_key(bundle.memberships, module_id) in evidence
     }
 
 
@@ -166,9 +165,7 @@ def _null_reference_scores_for_module_count(
         criteria_weights,
         topology_filtering=topology_filtering,
     )
-    result = {
-        cs.criterion: cs.raw_score for cs in null_evaluation.criterion_scores if cs.available
-    }
+    result = {cs.criterion: cs.raw_score for cs in null_evaluation.criterion_scores if cs.available}
     cache[module_count] = result
     return result
 
@@ -183,6 +180,9 @@ def search_candidate_modularizations(
     topology_filtering: TopologyFilteringPolicy | None = None,
     calibration_evidence: Mapping[ModuleContentKey, ModuleCalibrationEvaluation] | None = None,
     calibration_aggregation_policy: CalibrationAggregationPolicy | None = None,
+    functional_evaluation_evidence: (
+        Mapping[ModuleContentKey, ModuleFunctionalEvaluationResult] | None
+    ) = None,
     apply_resolution_correction: bool = False,
     exclude_single_module_from_ranking: bool = True,
     stability_weight_vectors: tuple[CriteriaWeights, ...] | None = None,
@@ -204,6 +204,14 @@ def search_candidate_modularizations(
     ``ModuleCalibrationEvaluation``. Agent 4 is never called automatically inside this search
     (task instructions §5) -- only evidence the caller already has, obtained through the
     existing Recursive Module Evaluation Orchestration layer, is ever consulted.
+
+    ``functional_evaluation_evidence`` (Functional Modularity Criteria from Agents 3 and 4
+    increment, optional), when given, is a flat mapping from a module's own content key to its
+    already-obtained ``ModuleFunctionalEvaluationResult`` -- the identical content-addressed
+    lookup convention as ``calibration_evidence`` above, so a module's own functional evidence
+    is picked up automatically wherever that exact module content recurs across the search.
+    Agent 3 is never called automatically inside this search; only evidence the caller already
+    has, obtained through ``app.agent2.module_functional_evaluation``/the Harness, is consulted.
 
     ``apply_resolution_correction`` (Module-Count / Resolution Bias Audit increment, optional,
     defaults to ``False``) -- when set, every candidate's own evaluation additionally scores a
@@ -263,7 +271,8 @@ def search_candidate_modularizations(
         return f"candidate::gen{generation}::{counter:04d}"
 
     def _evaluate(bundle: CandidateModularizationBundle) -> ModularizationEvaluation:
-        evidence = _calibration_evidence_for_bundle(bundle, calibration_evidence)
+        evidence = _content_evidence_for_bundle(bundle, calibration_evidence)
+        functional_evidence = _content_evidence_for_bundle(bundle, functional_evaluation_evidence)
         eval_model = attach_bundle(model, bundle)
         null_reference_scores = None
         if apply_resolution_correction:
@@ -278,6 +287,7 @@ def search_candidate_modularizations(
             topology_filtering=topology_filtering,
             calibration_evidence=evidence,
             calibration_aggregation_policy=calibration_aggregation_policy,
+            functional_evaluation_evidence=functional_evidence,
             null_reference_scores=null_reference_scores,
         )
 
@@ -428,12 +438,22 @@ def search_candidate_modularizations(
         combined_model = attach_many(model, retained_bundles)
         combined_calibration_evidence = (
             {
-                b.modularization.modularization_id: _calibration_evidence_for_bundle(
+                b.modularization.modularization_id: _content_evidence_for_bundle(
                     b, calibration_evidence
                 )
                 for b in retained_bundles
             }
             if calibration_evidence is not None
+            else None
+        )
+        combined_functional_evidence = (
+            {
+                b.modularization.modularization_id: _content_evidence_for_bundle(
+                    b, functional_evaluation_evidence
+                )
+                for b in retained_bundles
+            }
+            if functional_evaluation_evidence is not None
             else None
         )
         weight_space_result = explore_weight_space(
@@ -444,6 +464,7 @@ def search_candidate_modularizations(
             topology_filtering=topology_filtering,
             calibration_evidence=combined_calibration_evidence,
             calibration_aggregation_policy=calibration_aggregation_policy,
+            functional_evaluation_evidence=combined_functional_evidence,
             policy_version=WEIGHT_SPACE_EXPLORATION_POLICY_VERSION,
         )
     else:
