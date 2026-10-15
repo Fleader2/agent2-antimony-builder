@@ -1464,6 +1464,80 @@ is now always an explicit, separate call naming one modularization, per task ins
 ``ANTIMONY_GENERATION_POLICY_VERSION`` bumped ``"v6"`` -> ``"v7"``.
 ``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` is unchanged -- modules/boundaries were never part of
 that contract. See ``docs/26_module_decomposition_modularization_reconciliation.md``.
+
+**Module Boundary Evaluation Framework increment.** New package
+``app.agent2.module_evaluation`` scores an existing ``ModelModularization`` against multiple,
+independently-inspectable evidence criteria (``ModularizationCriterion``) rather than
+defining modularity by one mechanism such as topology -- "module mechanisms are evidence;
+functional/contextual independence is the eventual target property." Four criteria have a
+real producer today (all currently supportable from Agent 2/canonical-model information
+alone, per the task's own scope): ``TOPOLOGICAL_SEPARATION`` (reaction-adjacency-graph
+boundary cuts), ``BOUNDARY_SPARSITY`` (explicit ``ModulePort`` density), ``COMPARTMENT_
+COHERENCE`` (species-compartment concentration per module), and ``EC_CLASS_COHERENCE`` (a
+curated EC-number-class match per module -- originally, incorrectly, named
+``PATHWAY_ANNOTATION_COHERENCE``; corrected by a later increment, see below). Six more
+(``PATHWAY_ANNOTATION_COHERENCE``/``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``/
+``CALIBRATION_INDEPENDENCE``/``REGULATORY_COHERENCE``/``EXPERIMENTAL_VALIDATION``) are
+reserved vocabulary for future increments, not implemented here.
+
+``CriteriaWeights`` is an explicit, user/configuration-supplied weighting with deterministic
+normalization (every positive weight's own share always sums to 1; a zero or omitted weight
+always normalizes to exactly 0, disabling that criterion). ``evaluate_modularization``
+(``app.agent2.module_evaluation.evaluator``) always computes and reports every implemented
+criterion's own raw score, regardless of its weight, and never fabricates a score for
+unavailable evidence -- ``overall_score`` is ``None`` whenever zero positive-weight criteria
+have available evidence, and is otherwise the sum of only the available criteria's own
+weighted contributions (deliberately never renormalized among just the available subset, so
+the number's own meaning never silently shifts; ``evaluated_weight_fraction`` discloses any
+shortfall honestly). ``evaluate_modularization_under_weights``/``compare_modularizations``
+support weight-space exploration and multi-modularization comparison, respectively -- neither
+ever picks a "winner." Works identically for a ``GENERATED`` or ``IMPORTED`` model (no
+origin-specific branch anywhere in this package) and alters no executable whole-network or
+standalone-module-generation behavior whatsoever (``app.agent2.antimony`` is never imported
+by this package).
+
+New ``MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v1"``. No other version constant
+changes -- this package's own types are never stored on ``ModelSpecification``/
+``Agent2OutputPackage`` (an evaluation is always a derived, on-demand analysis, exactly like
+``app.agent2.modularization.derivation.ModuleConnection`` is "always computed, never
+persisted"), so ``AGENT2_CONTRACT_VERSION``/``AGENT2_DOWNSTREAM_CONTRACT_VERSION`` are both
+unaffected. See ``docs/27_module_boundary_evaluation_framework.md``.
+
+**Topology Hub/Currency Component Filtering increment.** ``TOPOLOGICAL_SEPARATION`` alone
+(every other criterion unaffected) now filters its own derived reaction-adjacency graph by a
+new, closed ``TopologyRole`` vocabulary (``NORMAL``/``UNIVERSAL_CURRENCY``/``COFACTOR``/
+``GENERIC_ADAPTOR``/``HIGH_DEGREE_HUB``/``USER_EXCLUDED``) so a ubiquitous "currency"
+metabolite (ATP/ADP, water, protons, phosphate -- hard-excluded, weight 0 by default) or
+cofactor (NAD(H)/NADP(H)/CoA -- down-weighted, weight 0.3 by default) never artificially
+dilutes a modularization's own topology score. ``ModularizationCriterionScore.raw_score`` for
+this one criterion is always the **filtered** score; the new ``detail: TopologySeparationDetail
+| None`` field (``None`` for every other criterion) additionally discloses the unfiltered
+``raw_topology_score``, exactly which components were filtered and why (``filters``), and
+which high-degree species were merely *flagged* as hub candidates without being auto-excluded
+(``hub_candidate_species_ids`` -- task §3: "must not silently exclude them by default").
+``evaluate_modularization``/``evaluate_modularization_under_weights``/
+``compare_modularizations`` all gained an optional ``topology_filtering: TopologyFilteringPolicy
+| None`` parameter (per-evaluation overrides, task §5's own context-sensitivity requirement --
+e.g. treating 14-3-3 as ``GENERIC_ADAPTOR`` in one model but ``NORMAL`` in another). Verified
+directly against the real yeast lipid-biosynthesis organism: default filtering raises
+``TOPOLOGICAL_SEPARATION`` from `0.236` (raw) to `0.419` (filtered), correctly identifying and
+down-weighting 9 real curated currency/cofactor species. No version constant changes at all
+-- this is purely an additive refinement to one criterion's own internal computation and
+reporting, never a change to any stored type. See
+``docs/28_topology_hub_currency_component_filtering.md``.
+
+**`EC_CLASS_COHERENCE` naming correction.** The criterion the two increments immediately
+above named ``PATHWAY_ANNOTATION_COHERENCE`` never read genuine pathway/network-membership
+data -- it has only ever matched curated EC-number top-level classes. Renamed
+``EC_CLASS_COHERENCE`` (``app.agent2.module_evaluation.criteria.score_ec_class_coherence``,
+scoring formula and behavior byte-for-byte unchanged). ``PATHWAY_ANNOTATION_COHERENCE`` is
+re-declared as a genuinely reserved, unimplemented ``ModularizationCriterion`` member for the
+real pathway-membership signal (Agent 1's own curated KEGG ``CuratedNetwork``/pathway data,
+still not wired into Agent 2), exactly like the other five reserved members, so a future
+increment implementing it needs no further conceptual rename. No version constant changes --
+this criterion's own types were never stored on ``ModelSpecification``/
+``Agent2OutputPackage`` or exposed across the downstream handoff either before or after this
+rename. See ``docs/29_ec_class_coherence_naming_correction.md``.
 """
 
 from __future__ import annotations
@@ -1498,6 +1572,10 @@ ENZYME_STATE_DYNAMICS_POLICY_VERSION = "enzyme-state-dynamics-v1"
 ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION = "enzyme-concentration-species-v1"
 AGENT2_ORCHESTRATION_POLICY_VERSION = "agent2-orchestration-v1"
 AGENT2_DOWNSTREAM_CONTRACT_VERSION = "agent2-downstream-v3"
+#: Module Boundary Evaluation Framework increment -- the version of
+#: ``app.agent2.module_evaluation``'s own scoring policy (which criteria exist, how each one
+#: is computed, how weights are normalized and combined into an overall score).
+MODULE_EVALUATION_POLICY_VERSION = "module-evaluation-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1516,6 +1594,7 @@ __all__ = [
     "MODEL_SPECIFICATION_ASSEMBLY_POLICY_VERSION",
     "MODULARIZATION_POLICY_VERSION",
     "MODULE_DECOMPOSITION_POLICY_VERSION",
+    "MODULE_EVALUATION_POLICY_VERSION",
     "PARAMETER_DECLARATION_POLICY_VERSION",
     "QUANTITATIVE_CONTEXT_POLICY_VERSION",
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
