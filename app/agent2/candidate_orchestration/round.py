@@ -12,7 +12,6 @@ time).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 
 from app.agent2.candidate_orchestration.errors import CandidateOrchestrationReferenceError
 from app.agent2.candidate_orchestration.requests import build_calibration_requests
@@ -32,7 +31,9 @@ from app.agent2.module_evaluation.types import (
     TopologyFilteringPolicy,
 )
 from app.agent2.module_functional_evaluation.types import ModuleFunctionalEvaluationResult
-from app.agent2.types import ModelModularization, ModelSpecification, ModularizationMethod
+from app.agent2.submodel_materialization.errors import SubmodelMaterializationReferenceError
+from app.agent2.submodel_materialization.materialization import materialize_submodel
+from app.agent2.types import ModelSpecification
 from app.agent2.version import CANDIDATE_ORCHESTRATION_POLICY_VERSION
 from app.agent2.weight_space_exploration.types import HighScoringSolutionPolicy
 
@@ -43,17 +44,21 @@ def build_submodel(
     """Wrap one already-decomposed module as its own, standalone ``ModelSpecification`` --
     recursive readiness (task instructions §5): the identical ``run_candidate_search_round``
     call below works on this submodel exactly as it does on any other model, with no code path
-    change. ``full_network``/``kinetic_laws``/``parameters`` are carried over unchanged from
-    ``model`` (mirrors the established recursive-module-evaluation fixture convention
-    elsewhere in this codebase); only the modularization itself is scoped to this one module,
-    which means a cross-boundary edge to a reaction *outside* this submodel is counted as a cut
-    edge by ``TOPOLOGICAL_SEPARATION`` exactly as any other network edge leaving the current
-    seed is -- a disclosed, acceptable scope limit for "usable," not a fully network-truncated
-    recursive algorithm (never automatically triggered -- task instructions §5: "do not
-    automatically recurse into every accepted module yet").
+    change.
+
+    **Canonical Submodel Materialization increment**: delegates to ``app.agent2
+    .submodel_materialization.materialize_submodel``, which genuinely scopes
+    ``full_network``/``kinetic_laws``/``parameters`` down to the module's own dependency
+    closure -- this function's own external signature/return shape
+    (``tuple[ModelSpecification, str]``) is unchanged, but it no longer carries the parent's
+    entire, untruncated network forward. Before this increment, a cross-boundary edge to a
+    reaction *outside* the module was counted as a cut edge by ``TOPOLOGICAL_SEPARATION``
+    exactly as any other network edge leaving the current seed was, because the "submodel" was
+    only a re-scoped modularization sitting on the full network -- a disclosed, acceptable
+    scope limit for "usable" at the time, now fixed.
 
     Raises ``CandidateOrchestrationReferenceError`` if ``module_id`` is not a real module of
-    ``seed_modularization_id``.
+    ``seed_modularization_id``, or if it has zero internal reactions.
     """
     bundle = extract_bundle(model, seed_modularization_id)
     known_module_ids = {m.module_id for m in bundle.modules}
@@ -62,33 +67,11 @@ def build_submodel(
             f"build_submodel: module_id {module_id!r} is not a module of "
             f"{seed_modularization_id!r} (known: {sorted(known_module_ids)})"
         )
-    sub_modularization_id = f"submodel::{seed_modularization_id}::{module_id}"
-    memberships = tuple(
-        replace(m, modularization_id=sub_modularization_id)
-        for m in bundle.memberships
-        if m.module_id == module_id
-    )
-    ports = tuple(
-        replace(p, modularization_id=sub_modularization_id)
-        for p in bundle.ports
-        if p.module_id == module_id
-    )
-    sub_module = next(m for m in bundle.modules if m.module_id == module_id)
-    modularization = ModelModularization(
-        modularization_id=sub_modularization_id,
-        name=sub_modularization_id,
-        method=ModularizationMethod.USER_DEFINED,
-        module_ids=(module_id,),
-    )
-    submodel = replace(
-        model,
-        model_id=f"{model.model_id}::submodel::{module_id}",
-        modularizations=(modularization,),
-        model_modules=(sub_module,),
-        module_memberships=memberships,
-        module_ports=ports,
-    )
-    return submodel, sub_modularization_id
+    try:
+        result = materialize_submodel(model, seed_modularization_id, module_id)
+    except SubmodelMaterializationReferenceError as exc:
+        raise CandidateOrchestrationReferenceError(str(exc)) from exc
+    return result.submodel, result.submodel_modularization_id
 
 
 def run_candidate_search_round(

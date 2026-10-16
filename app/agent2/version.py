@@ -1891,6 +1891,18 @@ CANDIDATE_ORCHESTRATION_POLICY_VERSION = "candidate-orchestration-v1"
 #: .module_evaluation.functional_adapter``'s own ``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``
 #: scoring formulas.
 MODULE_FUNCTIONAL_EVALUATION_POLICY_VERSION = "module-functional-evaluation-v1"
+#: Canonical Submodel Materialization for Recursive Modularization increment -- the version of
+#: ``app.agent2.submodel_materialization``'s own policy (the reaction-seeded dependency-closure
+#: algorithm; the "drop every FullNetwork supporting-data field except a filtered
+#: ``enzyme_states``" scope decision; the disclosed, heuristic rule/event/observable
+#: reference-token scan). ``app.agent2.candidate_orchestration.round.build_submodel`` now
+#: delegates to ``materialize_submodel`` -- its own external signature/return shape is
+#: unchanged, but the submodel it now returns is genuinely scoped (never the whole parent
+#: network carried over unchanged), a real, disclosed behavior change; see
+#: ``CANDIDATE_ORCHESTRATION_POLICY_VERSION``'s own changelog entry, left unbumped since this
+#: fix changes ``build_submodel``'s own output, not ``run_candidate_search_round``'s own
+#: policy/contract.
+SUBMODEL_MATERIALIZATION_POLICY_VERSION = "submodel-materialization-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1920,5 +1932,6 @@ __all__ = [
     "REACTION_CHARACTERIZATION_POLICY_VERSION",
     "REACTION_CONTEXT_RESOLUTION_POLICY_VERSION",
     "RESOLUTION_AUDIT_POLICY_VERSION",
+    "SUBMODEL_MATERIALIZATION_POLICY_VERSION",
     "WEIGHT_SPACE_EXPLORATION_POLICY_VERSION",
 ]
