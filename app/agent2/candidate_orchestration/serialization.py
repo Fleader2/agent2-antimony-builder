@@ -21,11 +21,13 @@ from app.agent2.module_calibration.serialization import (
     serialize_module_calibration_request,
 )
 from app.agent2.module_evaluation.types import ModularizationEvaluation
+from app.agent2.module_functional_evaluation.serialization import (
+    serialize_module_functional_evaluation_request,
+    serialize_module_functional_evaluation_result,
+)
 
 
-def _content_key_pairs(
-    bundle: CandidateModularizationBundle, module_id: str
-) -> list[list[str]]:
+def _content_key_pairs(bundle: CandidateModularizationBundle, module_id: str) -> list[list[str]]:
     """This module's own content key, as a JSON-shaped, sorted ``[[component_type,
     component_id], ...]`` list -- the one, literal token a caller (always the Harness) echoes
     back unchanged next round as this exact module's own ``calibration_evidence`` key. Never
@@ -68,9 +70,7 @@ def serialize_round_result(round_result: CandidateSearchRoundResult) -> dict[str
     bundles_by_candidate_id = {
         b.modularization.modularization_id: b for b in search_result.retained
     }
-    evaluations_by_id = {
-        ev.modularization_id: ev for ev in search_result.evaluations
-    }
+    evaluations_by_id = {ev.modularization_id: ev for ev in search_result.evaluations}
     degenerate_evaluations_by_id = {
         ev.modularization_id: ev for ev in search_result.degenerate_evaluations
     }
@@ -89,8 +89,10 @@ def serialize_round_result(round_result: CandidateSearchRoundResult) -> dict[str
         }
 
     retained = [
-        {**_candidate_summary(b, evaluations_by_id[b.modularization.modularization_id]),
-         "lineage": _lineage_dict(b.modularization.modularization_id)}
+        {
+            **_candidate_summary(b, evaluations_by_id[b.modularization.modularization_id]),
+            "lineage": _lineage_dict(b.modularization.modularization_id),
+        }
         for b in search_result.retained
     ]
     degenerate = [
@@ -148,6 +150,39 @@ def serialize_round_result(round_result: CandidateSearchRoundResult) -> dict[str
             for evaluation in round_result.locally_resolved_evidence
         ],
         "policy_version": round_result.policy_version,
+        "functional_evaluation_decisions": [
+            {
+                "candidate_id": d.candidate_id,
+                "module_id": d.module_id,
+                "content_key": _content_key_pairs(
+                    bundles_by_candidate_id[d.candidate_id], d.module_id
+                ),
+                "outcome": d.outcome.value,
+                "reason": d.reason,
+                "structural_score": _decimal_str(d.structural_score),
+                "rank": d.rank,
+            }
+            for d in round_result.functional_evaluation_decisions
+        ],
+        "functional_evaluation_requests": [
+            {
+                "content_key": _content_key_pairs(
+                    bundles_by_candidate_id[envelope.decision.candidate_id],
+                    envelope.decision.module_id,
+                ),
+                "request": serialize_module_functional_evaluation_request(envelope.request),
+            }
+            for envelope in round_result.functional_evaluation_requests
+        ],
+        "locally_resolved_functional_evidence": [
+            {
+                "content_key": _content_key_pairs(
+                    bundles_by_candidate_id[evaluation.modularization_id], evaluation.module_id
+                ),
+                "evaluation": serialize_module_functional_evaluation_result(evaluation),
+            }
+            for evaluation in round_result.locally_resolved_functional_evidence
+        ],
     }
 
 

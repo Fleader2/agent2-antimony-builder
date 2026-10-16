@@ -43,9 +43,7 @@ def build_calibration_requests(
     ``module_id`` already is) so a caller can correlate every request back to this one
     orchestration round without any two requests colliding.
     """
-    bundles_by_candidate_id = {
-        b.modularization.modularization_id: b for b in retained_bundles
-    }
+    bundles_by_candidate_id = {b.modularization.modularization_id: b for b in retained_bundles}
     requests: list[CalibrationRunRequestEnvelope] = []
     locally_resolved: list[ModuleCalibrationEvaluation] = []
     for decision in decisions:
@@ -59,8 +57,7 @@ def build_calibration_requests(
             )
         eval_model = attach_bundle(model, bundle)
         request_id = (
-            f"module-calibration-request::{run_id}::{decision.module_id}::"
-            f"{uuid.uuid4().hex[:8]}"
+            f"module-calibration-request::{run_id}::{decision.module_id}::{uuid.uuid4().hex[:8]}"
         )
         module_run_id = f"{run_id}::{decision.module_id}"
         try:

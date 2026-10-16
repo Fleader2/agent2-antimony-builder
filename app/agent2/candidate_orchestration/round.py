@@ -14,11 +14,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from app.agent2.candidate_orchestration.errors import CandidateOrchestrationReferenceError
+from app.agent2.candidate_orchestration.functional_requests import (
+    build_functional_evaluation_requests,
+)
+from app.agent2.candidate_orchestration.functional_selection import (
+    select_modules_for_functional_evaluation,
+)
 from app.agent2.candidate_orchestration.requests import build_calibration_requests
 from app.agent2.candidate_orchestration.selection import select_candidates_for_calibration
 from app.agent2.candidate_orchestration.types import (
     CalibrationSelectionPolicy,
     CandidateSearchRoundResult,
+    FunctionalEvaluationSelectionPolicy,
 )
 from app.agent2.modularization_search.assembly import extract_bundle
 from app.agent2.modularization_search.identity import ModuleContentKey, derive_module_id
@@ -93,6 +100,8 @@ def run_candidate_search_round(
     stability_weight_vectors: tuple[CriteriaWeights, ...] | None = None,
     high_scoring_policy: HighScoringSolutionPolicy | None = None,
     calibration_runs_used_so_far: int = 0,
+    functional_evaluation_selection_policy: FunctionalEvaluationSelectionPolicy | None = None,
+    functional_evaluations_used_so_far: int = 0,
     correlation_id: str,
     run_id: str,
     policy_version: str = CANDIDATE_ORCHESTRATION_POLICY_VERSION,
@@ -118,11 +127,17 @@ def run_candidate_search_round(
     ``functional_evaluation_evidence`` (Functional Modularity Criteria from Agents 3 and 4
     increment, optional) threads straight through to ``search_candidate_modularizations``
     unchanged -- the identical content-addressed accumulation convention as
-    ``calibration_evidence``. This increment does not add an automatic functional-evaluation
-    selection/caching loop analogous to ``calibration_selection_policy`` (a disclosed scope
-    limit, not an oversight): a caller already holding functional evidence gets it correctly
-    scored and threaded through every downstream layer, but this package does not yet decide
-    on its own which candidates' modules are worth a new Agent 3 round trip.
+    ``calibration_evidence``.
+
+    ``functional_evaluation_selection_policy`` (Automatic Functional-Evaluation Selection and
+    Caching increment, optional): when supplied, mirrors ``calibration_selection_policy``'s own
+    role exactly, but gating a real Agent 3 functional-evaluation round trip
+    (``select_modules_for_functional_evaluation``/``build_functional_evaluation_requests``)
+    instead of an Agent 3/Agent 4 calibration round trip -- a genuinely separate gate with its
+    own separate budget (task instructions §5), never required to select the identical
+    candidates/modules ``calibration_selection_policy`` does. ``None`` (the default) reproduces
+    the exact prior behavior: zero functional-evaluation decisions/requests, never a single
+    Agent 3 call Agent 2 initiates on its own.
     """
     search_result = search_candidate_modularizations(
         model,
@@ -156,12 +171,38 @@ def run_candidate_search_round(
         correlation_id=correlation_id,
         run_id=run_id,
     )
+
+    functional_decisions: tuple = ()
+    functional_requests: tuple = ()
+    locally_resolved_functional: tuple = ()
+    if functional_evaluation_selection_policy is not None:
+        already_evidenced_functional_module_ids = frozenset(
+            derive_module_id(key) for key in (functional_evaluation_evidence or {})
+        )
+        functional_decisions = select_modules_for_functional_evaluation(
+            search_result,
+            criteria_weights,
+            functional_evaluation_selection_policy,
+            already_evidenced_module_ids=already_evidenced_functional_module_ids,
+            functional_evaluations_used_so_far=functional_evaluations_used_so_far,
+        )
+        functional_requests, locally_resolved_functional = build_functional_evaluation_requests(
+            model,
+            search_result.retained,
+            functional_decisions,
+            correlation_id=correlation_id,
+            run_id=run_id,
+        )
+
     return CandidateSearchRoundResult(
         search_result=search_result,
         calibration_decisions=decisions,
         calibration_requests=requests,
         locally_resolved_evidence=locally_resolved,
         policy_version=policy_version,
+        functional_evaluation_decisions=functional_decisions,
+        functional_evaluation_requests=functional_requests,
+        locally_resolved_functional_evidence=locally_resolved_functional,
     )
 
 

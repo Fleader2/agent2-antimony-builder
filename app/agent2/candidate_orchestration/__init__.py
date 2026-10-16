@@ -14,9 +14,20 @@ are worth a real calibration round trip, and (3) builds the request (or resolves
 
 Public API: ``run_candidate_search_round``, ``build_submodel`` (``round``);
 ``select_candidates_for_calibration``, ``could_change_ordering`` (``selection``);
-``build_calibration_requests`` (``requests``); ``serialize_round_result`` (``serialization``);
-every type (``types``); ``CandidateOrchestrationError``,
-``CandidateOrchestrationReferenceError`` (``errors``).
+``build_calibration_requests`` (``requests``);
+``select_modules_for_functional_evaluation``, ``total_functional_weight``
+(``functional_selection``); ``build_functional_evaluation_requests``
+(``functional_requests``); ``serialize_round_result`` (``serialization``); every type
+(``types``); ``CandidateOrchestrationError``, ``CandidateOrchestrationReferenceError``
+(``errors``).
+
+**Automatic Functional-Evaluation Selection and Caching increment** extends this package with a
+second, genuinely separate gate (``FunctionalEvaluationSelectionPolicy``/``select_modules_for
+_functional_evaluation``/``build_functional_evaluation_requests``), mirroring the calibration
+gate exactly but deciding which candidates' modules are worth a real Agent 3 *functional-
+evaluation* round trip (``DYNAMIC_ISOLATION``/``SENSITIVITY_COHERENCE``) instead of an Agent
+3/Agent 4 *calibration* round trip. Still never calls Agent 3 directly; still never decides how
+many rounds to run.
 """
 
 from __future__ import annotations
@@ -24,6 +35,13 @@ from __future__ import annotations
 from app.agent2.candidate_orchestration.errors import (
     CandidateOrchestrationError,
     CandidateOrchestrationReferenceError,
+)
+from app.agent2.candidate_orchestration.functional_requests import (
+    build_functional_evaluation_requests,
+)
+from app.agent2.candidate_orchestration.functional_selection import (
+    select_modules_for_functional_evaluation,
+    total_functional_weight,
 )
 from app.agent2.candidate_orchestration.requests import build_calibration_requests
 from app.agent2.candidate_orchestration.round import build_submodel, run_candidate_search_round
@@ -38,6 +56,10 @@ from app.agent2.candidate_orchestration.types import (
     CalibrationRunRequestEnvelope,
     CalibrationSelectionPolicy,
     CandidateSearchRoundResult,
+    FunctionalEvaluationDecision,
+    FunctionalEvaluationDecisionOutcome,
+    FunctionalEvaluationRunRequestEnvelope,
+    FunctionalEvaluationSelectionPolicy,
 )
 
 __all__ = [
@@ -48,10 +70,17 @@ __all__ = [
     "CandidateOrchestrationError",
     "CandidateOrchestrationReferenceError",
     "CandidateSearchRoundResult",
+    "FunctionalEvaluationDecision",
+    "FunctionalEvaluationDecisionOutcome",
+    "FunctionalEvaluationRunRequestEnvelope",
+    "FunctionalEvaluationSelectionPolicy",
     "build_calibration_requests",
+    "build_functional_evaluation_requests",
     "build_submodel",
     "could_change_ordering",
     "run_candidate_search_round",
     "select_candidates_for_calibration",
+    "select_modules_for_functional_evaluation",
     "serialize_round_result",
+    "total_functional_weight",
 ]

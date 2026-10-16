@@ -1903,6 +1903,18 @@ MODULE_FUNCTIONAL_EVALUATION_POLICY_VERSION = "module-functional-evaluation-v1"
 #: fix changes ``build_submodel``'s own output, not ``run_candidate_search_round``'s own
 #: policy/contract.
 SUBMODEL_MATERIALIZATION_POLICY_VERSION = "submodel-materialization-v1"
+#: Automatic Functional-Evaluation Selection and Caching increment -- the version of
+#: ``app.agent2.candidate_orchestration``'s own new functional-evaluation-selection gate
+#: (``FunctionalEvaluationSelectionPolicy``/``select_modules_for_functional_evaluation``'s own
+#: decision rules, including the zero-functional-weight short circuit; ``build_functional
+#: _evaluation_requests``'s own local ``UNSUPPORTED_ANALYSIS``/``INSUFFICIENT_TARGETS``
+#: resolution rules). ``CANDIDATE_ORCHESTRATION_POLICY_VERSION`` is left unbumped: every new
+#: parameter this increment adds to ``run_candidate_search_round``
+#: (``functional_evaluation_selection_policy``/``functional_evaluations_used_so_far``) defaults
+#: to reproducing the exact prior behavior (zero functional-evaluation decisions/requests) when
+#: omitted -- the identical, already-established "purely additive, zero-default-behavior-
+#: change" convention ``functional_evaluation_evidence`` itself was rolled out under.
+FUNCTIONAL_EVALUATION_SELECTION_POLICY_VERSION = "functional-evaluation-selection-v1"
 
 __all__ = [
     "AGENT1_HANDOFF_VERSION",
@@ -1917,6 +1929,7 @@ __all__ = [
     "ENZYME_CONCENTRATION_SPECIES_POLICY_VERSION",
     "ENZYME_STATE_DYNAMICS_POLICY_VERSION",
     "EVIDENCE_CONSOLIDATION_POLICY_VERSION",
+    "FUNCTIONAL_EVALUATION_SELECTION_POLICY_VERSION",
     "HEURISTIC_INITIALIZATION_POLICY_VERSION",
     "KINETIC_LAW_ASSIGNMENT_POLICY_VERSION",
     "MACRO_TO_MICRO_RECONSTRUCTION_POLICY_VERSION",

@@ -28,6 +28,10 @@ from app.agent2.module_calibration.types import (
     ModuleCalibrationEvaluation,
     ModuleCalibrationRequest,
 )
+from app.agent2.module_functional_evaluation.types import (
+    ModuleFunctionalEvaluationRequest,
+    ModuleFunctionalEvaluationResult,
+)
 
 
 def _require_non_empty_str(value: object, *, field_name: str) -> str:
@@ -186,9 +190,7 @@ class CalibrationDecision:
                 f"CalibrationDecision.outcome must be a CalibrationDecisionOutcome, got "
                 f"{self.outcome!r}"
             )
-        object.__setattr__(
-            self, "reason", _require_non_empty_str(self.reason, field_name="reason")
-        )
+        object.__setattr__(self, "reason", _require_non_empty_str(self.reason, field_name="reason"))
         if self.structural_score is not None and not isinstance(self.structural_score, Decimal):
             raise TypeError(
                 f"CalibrationDecision.structural_score must be a Decimal or None, got "
@@ -196,6 +198,173 @@ class CalibrationDecision:
             )
         if not isinstance(self.rank, int) or isinstance(self.rank, bool) or self.rank < 1:
             raise ValueError(f"CalibrationDecision.rank must be a positive int, got {self.rank!r}")
+
+
+class FunctionalEvaluationDecisionOutcome(StrEnum):
+    """One module's own, fully-reasoned fate under one ``FunctionalEvaluationSelectionPolicy``
+    (Automatic Functional-Evaluation Selection and Caching increment, task instructions §2:
+    "record why every candidate/module was selected or skipped") -- mirrors
+    ``CalibrationDecisionOutcome``'s own identical discipline exactly, with one additional,
+    functional-evaluation-specific outcome (``SKIP_ZERO_FUNCTIONAL_WEIGHT``)."""
+
+    #: Selected: a real ``ModuleFunctionalEvaluationRequest`` was built (or, when the whole
+    #: network/module itself cannot support the analysis, a disclosed ``UNSUPPORTED_ANALYSIS``/
+    #: ``INSUFFICIENT_TARGETS`` was resolved locally, requiring no Harness round trip at all).
+    EVALUATE = "EVALUATE"
+    #: Both ``DYNAMIC_ISOLATION`` and ``SENSITIVITY_COHERENCE`` have zero (or omitted) weight in
+    #: the current ``CriteriaWeights`` -- functional evidence could not change ``overall_score``
+    #: at all, so no candidate is ever selected this round (task instructions §2: "whether
+    #: evaluation is skipped when both functional-criterion weights are zero"). Checked once,
+    #: before any per-candidate gating -- every decision this round carries this one outcome.
+    SKIP_ZERO_FUNCTIONAL_WEIGHT = "SKIP_ZERO_FUNCTIONAL_WEIGHT"
+    #: This candidate is a degenerate one-module decomposition -- excluded from ranking by
+    #: default, so evaluating it could never change a ranking it is not eligible to win.
+    SKIP_DEGENERATE_CANDIDATE = "SKIP_DEGENERATE_CANDIDATE"
+    #: This candidate's own rank (by current structural/blended score) falls outside
+    #: ``policy.rank_threshold``.
+    SKIP_BELOW_RANK_THRESHOLD = "SKIP_BELOW_RANK_THRESHOLD"
+    #: This candidate's own current ``overall_score`` falls below ``policy.score_threshold``
+    #: (or is itself unavailable).
+    SKIP_BELOW_SCORE_THRESHOLD = "SKIP_BELOW_SCORE_THRESHOLD"
+    #: ``policy.max_candidates_per_generation`` candidates already received at least one
+    #: ``EVALUATE`` decision this round.
+    SKIP_CANDIDATE_BUDGET_EXHAUSTED = "SKIP_CANDIDATE_BUDGET_EXHAUSTED"
+    #: ``policy.max_modules_per_candidate`` already reached for this one candidate.
+    SKIP_MODULE_LIMIT_REACHED = "SKIP_MODULE_LIMIT_REACHED"
+    #: ``policy.only_if_could_change_ordering`` is set, and this candidate's own best-case score
+    #: (current score plus the maximum possible functional-evidence contribution still
+    #: available) could not plausibly move it past either immediate rank-neighbor.
+    SKIP_COULD_NOT_CHANGE_ORDERING = "SKIP_COULD_NOT_CHANGE_ORDERING"
+    #: This exact module (by its own content-addressed module id) already has available
+    #: functional evidence from an earlier round/cache hit -- never re-evaluated.
+    SKIP_ALREADY_EVIDENCED = "SKIP_ALREADY_EVIDENCED"
+    #: ``policy.total_functional_evaluation_budget`` (across every round of this orchestration)
+    #: has been exhausted.
+    SKIP_TOTAL_BUDGET_EXHAUSTED = "SKIP_TOTAL_BUDGET_EXHAUSTED"
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionalEvaluationSelectionPolicy:
+    """The complete, explicit, deterministic gate between structural scoring and a real Agent 3
+    functional-evaluation round trip (Automatic Functional-Evaluation Selection and Caching
+    increment, task instructions §2) -- mirrors ``CalibrationSelectionPolicy`` field for field;
+    a genuinely separate policy object with its own separate budget (task instructions §5:
+    "functional and calibration selection must have separate budgets/policies")."""
+
+    max_candidates_per_generation: int
+    max_modules_per_candidate: int | None
+    score_threshold: Decimal | None
+    rank_threshold: int | None
+    only_if_could_change_ordering: bool
+    #: Maximum number of real Agent 3 functional-evaluation runs this *entire* orchestration
+    #: (every round combined) may ever request -- enforced via the caller-supplied
+    #: ``functional_evaluations_used_so_far`` running total, never re-derived or guessed.
+    total_functional_evaluation_budget: int
+    policy_version: str
+
+    def __post_init__(self) -> None:
+        _require_positive_int(
+            self.max_candidates_per_generation, field_name="max_candidates_per_generation"
+        )
+        if self.max_modules_per_candidate is not None:
+            _require_positive_int(
+                self.max_modules_per_candidate, field_name="max_modules_per_candidate"
+            )
+        for field_name, value in (
+            ("score_threshold", self.score_threshold),
+            ("rank_threshold", self.rank_threshold),
+        ):
+            if value is None:
+                continue
+            if field_name == "score_threshold":
+                if not isinstance(value, Decimal) or value < 0 or value > 1:
+                    raise ValueError(
+                        f"FunctionalEvaluationSelectionPolicy.score_threshold must be a "
+                        f"Decimal in [0, 1] or None, got {value!r}"
+                    )
+            else:
+                _require_positive_int(value, field_name="rank_threshold")
+        if not isinstance(self.only_if_could_change_ordering, bool):
+            raise TypeError(
+                "FunctionalEvaluationSelectionPolicy.only_if_could_change_ordering must be a "
+                f"bool, got {self.only_if_could_change_ordering!r}"
+            )
+        if (
+            not isinstance(self.total_functional_evaluation_budget, int)
+            or isinstance(self.total_functional_evaluation_budget, bool)
+            or self.total_functional_evaluation_budget < 0
+        ):
+            raise ValueError(
+                "FunctionalEvaluationSelectionPolicy.total_functional_evaluation_budget must "
+                f"be a non-negative int, got {self.total_functional_evaluation_budget!r}"
+            )
+        object.__setattr__(
+            self,
+            "policy_version",
+            _require_non_empty_str(self.policy_version, field_name="policy_version"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionalEvaluationDecision:
+    """One ``(candidate_id, module_id)`` pair's own, fully-reasoned fate this round under
+    ``FunctionalEvaluationSelectionPolicy`` -- always recorded, regardless of outcome. Mirrors
+    ``CalibrationDecision`` exactly."""
+
+    candidate_id: str
+    module_id: str
+    outcome: FunctionalEvaluationDecisionOutcome
+    reason: str
+    structural_score: Decimal | None
+    rank: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "candidate_id",
+            _require_non_empty_str(self.candidate_id, field_name="candidate_id"),
+        )
+        object.__setattr__(
+            self, "module_id", _require_non_empty_str(self.module_id, field_name="module_id")
+        )
+        if not isinstance(self.outcome, FunctionalEvaluationDecisionOutcome):
+            raise TypeError(
+                "FunctionalEvaluationDecision.outcome must be a "
+                f"FunctionalEvaluationDecisionOutcome, got {self.outcome!r}"
+            )
+        object.__setattr__(self, "reason", _require_non_empty_str(self.reason, field_name="reason"))
+        if self.structural_score is not None and not isinstance(self.structural_score, Decimal):
+            raise TypeError(
+                "FunctionalEvaluationDecision.structural_score must be a Decimal or None, got "
+                f"{self.structural_score!r}"
+            )
+        if not isinstance(self.rank, int) or isinstance(self.rank, bool) or self.rank < 1:
+            raise ValueError(
+                f"FunctionalEvaluationDecision.rank must be a positive int, got {self.rank!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionalEvaluationRunRequestEnvelope:
+    """One ``EVALUATE`` decision's own, already-built ``ModuleFunctionalEvaluationRequest`` --
+    ready for some other caller (always the Harness) to route through Agent 3. Never built for
+    a module/network that cannot support the analysis -- that case resolves locally instead
+    (see ``locally_resolved_functional_evidence``), never reaching this envelope at all."""
+
+    decision: FunctionalEvaluationDecision
+    request: ModuleFunctionalEvaluationRequest
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision, FunctionalEvaluationDecision):
+            raise TypeError(
+                "FunctionalEvaluationRunRequestEnvelope.decision must be a "
+                f"FunctionalEvaluationDecision, got {self.decision!r}"
+            )
+        if not isinstance(self.request, ModuleFunctionalEvaluationRequest):
+            raise TypeError(
+                "FunctionalEvaluationRunRequestEnvelope.request must be a "
+                f"ModuleFunctionalEvaluationRequest, got {self.request!r}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +402,13 @@ class CandidateSearchRoundResult:
     calibration_requests: tuple[CalibrationRunRequestEnvelope, ...]
     locally_resolved_evidence: tuple[ModuleCalibrationEvaluation, ...]
     policy_version: str
+    #: Automatic Functional-Evaluation Selection and Caching increment -- always empty tuples
+    #: when the caller does not supply a ``functional_evaluation_selection_policy`` to
+    #: ``run_candidate_search_round`` (purely additive, zero-default-behavior-change, mirroring
+    #: how ``functional_evaluation_evidence`` itself was rolled out).
+    functional_evaluation_decisions: tuple[FunctionalEvaluationDecision, ...] = ()
+    functional_evaluation_requests: tuple[FunctionalEvaluationRunRequestEnvelope, ...] = ()
+    locally_resolved_functional_evidence: tuple[ModuleFunctionalEvaluationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.search_result, CandidateModularizationSearchResult):
@@ -270,6 +446,33 @@ class CandidateSearchRoundResult:
             "policy_version",
             _require_non_empty_str(self.policy_version, field_name="policy_version"),
         )
+        object.__setattr__(
+            self,
+            "functional_evaluation_decisions",
+            _require_tuple_of(
+                self.functional_evaluation_decisions,
+                FunctionalEvaluationDecision,
+                field_name="functional_evaluation_decisions",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "functional_evaluation_requests",
+            _require_tuple_of(
+                self.functional_evaluation_requests,
+                FunctionalEvaluationRunRequestEnvelope,
+                field_name="functional_evaluation_requests",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "locally_resolved_functional_evidence",
+            _require_tuple_of(
+                self.locally_resolved_functional_evidence,
+                ModuleFunctionalEvaluationResult,
+                field_name="locally_resolved_functional_evidence",
+            ),
+        )
 
 
 __all__ = [
@@ -278,4 +481,8 @@ __all__ = [
     "CalibrationRunRequestEnvelope",
     "CalibrationSelectionPolicy",
     "CandidateSearchRoundResult",
+    "FunctionalEvaluationDecision",
+    "FunctionalEvaluationDecisionOutcome",
+    "FunctionalEvaluationRunRequestEnvelope",
+    "FunctionalEvaluationSelectionPolicy",
 ]
